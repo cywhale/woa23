@@ -17,13 +17,8 @@ logging.getLogger().addHandler(console)
 data_dir = '../data'
 save_dir = '../tmp_data'
 zarr_group_path = f'{data_dir}/test'
-param_keys = ['t', 's']
-parameters = {
-    't': 'temperature',
-    's': 'salinity',
-    # Add other parameters as needed
-}
-time_periods = ['1', '2']
+parameters = ['t', 's']
+time_periods = ['1', '2', '3']
 data_variables = ['an', 'mn']
 grid_resolutions = {'04': '0.25'}
 
@@ -68,6 +63,15 @@ def get_actual_coords(ds, region, lon_range, lat_range, depth_range):
 
     return lon, lat, depth
 
+# Function to find nearest grid points in Zarr dataset
+def find_nearest(ds, coord_name, values):
+    coord_values = ds[coord_name].values
+    nearest_values = []
+    for value in values:
+        nearest_value = coord_values[np.abs(coord_values - value).argmin()]
+        nearest_values.append(nearest_value)
+    return np.array(nearest_values)
+
 # Function to compare values between NetCDF and Zarr
 def compare_values(nc_file, zarr_ds, param_key, period_key, lon, lat, depth, run):
     try:
@@ -76,8 +80,25 @@ def compare_values(nc_file, zarr_ds, param_key, period_key, lon, lat, depth, run
         # Load the new dataset from NetCDF with decode_times=False
         ds_new = xr.open_dataset(nc_file, decode_times=False)
 
+        # Log available coordinates
+        logging.info(f"Available longitudes in NetCDF: {ds_new['lon'].values}")
+        logging.info(f"Available latitudes in NetCDF: {ds_new['lat'].values}")
+        logging.info(f"Available depths in NetCDF: {ds_new['depth'].values}")
+        logging.info(f"Available longitudes in Zarr: {zarr_ds['lon'].values}")
+        logging.info(f"Available latitudes in Zarr: {zarr_ds['lat'].values}")
+        logging.info(f"Available depths in Zarr: {zarr_ds['depth'].values}")
+
+        # Find nearest grid points in Zarr dataset
+        lon_nearest = find_nearest(zarr_ds, 'lon', lon)
+        lat_nearest = find_nearest(zarr_ds, 'lat', lat)
+        depth_nearest = find_nearest(zarr_ds, 'depth', depth)
+
+        logging.info(f"Nearest longitudes in Zarr: {lon_nearest}")
+        logging.info(f"Nearest latitudes in Zarr: {lat_nearest}")
+        logging.info(f"Nearest depths in Zarr: {depth_nearest}")
+
         # Select the nearest coordinates from the NetCDF dataset
-        ds_new = ds_new.sel(lon=lon, lat=lat, depth=depth, method='nearest')
+        ds_new = ds_new.sel(lon=lon_nearest, lat=lat_nearest, depth=depth_nearest, method='nearest')
 
         # Log available parameters
         logging.info(f"Available parameters in NetCDF: {list(ds_new.keys())}")
@@ -90,26 +111,33 @@ def compare_values(nc_file, zarr_ds, param_key, period_key, lon, lat, depth, run
                 logging.info(f"Comparing variable {netcdf_var} in NetCDF with {var} in Zarr")
                 nc_values = ds_new[netcdf_var].values
                 logging.info(f"NetCDF values: {nc_values}")
-                zarr_values = zarr_ds[var].sel(lon=lon, lat=lat, depth=depth, parameters=parameters[param_key], time_periods=period_key).values
 
-                # Log specific values for debugging
-                logging.info(f"Zarr values: {zarr_values}")
+                if param_key in zarr_ds['parameters'].values and period_key in zarr_ds['time_periods'].values:
+                    zarr_values = zarr_ds[var].sel(
+                        lon=lon_nearest,
+                        lat=lat_nearest,
+                        depth=depth_nearest,
+                        parameters=param_key,
+                        time_periods=period_key,
+                        method='nearest'
+                    ).values
 
-                # Ensure the values are numerical arrays
-                if isinstance(nc_values, np.ndarray) and isinstance(zarr_values, np.ndarray):
+                    # Log specific values for debugging
+                    logging.info(f"Zarr values: {zarr_values}")
+
                     if not np.allclose(nc_values, zarr_values, equal_nan=True):
-                        logging.error(f"Mismatch found for {parameters[param_key]} during period {period_key} at (lon, lat, depth)=({lon}, {lat}, {depth}) "
+                        logging.error(f"Mismatch found for {param_key} during period {period_key} at (lon, lat, depth)=({lon}, {lat}, {depth}) "
                                       f"for variable {var}: NetCDF values={nc_values}, Zarr values={zarr_values}")
                         return False
                 else:
-                    logging.error(f"Non-numerical values encountered: NetCDF values type={type(nc_values)}, Zarr values type={type(zarr_values)}")
+                    logging.error(f"Parameter {param_key} or time period {period_key} not found in Zarr dataset.")
                     return False
 
-        logging.info(f"{run}. Comparison passed for {parameters[param_key]} during period {period_key} at (lon, lat, depth)=({lon}, {lat}, {depth})")
+        logging.info(f"{run}. Comparison passed for {param_key} during period {period_key} at (lon, lat, depth)=({lon}, {lat}, {depth})")
         return True
 
     except Exception as e:
-        logging.error(f"Error comparing values for {parameters[param_key]} during period {period_key} at (lon, lat, depth)=({lon}, {lat}, {depth}): {e}")
+        logging.error(f"Error comparing values for {param_key} during period {period_key} at (lon, lat, depth)=({lon}, {lat}, {depth}): {e}")
         return False
 
 def main():
@@ -126,7 +154,7 @@ def main():
         logging.info(f"Starting iteration {i+1}/{iterations}...")
 
         # Iterate through parameters and time periods
-        for param in param_keys:
+        for param in parameters:
             for period in time_periods:
                 # Randomly select a region
                 region_name, region = random.choice(list(regions.items()))
@@ -139,7 +167,7 @@ def main():
                 # Check if the file exists
                 if not os.path.exists(nc_file):
                     logging.info(f"Downloading file: {nc_file}")
-                    download_data(f'{base_url}/{param_keys[param]}/netcdf/decav/{grid_resolutions["04"]}/{file_name}', nc_file)
+                    download_data(f'{base_url}/{parameters[param]}/netcdf/decav/{grid_resolutions["04"]}/{file_name}', nc_file)
 
                 # Load the NetCDF dataset to get actual coordinates
                 ds_new = xr.open_dataset(nc_file, decode_times=False)

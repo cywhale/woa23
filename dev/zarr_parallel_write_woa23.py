@@ -55,7 +55,7 @@ logger = logging.getLogger()
 if not logger.hasHandlers():
     file_handler = logging.FileHandler('processing.log', mode='w')
     file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levellevel)s - %(message)s'))
     logger.addHandler(file_handler)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
@@ -118,6 +118,8 @@ def initialize_zarr_store(zarr_group_path, ds, chunk_sizes):
 
         # Incrementally add each variable to avoid memory exhaustion
         for var in data_variables:
+            if var == 'ma' and '0' in ds.coords['time_periods']:
+                continue
             data_shape = (
                 len(ds.coords['time_periods']),
                 len(ds.coords['parameters']),
@@ -149,11 +151,11 @@ def append_to_zarr_store(zarr_group_path, nc_file, param_key, period_key, grid_r
         ds_new = ds_new.drop_vars(['crs', 'lat_bnds', 'lon_bnds', 'depth_bnds', 'climatology_bounds'], errors='ignore')
         
         # Rename variables according to data_variables
-        rename_vars = {f'{param_key}_{var}': var for var in data_variables}
+        rename_vars = {f'{param_key}_{var}': var for var in data_variables if not (var == 'ma' and period_key == '0')}
         ds_new = ds_new.rename(rename_vars)
         
         # Remove the time dimension if it exists
-        for var in data_variables:
+        for var in ds_new.data_vars:
             if 'time' in ds_new[var].dims:
                 ds_new[var] = ds_new[var].squeeze('time', drop=True)
         ds_new = ds_new.drop_vars('time', errors='ignore')
@@ -197,6 +199,23 @@ def append_to_zarr_store(zarr_group_path, nc_file, param_key, period_key, grid_r
 def is_data_completed(param, period, grid_res):
     return f'{param},{period},{grid_res}' in completed_datasets
 
+# Function to determine the subgroup based on parameter and period
+def determine_subgroup(param, period):
+    param_group = 'Nutrients'
+    subgroup = f'seasonal/{param_group}'
+
+    if param in ['t', 's']:
+        param_group = 'TS'
+    elif param in ['o', 'O', 'A']:
+        param_group = 'Oxy'
+    
+    if period == '0':
+        subgroup = f'annual/{param_group}'
+    elif period in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
+        subgroup = f'monthly/{param_group}'      
+    
+    return subgroup
+
 # Top-level function for parallel processing
 def download_and_process(param, period, save_dir, data_dir, res, chunk_sizes):
     if is_data_completed(param, period, res):
@@ -215,16 +234,64 @@ def download_and_process(param, period, save_dir, data_dir, res, chunk_sizes):
     else:
         logger.info(f"Using existing file: {nc_file}")
 
-    return append_to_zarr_store(os.path.abspath(data_dir), nc_file, param, period, res)
+    subgroup = determine_subgroup(param, period)
+    zarr_group_path = os.path.abspath(f'{data_dir}/{grid_dir[res]}/{subgroup}')
+    
+    lon = np.arange(-179.875, 180, 0.25, dtype=np.float32)
+    lat = np.arange(-89.875, 90, 0.25, dtype=np.float32)
+    if 'annual' in subgroup or ('TS' in subgroup and not 'monthly' in subgroup):
+        depth = np.concatenate([np.arange(0, 100, 5), np.arange(100, 500, 25), np.arange(500, 800, 50), np.arange(800, 2000, 50), np.arange(2000, 5600, 100)], dtype=np.float32)
+    elif 'Oxy' in subgroup or 'TS' in subgroup:
+        depth = np.concatenate([np.arange(0, 100, 5), np.arange(100, 500, 25), np.arange(500, 800, 50), np.arange(800, 1550, 50)], dtype=np.float32)
+    else:
+        depth = np.concatenate([np.arange(0, 100, 5), np.arange(100, 500, 25), np.arange(500, 850, 50)], dtype=np.float32)
+    
+    # Ensure the correct parameters and time periods for each subgroup
+    subgroup_parameters = ['temperature', 'salinity']
+    if 'Oxy' in subgroup:
+        subgroup_parameters = ['oxygen', 'o2sat', 'AOU']
+    elif 'Nutrients' in subgroup:
+        subgroup_parameters = ['nitrate', 'phosphate', 'silicate']
+
+    subgroup_time_periods = ['0']
+    if 'monthly' in subgroup:
+        subgroup_time_periods = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+    elif 'seasonal' in subgroup:
+        subgroup_time_periods = ['13', '14', '15', '16']
+
+    ds_initial = xr.Dataset(
+        coords={
+            'lon': lon,
+            'lat': lat,
+            'depth': depth,
+            'parameters': subgroup_parameters,
+            'time_periods': subgroup_time_periods
+        }
+    )
+    
+    initialize_zarr_store(zarr_group_path, ds_initial, chunk_sizes)
+    return append_to_zarr_store(zarr_group_path, nc_file, param, period, res)
 
 # Main processing function
-def process_part_data_parallel(save_dir, data_dir, res):
-    params = ['t', 's']
-    time_periods = ['1', '2', '3']  # Example for trials
+def process_subgroup(save_dir, data_dir, res):
+    params = ['t', 's'] # ['o', 'O', 'A', 'i', 'p', 'n']
+    periods = ['0', '1', '2'] #list(time_periods) # Example for trials
 
     delayed_tasks = []
     for param in params:
-        for period in time_periods:
+        for period in periods:
+            delayed_tasks.append(download_and_process(param, period, save_dir, data_dir, res, chunk_sizes))
+
+    with ProgressBar():
+        dask.compute(*delayed_tasks)
+
+def process_part_data_parallel(save_dir, data_dir, res):
+    params = ['t', 's']
+    periods = list(time_periods) #['1', '2']  # Example for trials
+
+    delayed_tasks = []
+    for param in params:
+        for period in periods:
             delayed_tasks.append(download_and_process(param, period, save_dir, data_dir, res, chunk_sizes))
 
     with ProgressBar():
@@ -235,21 +302,9 @@ def main():
     data_dir = os.path.abspath('../data')
     save_dir = os.path.abspath('../tmp_data')
     res = '04'  # You can change this to '01' for 1-degree resolution
-    # zarr_group_path = os.path.abspath(f'{data_dir}/{grid_dir[res]}')
-    zarr_group_path = os.path.abspath(f'{data_dir}/test')
-    ds_initial = xr.Dataset(
-        coords={
-            'lon': np.linspace(-180, 180, 1440),
-            'lat': np.linspace(-90, 90, 720),
-            'depth': np.linspace(0, 1500, 57),
-            'parameters': list(parameters.values()),
-            'time_periods': list(time_periods.keys())
-        }
-    )
 
-    initialize_zarr_store(zarr_group_path, ds_initial, chunk_sizes)
     load_completed_datasets(res)
-    process_part_data_parallel(save_dir, zarr_group_path, res)
+    process_subgroup(save_dir, data_dir, res)
 
 if __name__ == '__main__':
     main()
