@@ -17,7 +17,12 @@ from tqdm import tqdm
 parameters = {
     't': 'temperature',
     's': 'salinity',
-    # Add other parameters as needed
+    'o': 'oxygen',
+    'O': 'o2sat',
+    'A': 'AOU',
+    'i': 'silicate',
+    'p': 'phosphate',
+    'n': 'nitrate'
 }
 time_periods = {
     '0': 'annual',
@@ -71,7 +76,8 @@ def load_completed_datasets(res):
     if os.path.exists(completed_data_file):
         with open(completed_data_file, 'r') as f:
             for line in f:
-                completed_datasets.add(line.strip())
+                parts = line.strip().split(',')
+                completed_datasets.add(f"{parts[0]},{parts[1]},{parts[2]}")
 
 # Function to write a completed dataset entry
 def write_completed_dataset(param, period, grid_res, nc_file):
@@ -120,6 +126,8 @@ def initialize_zarr_store(zarr_group_path, ds, chunk_sizes):
         for var in data_variables:
             if var == 'ma' and '0' in ds.coords['time_periods']:
                 continue
+            if var == 'sdo' and ('Nutrients' in zarr_group_path or ('Oxy' in zarr_group_path and not 'annual' in zarr_group_path)):
+                continue
             data_shape = (
                 len(ds.coords['time_periods']),
                 len(ds.coords['parameters']),
@@ -151,7 +159,7 @@ def append_to_zarr_store(zarr_group_path, nc_file, param_key, period_key, grid_r
         ds_new = ds_new.drop_vars(['crs', 'lat_bnds', 'lon_bnds', 'depth_bnds', 'climatology_bounds'], errors='ignore')
         
         # Rename variables according to data_variables
-        rename_vars = {f'{param_key}_{var}': var for var in data_variables if not (var == 'ma' and period_key == '0')}
+        rename_vars = {f'{param_key}_{var}': var for var in data_variables if not ((var == 'ma' and period_key == '0') or (var == 'sdo' and ('Nutrients' in zarr_group_path or ('Oxy' in zarr_group_path and not 'annual' in zarr_group_path))))}
         ds_new = ds_new.rename(rename_vars)
         
         # Remove the time dimension if it exists
@@ -201,19 +209,22 @@ def is_data_completed(param, period, grid_res):
 
 # Function to determine the subgroup based on parameter and period
 def determine_subgroup(param, period):
+    param_name = parameters[param]
     param_group = 'Nutrients'
-    subgroup = f'seasonal/{param_group}'
 
-    if param in ['t', 's']:
+    if param_name in ['temperature', 'salinity']:
         param_group = 'TS'
-    elif param in ['o', 'O', 'A']:
+    elif param_name in ['oxygen', 'o2sat', 'AOU']:
         param_group = 'Oxy'
     
     if period == '0':
         subgroup = f'annual/{param_group}'
     elif period in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
-        subgroup = f'monthly/{param_group}'      
-    
+        subgroup = f'monthly/{param_group}'
+    else:
+        subgroup = f'seasonal/{param_group}'    
+
+    logger.info(f"current handling {param} for period {period}. Get {param_name} and {subgroup}")
     return subgroup
 
 # Top-level function for parallel processing
@@ -222,10 +233,11 @@ def download_and_process(param, period, save_dir, data_dir, res, chunk_sizes):
         logger.info(f"Skipping already completed dataset: {param} {period} {res}")
         return
 
-    base_url = "https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA"
+    span = 'decav' if param in ['t', 's'] else 'all'
+    base_url = "https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DATA" if param in ['t', 's'] else "https://www.ncei.noaa.gov/thredds-ocean/fileServer/woa23/DATA"
     padded_period = period.zfill(2)
-    file_name = f'woa23_decav_{param}{padded_period}_{res}.nc'
-    url = f'{base_url}/{parameters[param]}/netcdf/decav/{grid_resolutions[res]}/{file_name}'
+    file_name = f'woa23_{span}_{param}{padded_period}_{res}.nc'
+    url = f'{base_url}/{parameters[param]}/netcdf/{span}/{grid_resolutions[res]}/{file_name}'
     nc_file = os.path.abspath(f'{save_dir}/{file_name}')
 
     if not os.path.exists(nc_file):
@@ -237,8 +249,9 @@ def download_and_process(param, period, save_dir, data_dir, res, chunk_sizes):
     subgroup = determine_subgroup(param, period)
     zarr_group_path = os.path.abspath(f'{data_dir}/{grid_dir[res]}/{subgroup}')
     
-    lon = np.arange(-179.875, 180, 0.25, dtype=np.float32)
-    lat = np.arange(-89.875, 90, 0.25, dtype=np.float32)
+    lon = np.arange(-179.875, 180, 0.25, dtype=np.float32) if res == '04' else np.arange(-179.5, 180, 1.0, dtype=np.float32)
+    lat = np.arange(-89.875, 90, 0.25, dtype=np.float32) if res == '04' else np.arange(-89.5, 90, 1.0, dtype=np.float32)
+ 
     if 'annual' in subgroup or ('TS' in subgroup and not 'monthly' in subgroup):
         depth = np.concatenate([np.arange(0, 100, 5), np.arange(100, 500, 25), np.arange(500, 800, 50), np.arange(800, 2000, 50), np.arange(2000, 5600, 100)], dtype=np.float32)
     elif 'Oxy' in subgroup or 'TS' in subgroup:
@@ -274,8 +287,8 @@ def download_and_process(param, period, save_dir, data_dir, res, chunk_sizes):
 
 # Main processing function
 def process_subgroup(save_dir, data_dir, res):
-    params = ['t', 's'] # ['o', 'O', 'A', 'i', 'p', 'n']
-    periods = ['0', '1', '2'] #list(time_periods) # Example for trials
+    params = ['t', 's', 'o', 'O', 'A', 'i', 'p', 'n']
+    periods = list(time_periods) # ['0', '1', '2', '3', '4', '5', '6', '7', '13', '14', '15', '16']  # Example for trials
 
     delayed_tasks = []
     for param in params:
@@ -283,25 +296,13 @@ def process_subgroup(save_dir, data_dir, res):
             delayed_tasks.append(download_and_process(param, period, save_dir, data_dir, res, chunk_sizes))
 
     with ProgressBar():
-        dask.compute(*delayed_tasks)
-
-def process_part_data_parallel(save_dir, data_dir, res):
-    params = ['t', 's']
-    periods = list(time_periods) #['1', '2']  # Example for trials
-
-    delayed_tasks = []
-    for param in params:
-        for period in periods:
-            delayed_tasks.append(download_and_process(param, period, save_dir, data_dir, res, chunk_sizes))
-
-    with ProgressBar():
-        dask.compute(*delayed_tasks)
+        dask.compute(*delayed_tasks, num_workers=4)
 
 # Create the initial empty Zarr store
 def main():
     data_dir = os.path.abspath('../data')
     save_dir = os.path.abspath('../tmp_data')
-    res = '04'  # You can change this to '01' for 1-degree resolution
+    res = '01'  # change this to '01' for 1-degree resolution, '04' for 0.25-degree
 
     load_completed_datasets(res)
     process_subgroup(save_dir, data_dir, res)
