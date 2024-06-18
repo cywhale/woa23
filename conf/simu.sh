@@ -10,7 +10,7 @@ gunicorn woa23_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8050 -
 ps -ef | grep 'woa23_app' | grep -v grep | awk '{print $2}' | xargs -r kill -9
 
 # kill dask
-ps -ef | grep -w 'dask scheduler' | grep -v grep | awk '{print $2}' | xargs -r kill -9 && ps -ef | grep -w 'dask worker' | grep -v grep | awk '{print $2}' | xargs -r kill -9 && ps -ef >
+ps -ef | grep -w 'dask scheduler' | grep -v grep | awk '{print $2}' | xargs -r kill -9 && ps -ef | grep -w 'dask worker' | grep -v grep | awk '{print $2}' | xargs -r kill -9 && ps -ef | grep -w 'tide_app' | grep -v grep | awk '{print $2}' | xargs -r kill -9
 
 # pm2 start
 pm2 start ./conf/ecosystem.config.js

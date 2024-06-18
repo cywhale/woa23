@@ -13,9 +13,9 @@ from typing import Optional, List, Union
 # import requests
 import json, math
 from datetime import datetime #, timedelta
-# import src.config as config
-# from dask.distributed import Client
-# client = Client('tcp://localhost:8786')
+from dask.distributed import Client
+
+client = Client('tcp://localhost:8786')
 
 def generate_custom_openapi():
     if app.openapi_schema:
@@ -45,7 +45,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, default_response_class=ORJSONResponse)
-
 
 @app.get("/api/swagger/woa23/openapi.json", include_in_schema=False)
 async def custom_openapi():
@@ -136,20 +135,6 @@ def determine_subgroup(param, period):
 
     return subgroup
 
-# Add a variable type column and rename the value column
-def add_variable_type(df, variable_type):
-    if variable_type in df.columns:
-        df = df.rename({variable_type: "value"})
-        df = df.with_columns(pl.lit(variable_type).alias("variable_type"))
-    return df
-
-# Detect variable types and apply transformation
-def transform_df(df):
-    for var_type in available_vars:
-        if var_type in df.columns:
-            return add_variable_type(pl.from_pandas(df), var_type)
-    return pl.from_pandas(df)
-
 def custom_json_serializer(obj):
     if isinstance(obj, float):
         if np.isnan(obj) or np.isinf(obj):
@@ -175,21 +160,21 @@ async def get_woa23(
     lat1: Optional[float] = Query(
         None, description="Maximum latitude, range: [-90, 90]"),
     dep0: Optional[float] = Query(
-        None, description="Optional, minimum depth, and default is 0"),
+        None, description="Minimum depth. Optional, default is 0"),
     dep1: Optional[float] = Query(
-        None, description="Optional, maximum depth, and default is maximum depth 5500m in WOA23"),
+        None, description="Maximum depth. Optional, default is maximum depth 5500m in WOA23"),
     grid: Optional[str] = Query(
-        None, description="Grid resoultions: 1, 1-degree; 025, 0.25-degree; default is 1"),
+        None, description="Grid resoultion: 1 for 1-degree, 0.25 for 0.25-degree. Default is 1"),
     mode: Optional[str] = Query(
         None,
-        description="Allowed modes: list. Optional can be none (default output is list). Multiple/special modes can be separated by comma."),
+        description="Modes, not implemented yet."),
     append: Optional[str] = Query(
-        None, description="Data fields to append, separated by commas. If none, 'mn': Statistical mean default. Allowed fields: 'an', 'mn', 'dd', 'ma', 'sd', 'se', 'oa', 'gp', 'sdo', 'sea'"),
+        None, description=f"Statistics to append, separated by commas. Default is 'mn': Statistical mean. Allowed: {', '.join(available_vars)}"),
     parameter: Optional[str] = Query(
         None,
-        description="Allowed WOA23 parameteres are 'temperature, salinity, oxygen, o2sat, AOU, silicate, phosphate, nitrate'. If none, temperature is default"),
+        description="WOA23 parameteres, separated by commas. Default is 'temperature'. Allowed: temperature, salinity (both 0.25/1-degree data), oxygen, o2sat, AOU, silicate, phosphate, nitrate (only 1-degree data)."),
     time_period: Optional[str] = Query(
-        None, description="Time periods for statistics, separated by commas. If none, '0': Annual period is default. Allowed periods: 0, annual; 1-12, monthly; 13-16, seasonal from winter to autumn."),
+        None, description="Time periods for statistics, separated by commas. Default is '0' (annual). Allowed: 0 (annual). 1-12 (monthly), 13-16 (seasonal)."),
 ):
     """
     Query WOA2023 data (in JSON).
@@ -198,7 +183,7 @@ async def get_woa23(
     * /api/woa23?lon0=125&lat0=15&dep0=100&grid=1&parameter=temperature,salinity&time_period=13,14,15,16
     """
     init_time = datetime.now()
-    start_time = datetime.now() 
+    # start_time = datetime.now() 
 
     if grid is None:
         grid = '01'
@@ -283,8 +268,8 @@ async def get_woa23(
 
     result_list = []
     all_columns = set()
-    end_time = datetime.now()
-    print(f"Time taken to handle query parameters: {(end_time - start_time).total_seconds()} seconds")
+    # end_time = datetime.now()
+    # print(f"Time taken to handle query parameters: {(end_time - start_time).total_seconds()} seconds")
 
     start_time = datetime.now() 
     for zarr_group_path in zarr_group_paths:
@@ -341,16 +326,16 @@ async def get_woa23(
                 data_polars = data_polars.drop(var) 
                 result_list.append(data_polars)
 
-        end_time = datetime.now()
-        print(f"Time taken to appending result_list: {(end_time - appending_start_time).total_seconds()} seconds")
+        # end_time = datetime.now()
+        # print(f"Time taken to appending result_list: {(end_time - appending_start_time).total_seconds()} seconds")
 
-    end_time = datetime.now()
-    print(f"Time taken to open and filter Zarr stores: {(end_time - start_time).total_seconds()} seconds")
+    # end_time = datetime.now()
+    # print(f"Time taken to open and filter Zarr stores: {(end_time - start_time).total_seconds()} seconds")
 
     if not result_list:
         raise HTTPException(status_code=404, detail="No data found for the specified query parameters")
 
-    print("result list: ", result_list)
+    # print("result list: ", result_list)
     """ pandas version
     # Concatenate all dataframes in the result list
     result_df = pd.concat(result_list, ignore_index=True)
@@ -377,20 +362,18 @@ async def get_woa23(
     """
     """ polars version """  
     # Convert each dataframe in result_list to polars and add the variable type
-    start_time = datetime.now() 
-    # polars_list = [transform_df(df) for df in result_list]
+    # start_time = datetime.now() 
 
     # Concatenate the dataframes
-    # result_df = pl.concat(polars_list, how="vertical")
     result_df = pl.concat(result_list, how="vertical")
-    print("result df: ", result_df)
+    # print("result df: ", result_df)
 
     # Combine the parameter and variable type columns
     result_df = result_df.with_columns(
         (pl.col("parameters") + "_" + pl.col("variable_type")).alias("parameter_variable")
     )
-    end_time = datetime.now()
-    print(f"Time taken for converting to polars and concatenating: {(end_time - start_time).total_seconds()} seconds")
+    # end_time = datetime.now()
+    # print(f"Time taken for converting to polars and concatenating: {(end_time - start_time).total_seconds()} seconds")
 
     # print("result_df after rename, before pivot: ", result_df)
     """ Check for duplicates
@@ -408,17 +391,17 @@ async def get_woa23(
         print(duplicated_data)
     """
     # Pivot to wide format
-    start_time = datetime.now() 
+    # start_time = datetime.now() 
     result_df = result_df.pivot(
         index=["lon", "lat", "depth", "time_periods"],
         columns="parameter_variable",
         values="value"
     )
-    end_time = datetime.now()
-    print(f"Time taken for pivoting: {(end_time - start_time).total_seconds()} seconds")
+    # end_time = datetime.now()
+    # print(f"Time taken for pivoting: {(end_time - start_time).total_seconds()} seconds")
 
     # Optionally rename {param}_mn to {param} if `mn` is present in the query variables
-    start_time = datetime.now() 
+    # start_time = datetime.now() 
     if 'mn' in variables:
         rename_dict = {f"{param}_mn": param for param in pars if f"{param}_mn" in result_df.columns}
         if rename_dict:  # Check if there are columns to rename
@@ -427,7 +410,7 @@ async def get_woa23(
     result_df = result_df.rename({"time_periods": "time_period"})
     result_data = result_df.to_dicts()
     end_time = datetime.now()
-    print(f"Time taken for renaming and generating JSON: {(end_time - start_time).total_seconds()} seconds")
-    print(f"Total time taken: {(end_time - init_time).total_seconds()} seconds")
+    # print(f"Time taken for renaming and generating JSON: {(end_time - start_time).total_seconds()} seconds")
+    print(f"Total time for this query taken: {(end_time - init_time).total_seconds()} seconds")
 
     return ORJSONResponse(content=result_data)
