@@ -5,14 +5,11 @@ dask[complete]==2024.5.0
 fastapi==0.111.0
 gunicorn==22.0.0
 matplotlib==3.8.4
-netCDF4==1.6.5
-numcodecs==0.12.1
 numpy==1.26.4
 pandas[pyarrow]==2.2.2
 polars==0.20.25
 pydantic==2.7.1
 Requests==2.31.0
-scipy==1.13.0
 setuptools==69.5.1
 uvicorn==0.29.0
 xarray==2024.3.0
