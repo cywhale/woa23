@@ -2,17 +2,15 @@ import xarray as xr
 import pandas as pd
 import numpy as np
 import polars as pl
-from fastapi import FastAPI, Query, HTTPException #, status
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse, ORJSONResponse
-# from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse, ORJSONResponse, FileResponse
 from contextlib import asynccontextmanager
-from typing import Optional, List, Union
-# from pydantic import BaseModel
-# import requests
+from typing import Optional, List
+from tempfile import NamedTemporaryFile
 import json, math
-from datetime import datetime #, timedelta
+from datetime import datetime
 from dask.distributed import Client
 
 client = Client('tcp://localhost:8786')
@@ -23,8 +21,9 @@ def generate_custom_openapi():
     openapi_schema = get_openapi(
         title="ODB WOA23 API",
         version="1.0.0",
-        description=('Open API to query WOA2023 data, compiled by ODB.\n' +
-                     'Data source: Reagan, James R.; Boyer, Tim P.; García, Hernán E.; Locarnini, Ricardo A.; Baranova, Olga K.; Bouchard, Courtney; Cross, Scott L.; Mishonov, Alexey V.; Paver, Christopher R.; Seidov, Dan; Wang, Zhankun; Dukhovskoy, Dmitry. (2024). World Ocean Atlas 2023. NOAA National Centers for Environmental Information. Dataset: NCEI Accession 0270533'),
+        description=('Open API to query WOA2023 (WOA23) data, compiled by ODB.\n' +
+                     '* Data source: Reagan, James R.; Boyer, Tim P.; García, Hernán E.; Locarnini, Ricardo A.; Baranova, Olga K.; Bouchard, Courtney; Cross, Scott L.; Mishonov, Alexey V.; Paver, Christopher R.; Seidov, Dan; Wang, Zhankun; Dukhovskoy, Dmitry. (2024). World Ocean Atlas 2023. NOAA National Centers for Environmental Information. Dataset: NCEI Accession 0270533.\n' +
+                     '* WOA23 official spec (in PDF): https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DOCUMENTATION/WOA23_Product_Documentation.pdf'),
         routes=app.routes,
     )
     openapi_schema["servers"] = [
@@ -141,47 +140,7 @@ def custom_json_serializer(obj):
             return None
     return obj
 
-#class WoaResponse(BaseModel):
-#    longitude: float
-#    latitude: float
-#    time: str
-#    z: Optional[float]
-#    u: Optional[float]
-#    v: Optional[float]
-
-
-@app.get("/api/woa23", tags=["WOA23"], summary="Query WOA23 data") #response_model=List[WoaResponse], 
-async def get_woa23(
-    lon0: float = Query(...,
-                        description="Minimum longitude, range: [-180, 180]"),
-    lat0: float = Query(..., description="Minimum latitude, range: [-90, 90]"),
-    lon1: Optional[float] = Query(
-        None, description="Maximum longitude, range: [-180, 180]"),
-    lat1: Optional[float] = Query(
-        None, description="Maximum latitude, range: [-90, 90]"),
-    dep0: Optional[float] = Query(
-        None, description="Minimum depth. Optional, default is 0"),
-    dep1: Optional[float] = Query(
-        None, description="Maximum depth. Optional, default is maximum depth 5500m in WOA23"),
-    grid: Optional[str] = Query(
-        None, description="Grid resoultion: 1 for 1-degree, 0.25 for 0.25-degree. Default is 1"),
-    mode: Optional[str] = Query(
-        None,
-        description="Modes, not implemented yet."),
-    append: Optional[str] = Query(
-        None, description=f"Statistics to append, separated by commas. Default is 'mn': Statistical mean. Allowed: {', '.join(available_vars)}"),
-    parameter: Optional[str] = Query(
-        None,
-        description="WOA23 parameteres, separated by commas. Default is 'temperature'. Allowed: temperature, salinity (both 0.25/1-degree data), oxygen, o2sat, AOU, silicate, phosphate, nitrate (only 1-degree data)."),
-    time_period: Optional[str] = Query(
-        None, description="Time periods for statistics, separated by commas. Default is '0' (annual). Allowed: 0 (annual). 1-12 (monthly), 13-16 (seasonal)."),
-):
-    """
-    Query WOA2023 data (in JSON).
-
-    #### Usage
-    * /api/woa23?lon0=125&lat0=15&dep0=100&grid=1&parameter=temperature,salinity&time_period=13,14,15,16
-    """
+async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], lat1: Optional[float], dep0: Optional[float], dep1: Optional[float], grid: Optional[str], append: Optional[str], parameter: Optional[str], time_period: Optional[str]):
     init_time = datetime.now()
     # start_time = datetime.now() 
 
@@ -203,7 +162,7 @@ async def get_woa23(
             status_code=400, detail=f"Invalid variables. Allowed variables are {', '.join(available_vars)}")
 
     if parameter is None:
-        pars = 'temperature'
+        parameter = 'temperature'
 
     available_pars = ['temperature', 'salinity'] if gridSz == 0.25 else ['temperature', 'salinity', 'oxygen', 'o2sat', 'AOU', 'silicate', 'phosphate', 'nitrate']
 
@@ -222,9 +181,6 @@ async def get_woa23(
             status_code=400, detail=f"Invalid time_periods. Allowed time_periods are {', '.join(list(time_periods))}")
     periods.sort()  # in-place sort not return anything
     print("Handling parameters and time_periods: ", pars, periods)
-
-    if mode is None:
-        mode = 'list'
 
     # Load the appropriate Zarr group
     # Note some parameters and time_periods belong to the same subgroups in zarr. 
@@ -408,9 +364,83 @@ async def get_woa23(
             result_df = result_df.rename(rename_dict)
 
     result_df = result_df.rename({"time_periods": "time_period"})
-    result_data = result_df.to_dicts()
     end_time = datetime.now()
     # print(f"Time taken for renaming and generating JSON: {(end_time - start_time).total_seconds()} seconds")
     print(f"Total time for this query taken: {(end_time - init_time).total_seconds()} seconds")
+    return result_df
 
-    return ORJSONResponse(content=result_data)
+@app.get("/api/woa23", tags=["WOA23"], summary="Query WOA23 data (in JSON)")
+async def get_woa23(
+    lon0: float = Query(...,
+                        description="Minimum longitude, range: [-180, 180]."),
+    lat0: float = Query(..., description="Minimum latitude, range: [-90, 90]."),
+    lon1: Optional[float] = Query(
+        None, description="Maximum longitude, range: [-180, 180]."),
+    lat1: Optional[float] = Query(
+        None, description="Maximum latitude, range: [-90, 90]."),
+    dep0: Optional[float] = Query(
+        None, description="Minimum depth. Optional, default is 0."),
+    dep1: Optional[float] = Query(
+        None, description="Maximum depth. Optional, default is maximum depth 5500m in WOA23."),
+    grid: Optional[str] = Query(
+        None, description="Grid resoultion: 1 for 1-degree, 0.25 for 0.25-degree. Default is 1."),
+    append: Optional[str] = Query(
+        None, description=f"Statistics to append, separated by commas. Default is 'mn': Statistical mean. Allowed: {', '.join(available_vars)}."),
+    parameter: Optional[str] = Query(
+        None,
+        description="WOA23 parameteres, separated by commas. Default is 'temperature'. Allowed: temperature, salinity (both 0.25/1-degree data), oxygen, o2sat, AOU, silicate, phosphate, nitrate (only 1-degree data)."),
+    time_period: Optional[str] = Query(
+        None, description="Time periods for statistics, separated by commas. Default is '0' (annual). Allowed: 0 (annual). 1-12 (monthly), 13-16 (seasonal)."),
+):
+    """
+    Query WOA23 data (in JSON).
+
+    #### Usage
+    * /api/woa23?lon0=125&lat0=15&dep0=100&grid=1&parameter=temperature,salinity&time_period=13,14,15,16
+    """
+    try:
+        df = await process_woa23_data(lon0, lat0, lon1, lat1, dep0, dep1, grid, append, parameter, time_period)
+        result_data = df.to_dicts()
+        return ORJSONResponse(content=result_data)
+    except HTTPException as herr:
+        raise herr
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error. Please try it later or inform admin")
+
+@app.get("/api/woa23/csv", tags=["WOA23"], summary="Query WOA23 data (in CSV)")
+async def get_woa23_csv(
+    lon0: float = Query(..., description="Minimum longitude, range: [-180, 180]."),
+    lat0: float = Query(..., description="Minimum latitude, range: [-90, 90]."),
+    lon1: Optional[float] = Query(None, description="Maximum longitude, range: [-180, 180]."),
+    lat1: Optional[float] = Query(None, description="Maximum latitude, range: [-90, 90]."),
+    dep0: Optional[float] = Query(None, description="Minimum depth. Optional, default is 0."),
+    dep1: Optional[float] = Query(None, description="Maximum depth. Optional, default is maximum depth 5500m in WOA23."),
+    grid: Optional[str] = Query(None, description="Grid resoultion: 1 for 1-degree, 0.25 for 0.25-degree. Default is 1."),
+    append: Optional[str] = Query(None, description=f"Statistics to append, separated by commas. Default is 'mn': Statistical mean. Allowed: {', '.join(available_vars)}."),
+    parameter: Optional[str] = Query(None, description="WOA23 parameteres, separated by commas. Default is 'temperature'. Allowed: temperature, salinity (both 0.25/1-degree data), oxygen, o2sat, AOU, silicate, phosphate, nitrate (only 1-degree data)."),
+    time_period: Optional[str] = Query(None, description="Time periods for statistics, separated by commas. Default is '0' (annual). Allowed: 0 (annual). 1-12 (monthly), 13-16 (seasonal)."),
+):
+    """
+    Query WOA23 data (in CSV).
+
+    #### Usage
+    * /api/woa23/csv?lon0=125&lat0=15&dep0=100&grid=1&parameter=temperature,salinity&time_period=13,14,15,16
+    """
+    try:
+        df = await process_woa23_data(lon0, lat0, lon1, lat1, dep0, dep1, grid, append, parameter, time_period)
+        if df.is_empty():
+            raise HTTPException(status_code=400, detail="No data available for the given parameters.")
+
+        temp_file = NamedTemporaryFile(delete=False)
+        df.write_csv(temp_file.name)  # polars version
+        out_file = f"woa23_from_ODB_{datetime.today().strftime('%Y-%m-%d')}.csv"
+        return FileResponse(temp_file.name, media_type="text/csv", filename=out_file)
+
+    except HTTPException as herr:
+        raise herr
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error. Please try it later or inform admin")

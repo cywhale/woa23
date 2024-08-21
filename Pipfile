@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+dask = {extras = ["complete"], version = "==2024.7.1"}
+distributed = "==2024.7.1"
+fastapi = {extras = ["standard"], version = "==0.112.0"}
+gunicorn = "==22.0.0"
+numpy = "==1.26.4"
+pandas = {extras = ["pyarrow"], version = "==2.2.2"}
+polars = "==1.4.1"
+pydantic = "==2.8.2"
+uvicorn = "==0.30.5"
+xarray = "==2024.7.0"
+zarr = "==2.18.2"
+
+[dev-packages]
+
+[requires]
+python_version = "3.11"
