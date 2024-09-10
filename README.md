@@ -1,6 +1,6 @@
 # WOA23 API
 
-# Open API to query TPXO9-v5 global tide models
+# ODB Open API to query WOA 2023 (WOA23) data
 
 [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.13739802.svg)](https://doi.org/10.5281/zenodo.13739802)
 
