@@ -1,4 +1,4 @@
-# ODB Open API to query WOA 2023 (WOA23) API
+# ODB Open API to query WOA 2023 (WOA23) data
 
 [![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.13739802.svg)](https://doi.org/10.5281/zenodo.13739802)
 
