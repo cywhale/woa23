@@ -1,5 +1,9 @@
 # WOA23 API
 
+# Open API to query TPXO9-v5 global tide models
+
+[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.13739802.svg)](https://doi.org/10.5281/zenodo.13739802)
+
 #### Swagger API doc
 
 [ODB WOA23 API manual/online try-out](https://api.odb.ntu.edu.tw/hub/swagger?node=odb_woa23_v1)
