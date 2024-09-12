@@ -5,3 +5,4 @@
 #### ver 0.0.5 Use Dask client/major packages upgrade
 #### ver 0.0.6 Fix empty parameter bug/major packages upgrade
 #### ver 0.0.7 Zarr to POSTGIS for WMS application/modify README.md to opensource it/n1
+#### ver 0.0.8 temporary version that complete Nutrients 1-degree/TS 0.25-degree conversion
