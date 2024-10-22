@@ -11,9 +11,10 @@ from typing import Optional, List
 from tempfile import NamedTemporaryFile
 import json, math
 from datetime import datetime
-from dask.distributed import Client
-
-client = Client('tcp://localhost:8786')
+# from dask.distributed import Client
+# client = Client('tcp://localhost:8786')
+from src.dask_client_manager import get_dask_client
+client = get_dask_client("woa23api")
 
 def generate_custom_openapi():
     if app.openapi_schema:
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI):
     print("App start at ", datetime.now())
     yield
     # below code to execute when app is shutting down
+    client.close()
     print("App end at ", datetime.now())
 
 
@@ -111,11 +113,11 @@ available_vars = ['an', 'mn', 'dd', 'ma', 'sd', 'se', 'oa', 'gp', 'sdo', 'sea']
 def to_lowest_grid_point(lon: float, lat: float, grid_size: float) -> tuple:
     # Calculate the grid snapping offset based on grid size
     offset = 0.5 * grid_size
-    
+
     # Snap longitude and latitude to the nearest grid points
     grid_lon = (math.floor(lon / grid_size) * grid_size) + offset
     grid_lat = (math.floor(lat / grid_size) * grid_size) + offset
-    
+
     return grid_lon, grid_lat
 
 def determine_subgroup(param, period):
@@ -124,7 +126,7 @@ def determine_subgroup(param, period):
         param_group = 'TS'
     elif param in ['oxygen', 'o2sat', 'AOU']:
         param_group = 'Oxy'
-    
+
     if period == '0':
         subgroup = f'annual/{param_group}'
     elif period in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']:
@@ -142,7 +144,7 @@ def custom_json_serializer(obj):
 
 async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], lat1: Optional[float], dep0: Optional[float], dep1: Optional[float], grid: Optional[str], append: Optional[str], parameter: Optional[str], time_period: Optional[str]):
     init_time = datetime.now()
-    # start_time = datetime.now() 
+    # start_time = datetime.now()
 
     if grid is None:
         grid = '01'
@@ -183,7 +185,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
     print("Handling parameters and time_periods: ", pars, periods)
 
     # Load the appropriate Zarr group
-    # Note some parameters and time_periods belong to the same subgroups in zarr. 
+    # Note some parameters and time_periods belong to the same subgroups in zarr.
     # Use `set` to prevent duplicated zarr_group_paths being appended.
     zarr_group_paths = set()
     for param in pars:
@@ -200,7 +202,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
     if dep0 <= dep1:
         depth_min, depth_max = dep0, dep1
     else:
-        depth_min, depth_max = dep1, dep0         
+        depth_min, depth_max = dep1, dep0
 
     if lon1 is None or lat1 is None or (lon0 == lon1 and lat0 == lat1):
         # Only one point
@@ -212,7 +214,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
         lon0, lat0 = to_lowest_grid_point(lon0, lat0, gridSz)
         lon1, lat1 = to_lowest_grid_point(lon1, lat1, gridSz)
 
-        if lon0 <= lon1: 
+        if lon0 <= lon1:
             lon_min, lon_max = lon0, lon1+0.1
         else:
             lon_min, lon_max = lon1, lon0+0.1
@@ -227,12 +229,12 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
     # end_time = datetime.now()
     # print(f"Time taken to handle query parameters: {(end_time - start_time).total_seconds()} seconds")
 
-    start_time = datetime.now() 
+    start_time = datetime.now()
     for zarr_group_path in zarr_group_paths:
         ds = xr.open_zarr(zarr_group_path)
 
         # Ensure the selected parameters exist in the dataset
-        # intersect_params_start_time = datetime.now() 
+        # intersect_params_start_time = datetime.now()
         existing_params = set(ds.coords['parameters'].values)
         selected_params = existing_params.intersection(pars)
         # end_time = datetime.now()
@@ -242,7 +244,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
             continue
 
         # Ensure the selected time periods exist in the dataset
-        # intersect_periods_start_time = datetime.now() 
+        # intersect_periods_start_time = datetime.now()
         existing_periods = set(ds.coords['time_periods'].values)
         selected_periods = existing_periods.intersection(periods)
         # end_time = datetime.now()
@@ -251,7 +253,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
             continue
 
         # Select the appropriate data based on the query parameters
-        # filtering_start_time = datetime.now() 
+        # filtering_start_time = datetime.now()
         filtered_data = ds.sel(
             lon=slice(lon_min, lon_max),
             lat=slice(lat_min, lat_max),
@@ -262,7 +264,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
         # end_time = datetime.now()
         # print(f"Time taken to filtering ds: {(end_time - filtering_start_time).total_seconds()} seconds")
         # Append the data variables to the result list
-        appending_start_time = datetime.now() 
+        appending_start_time = datetime.now()
         """ pandas version """
         for var in variables:
             if var in filtered_data:
@@ -270,7 +272,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
                 # Append the data variable to the DataFrame
                 """ pandas version
                 data[var] = data.apply(lambda row: row[var], axis=1)
-                result_list.append(data)     
+                result_list.append(data)
                 """
                 # Convert to polars directly
                 data_polars = pl.from_pandas(data)
@@ -279,7 +281,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
                     pl.col(var).alias("value")
                 ])
                 # Drop original var columns if exist
-                data_polars = data_polars.drop(var) 
+                data_polars = data_polars.drop(var)
                 result_list.append(data_polars)
 
         # end_time = datetime.now()
@@ -316,9 +318,9 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
 
     return ORJSONResponse(content=result_data)
     """
-    """ polars version """  
+    """ polars version """
     # Convert each dataframe in result_list to polars and add the variable type
-    # start_time = datetime.now() 
+    # start_time = datetime.now()
 
     # Concatenate the dataframes
     result_df = pl.concat(result_list, how="vertical")
@@ -347,7 +349,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
         print(duplicated_data)
     """
     # Pivot to wide format
-    # start_time = datetime.now() 
+    # start_time = datetime.now()
     result_df = result_df.pivot(
         index=["lon", "lat", "depth", "time_periods"],
         columns="parameter_variable",
@@ -357,7 +359,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
     # print(f"Time taken for pivoting: {(end_time - start_time).total_seconds()} seconds")
 
     # Optionally rename {param}_mn to {param} if `mn` is present in the query variables
-    # start_time = datetime.now() 
+    # start_time = datetime.now()
     if 'mn' in variables:
         rename_dict = {f"{param}_mn": param for param in pars if f"{param}_mn" in result_df.columns}
         if rename_dict:  # Check if there are columns to rename
