@@ -8,3 +8,6 @@
 #### v0.0.9 temporary version that complete Oxy 1-degree conversion
 #### v0.1.0 Try to shared dask worker leak by unique naming scheme for Dask tasks/major package upgrade (numpy v2)
 #### v0.1.1 Improve the PostGIS write-in by chunks using polars dataframe, greatly improve write-in speed
+
+    -- small package upgrade
+
