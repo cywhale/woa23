@@ -11,4 +11,6 @@
 
     -- small package upgrade
 	-- add Research example: regional dissolved oxgen profile
+        -- add GSW-PY(gsw) to calculate potential density anomaly in example/n2
+
 

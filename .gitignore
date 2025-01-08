@@ -44,3 +44,4 @@ data
 **/*.nc
 **/src.egg-info
 **/*.mat
+**/.python-version
