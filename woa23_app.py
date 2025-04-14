@@ -395,10 +395,11 @@ async def get_woa23(
         None, description="Time periods for statistics, separated by commas. Default is '0' (annual). Allowed: 0 (annual). 1-12 (monthly), 13-16 (seasonal)."),
 ):
     """
-    Query WOA23 data (in JSON).
+    Query WOA23 data (in JSON), including sea temperature, salinity, dissolved oxygen, and nutrients.
 
     #### Usage
     * /api/woa23?lon0=125&lat0=15&dep0=100&grid=1&parameter=temperature,salinity&time_period=13,14,15,16
+    * parameter: temperature, salinity, oxygen, o2sat, AOU, silicate, phosphate, nitrate
     """
     try:
         df = await process_woa23_data(lon0, lat0, lon1, lat1, dep0, dep1, grid, append, parameter, time_period)
@@ -425,10 +426,11 @@ async def get_woa23_csv(
     time_period: Optional[str] = Query(None, description="Time periods for statistics, separated by commas. Default is '0' (annual). Allowed: 0 (annual). 1-12 (monthly), 13-16 (seasonal)."),
 ):
     """
-    Query WOA23 data (in CSV).
+    Query WOA23 data (in CSV), including sea temperature, salinity, dissolved oxygen, and nutrients.
 
     #### Usage
     * /api/woa23/csv?lon0=125&lat0=15&dep0=100&grid=1&parameter=temperature,salinity&time_period=13,14,15,16
+    * parameter: temperature, salinity, oxygen, o2sat, AOU, silicate, phosphate, nitrate
     """
     try:
         df = await process_woa23_data(lon0, lat0, lon1, lat1, dep0, dep1, grid, append, parameter, time_period)

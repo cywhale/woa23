@@ -10,6 +10,7 @@
 #### v0.1.1 Improve the PostGIS write-in by chunks using polars dataframe, greatly improve write-in speed
 
     -- small package upgrade
-	-- add Research example: regional dissolved oxgen profile/n2
-        -- add GSW-PY(gsw) to calculate potential density anomaly in example/n2
+    -- add Research example: regional dissolved oxgen profile/n2
+    -- add GSW-PY(gsw) to calculate potential density anomaly in example/n2
 
+#### v0.1.2 improve Swagger doc (small package upgrade/stable since add research example)
