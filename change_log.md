@@ -14,3 +14,5 @@
     -- add GSW-PY(gsw) to calculate potential density anomaly in example/n2
 
 #### v0.1.2 improve Swagger doc (small package upgrade/stable since add research example)
+
+    -- improve Research example (regional dissolved oxgen profile) code comments/n3
