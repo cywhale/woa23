@@ -13,7 +13,7 @@ import json, math
 from datetime import datetime
 # from dask.distributed import Client
 # client = Client('tcp://localhost:8786')
-from src.dask_client_manager import get_dask_client
+from src.dask_client_manager import get_dask_client, close_dask_client
 client = get_dask_client("woa23api")
 
 def generate_custom_openapi():
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
     print("App start at ", datetime.now())
     yield
     # below code to execute when app is shutting down
-    client.close()
+    close_dask_client("woa23api")
     print("App end at ", datetime.now())
 
 
