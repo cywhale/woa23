@@ -10,7 +10,7 @@ all, as matches. The reviewer found it by hand; these keep it found.
 import json
 
 from bench.contract_cases import CASES, all_cases, csv_cases
-from bench.contract_diff import compare_semantic
+from bench.contract_diff import compare_semantic, request_order
 
 failures: list[str] = []
 passed: list[str] = []
@@ -130,9 +130,37 @@ def test_case_list() -> None:
           next(c for c in CASES if c.id == "C5c").expect_status == 200)
 
 
+def test_request_order_is_counterbalanced() -> None:
+    """Which arm goes first must not be the same arm every time.
+
+    Every case used to fetch the reference first and the candidate second. For all
+    64 cases that makes one arm systematically cold and the other systematically
+    warm, so any order-dependent state — connection pool, store handle, page cache
+    over a shared store — is always applied in the same direction.
+    """
+    n = len(all_cases())
+    seq = [request_order(i) for i in range(n)]
+    check("only the two orders are produced", set(seq) <= {"RC", "CR"}, str(set(seq)))
+    check(f"the {n} cases split evenly", seq.count("RC") == seq.count("CR") == n // 2,
+          f"RC={seq.count('RC')} CR={seq.count('CR')}")
+    check("the order alternates rather than blocking",
+          all(a != b for a, b in zip(seq, seq[1:])), str(seq[:6]))
+    check("it is a pure function of the index",
+          [request_order(i) for i in range(n)] == seq)
+
+    # The property that actually matters: no arm is first for a majority of cases,
+    # and it holds for an odd count too, to within the one case that cannot balance.
+    for size in (1, 2, 3, 63, 64, 65):
+        s2 = [request_order(i) for i in range(size)]
+        check(f"n={size}: neither arm leads by more than one",
+              abs(s2.count("RC") - s2.count("CR")) <= 1,
+              f"RC={s2.count('RC')} CR={s2.count('CR')}")
+
+
 def main() -> int:
     for fn in (test_error_bodies, test_success_bodies, test_csv_bodies,
-               test_non_row_payloads, test_case_list):
+               test_non_row_payloads, test_case_list,
+               test_request_order_is_counterbalanced):
         print(f"\n{fn.__name__}")
         fn()
     total = len(passed) + len(failures)

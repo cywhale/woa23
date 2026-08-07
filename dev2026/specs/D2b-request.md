@@ -28,13 +28,30 @@ arms is the two lines of §4.4.
 
 | phase | → our reference 8052 | → our candidate 8051 | → **production 8050** |
 |---|---|---|---|
+| readiness (OpenAPI document, no store read) | ≤30 | ≤30 | **0** |
+| data-path probe, counterbalanced | 2 | 2 | **0** |
 | contract gate, 5.2A, 64 cases | 64 | 64 | **0** |
 | latency gate, rung 21 | 176 | 176 | **0** |
 | sample-size pilot, *after* the gate, both arms | 208 | 208 | **0** |
-| **total** | **448** | **448** | **0** |
+| **total** | **≤480** | **≤480** | **0** |
 
 Every request goes to a process this run started. The public API and its backend are
 never contacted.
+
+**Readiness never touches the data path.** The probe that waits for a server to
+come up requests the OpenAPI document, which exercises gunicorn, the uvicorn worker
+and FastAPI routing while reading nothing from the Zarr store. The previous probe
+issued a real data query, to the reference first — giving the reference a warm store
+handle and populated page cache before the candidate had served anything, on the one
+path the whole experiment measures. The data path is still confirmed before
+committing to 64 contract cases, by a probe that runs once in each order
+(candidate-first, then reference-first): two requests per arm, exactly balanced.
+
+**The contract gate counterbalances its request order.** All 64 cases used to fetch
+the reference first. `request_order(i)` alternates by case index, giving 32 RC and 32
+CR, and the order chosen for each case is recorded in the artefact alongside a
+`request_order_counts` summary — so the balance can be audited from the result file
+rather than taken on trust.
 
 **The pilot runs last, and against both arms.** Placed before the gate it would have
 sampled one arm 208 times and the other not at all — warming one side's page cache
@@ -140,7 +157,12 @@ host's CPU and evicted production's page cache for nothing. In order:
      environment. Both fail closed: a missing record, a missing field, or a
      non-string value is a problem, never a pass.
 
-**Ports are parsed, not pattern-matched.** Every port test in both runner scripts
+**Port state is read through one library, `scripts/lib_ports.sh`**, shared by both
+runners and exercised offline by `scripts/test_ports.sh` against a captured `ss`
+fixture under the same `set -euo pipefail` the runners use. Three properties it
+guarantees, each of which was previously violated:
+
+- **Ports are parsed, not pattern-matched.** Every port test in both runner scripts
 was a substring match on `ss` output. `ss` writes the local address as `addr:port`
 and the address half may contain colons, so `[fe80::8050]:9000` — an unrelated
 service — read as a listener on 8050, and a `\b`-anchored grep for port 50 matched
@@ -149,6 +171,20 @@ identity check rests on, so a false member there corrupts the master election an
 every comparison downstream. The port is now taken from the local-address column,
 after the last colon, compared as an integer, and only in `LISTEN` rows — which also
 stops a *client* of 8050 being counted as holding it.
+- **An empty result is an observation, not an error.** `grep` exits 1 when nothing
+  matches and `pipefail` propagates it, so `x="$(pids_on_port 8050)"` under `set -e`
+  aborted the script outright — preflight never reached its "production is not
+  listening" branch, and cleanup aborted mid-function, losing the entire
+  production-identity report and the `CLEANUP_FAILED` rollup.
+- **"Cannot determine" is never "nothing there."** If `ss` itself fails, every
+  function returns status **2**, distinct from 1. `port_released()` is true only for
+  a port observed free, so an unreadable `ss` can never be reported as a released
+  socket, and preflight refuses to start rather than assume a port is available.
+
+Cleanup reports each production outcome distinctly — port state unreadable, listener
+gone, master unresolvable, master start time unreadable, production restarted,
+workers recycled, unchanged — because "cannot tell" and "gone" and "different
+process" are three different facts and only one of them is benign.
 
 Every process this run owns — scheduler, worker, reference, candidate — is started
 through the **same tracked-start path**, which writes a pidfile, reads the PID's

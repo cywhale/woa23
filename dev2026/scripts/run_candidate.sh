@@ -74,25 +74,20 @@ fi
 cd "$HERE"
 mkdir -p run results
 
-# `ss` writes the local address as `addr:port`, and the address half may contain
-# colons of its own, so a substring test for ":${PORT}" also matches an unrelated
-# service at `[fe80::8051]:9000`, and a `\b`-anchored one matches an IPv6 address
-# ending in the port's digits. Parse the port out of the local-address column and
-# compare it as a number; count only LISTEN rows, which also drops the header.
-ss_rows_on_port() {
-  ss -lntp 2>/dev/null | awk -v want="$1" '
-    $1 == "LISTEN" && NF >= 4 {
-      n = split($4, part, ":")
-      if (n >= 2 && part[n] ~ /^[0-9]+$/ && part[n] + 0 == want + 0) print
-    }'
-}
-port_held() { [ -n "$(ss_rows_on_port "$1")" ]; }
+# Port-state helpers. Shared with run_controlled.sh and covered offline by
+# scripts/test_ports.sh against a captured `ss` fixture.
+# shellcheck source=lib_ports.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_ports.sh"
 
-if port_held "$PORT"; then
-  echo "port ${PORT} is already in use — aborting rather than touching it" >&2
-  ss_rows_on_port "$PORT" >&2
-  exit 1
-fi
+st=0; port_held "$PORT" || st=$?
+case "$st" in
+  0) echo "port ${PORT} is already in use — aborting rather than touching it" >&2
+     ss_rows_on_port "$PORT" >&2 || true
+     exit 1 ;;
+  2) echo "cannot read port state for ${PORT}; refusing to start rather than" >&2
+     echo "  assume it is free" >&2
+     exit 1 ;;
+esac
 
 # A free port is not an all-clear. `stop_candidate` deliberately leaves the pidfile
 # when it refuses to kill — a recycled PID, or a process that no longer holds the
@@ -128,7 +123,7 @@ starttime_of() {
 }
 
 holds_port() {
-  ss_rows_on_port "$PORT" | grep -qE "pid=$1,"
+  pid_holds_port "$1" "$PORT"
 }
 
 stop_candidate() {
@@ -144,7 +139,7 @@ stop_candidate() {
     echo "PID $pid is already gone — checking whether port ${PORT} is free" >&2
     local j
     for j in $(seq 1 20); do
-      if ! port_held "$PORT"; then
+      if port_released "$PORT"; then
         rm "$PIDFILE"
         [ -f "$STARTFILE" ] && rm "$STARTFILE"
         echo "port ${PORT} is free; pidfile removed"
@@ -153,7 +148,7 @@ stop_candidate() {
       sleep 1
     done
     echo "PID $pid is gone but port ${PORT} is STILL HELD:" >&2
-    ss_rows_on_port "$PORT" >&2
+    ss_rows_on_port "$PORT" >&2 || true
     echo "pidfile left in place; do not start another instance until this is resolved" >&2
     return 1
   fi
@@ -170,7 +165,7 @@ stop_candidate() {
   kill "$pid" 2>/dev/null || true
   local i
   for i in $(seq 1 20); do
-    if ! port_held "$PORT"; then
+    if port_released "$PORT"; then
       # Only once the port is confirmed released. A stop that reports success while
       # something still holds the socket is worse than no stop at all.
       rm "$PIDFILE"

@@ -147,6 +147,23 @@ def localise(a: dict, b: dict, is_csv: bool) -> list[str]:
             "catch"]
 
 
+def request_order(index: int) -> str:
+    """Which arm is requested first for case `index`: "RC" reference, "CR" candidate.
+
+    Every case used to fetch the reference first and the candidate second. For a
+    gate that compares *bodies* that is not obviously wrong, but it makes one arm
+    systematically the cold one and the other systematically the warm one for all 64
+    cases, and any order-dependent state — a connection pool, a store handle, the
+    page cache under a shared store — is then always applied in the same direction.
+    A gate is not the place to leave a systematic asymmetry lying around.
+
+    Alternating by index counterbalances it exactly for an even case count and to
+    within one case otherwise. The chosen order is recorded per case in the
+    artefact, so the balance is auditable rather than asserted.
+    """
+    return "RC" if index % 2 == 0 else "CR"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -194,13 +211,19 @@ def main() -> int:
 
     results, failed = [], []
     with httpx.Client(verify=not args.insecure, follow_redirects=True) as client:
-        for case in cases:
+        for index, case in enumerate(cases):
             is_csv = case.path.endswith("/csv")
+            order = request_order(index)
             try:
-                ref = fetch(client, args.reference, case, args.timeout)
-                cand = fetch(client, args.candidate, case, args.timeout)
+                if order == "RC":
+                    ref = fetch(client, args.reference, case, args.timeout)
+                    cand = fetch(client, args.candidate, case, args.timeout)
+                else:
+                    cand = fetch(client, args.candidate, case, args.timeout)
+                    ref = fetch(client, args.reference, case, args.timeout)
             except Exception as exc:
-                results.append({"id": case.id, "verdict": "ERROR", "error": repr(exc)})
+                results.append({"id": case.id, "verdict": "ERROR", "error": repr(exc),
+                                "request_order": order})
                 failed.append(case.id)
                 print(f"{case.id:10s} ERROR {exc!r}")
                 continue
@@ -227,6 +250,7 @@ def main() -> int:
                 "candidate_bytes": len(cand["body"]),
                 "verdict": verdict, "notes": notes,
                 "status_as_recorded": status_ok,
+                "request_order": order,
             })
             if not same or not status_ok:
                 failed.append(case.id)
@@ -249,6 +273,9 @@ def main() -> int:
         "host": platform.node(),
         "python": sys.version,
         "harness_invocation": sys.argv,
+        "request_order_counts": {
+            o: sum(1 for r in results if r.get("request_order") == o)
+            for o in ("RC", "CR")},
         "candidate_meta": metas.get("candidate"),
         "reference_meta": metas.get("reference"),
         "results": results,

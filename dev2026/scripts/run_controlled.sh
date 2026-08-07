@@ -53,6 +53,12 @@ env -C / true 2>/dev/null || { echo "env -C is required (coreutils >= 8.28)" >&2
 cd "$HERE"
 mkdir -p "$RUN" results
 
+# Port-state helpers. Shared with run_candidate.sh and covered offline by
+# scripts/test_ports.sh, which exercises them against a captured `ss` fixture under
+# these same shell options.
+# shellcheck source=lib_ports.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_ports.sh"
+
 # ============================================================== environment ===
 # Built and verified before any process starts. A run that discovers its
 # environment is wrong after the servers are up has already perturbed the host for
@@ -111,33 +117,16 @@ if [ ${#leftovers[@]} -gt 0 ]; then
 fi
 shopt -u nullglob
 
-# --------------------------------------------------------- port parsing ---
-# `ss` writes the local address as `addr:port`, and the address half may contain
-# colons of its own. Every port test here used to be a substring match, under which
-# `[fe80::8050]:9000` — an unrelated service — read as a listener on 8050, and a
-# `\b`-anchored grep additionally matched an IPv6 address ending in `:50` when
-# looking for port 50. The port is now taken from the local-address column, after
-# the last colon, and compared as a number. Only LISTEN rows count, which also
-# drops the header.
-ss_rows_on_port() {
-  ss -lntp 2>/dev/null | awk -v want="$1" '
-    $1 == "LISTEN" && NF >= 4 {
-      n = split($4, part, ":")
-      if (n >= 2 && part[n] ~ /^[0-9]+$/ && part[n] + 0 == want + 0) print
-    }'
-}
-port_held()      { [ -n "$(ss_rows_on_port "$1")" ]; }
-pid_holds_port() { ss_rows_on_port "$2" | grep -qE "pid=$1,"; }
-pids_on_port() {            # every PID holding the socket, across all ss rows
-  ss_rows_on_port "$1" | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -un | tr '\n' ' '
-}
-
 for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
-  if port_held "$port"; then
-    echo "port ${port} is already in use — aborting rather than touching it" >&2
-    ss_rows_on_port "$port" >&2
-    exit 1
-  fi
+  st=0; port_held "$port" || st=$?
+  case "$st" in
+    0) echo "port ${port} is already in use — aborting rather than touching it" >&2
+       ss_rows_on_port "$port" >&2 || true
+       exit 1 ;;
+    2) echo "cannot read port state for ${port}; refusing to start rather than" >&2
+       echo "  assume it is free" >&2
+       exit 1 ;;
+  esac
 done
 
 # ------------------------------------------------------------ /proc helpers ---
@@ -166,7 +155,9 @@ BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
 # "Someone is still listening on 8050" is not the same as "production is the process
 # it was". A restart between the two checks would leave the port occupied and every
 # comparison in this run describing a different backend.
-PROD_PIDS_BEFORE="$(pids_on_port "$PROD_PORT")"
+prod_st=0
+PROD_PIDS_BEFORE="$(pids_on_port "$PROD_PORT")" || prod_st=$?
+[ "$prod_st" -eq 2 ] && { echo "cannot read port state for $PROD_PORT" >&2; exit 1; }
 [ -n "$PROD_PIDS_BEFORE" ] || { echo "production is not listening on $PROD_PORT" >&2; exit 1; }
 PROD_MASTER_BEFORE="$(master_of "$PROD_PIDS_BEFORE")" || {
   echo "cannot identify production's master among [$PROD_PIDS_BEFORE]" >&2; exit 1; }
@@ -199,10 +190,10 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     if [ -n "$port" ]; then
       local i
       for i in $(seq 1 20); do
-        port_held "$port" || break
+        port_released "$port" && break
         sleep 1
       done
-      if port_held "$port"; then
+      if ! port_released "$port"; then
         echo "$name: PID $pid gone but port ${port} STILL HELD — left for inspection" >&2
         return 1
       fi
@@ -226,12 +217,12 @@ stop_tracked() {            # stop_tracked <name> <port|"">
   for i in $(seq 1 20); do
     if [ -z "$port" ]; then
       [ -d "/proc/$pid" ] || break
-    elif ! port_held "$port"; then
+    elif port_released "$port"; then
       break
     fi
     sleep 1
   done
-  if [ -n "$port" ] && port_held "$port"; then
+  if [ -n "$port" ] && ! port_released "$port"; then
     echo "$name: FAILED TO RELEASE port ${port} — left for inspection" >&2
     return 1
   fi
@@ -254,37 +245,57 @@ cleanup() {
   stop_tracked dask_worker    ""            || CLEANUP_FAILED=1
   stop_tracked dask_scheduler "$SCHED_PORT" || CLEANUP_FAILED=1
 
-  # Production must be the same process it was, not merely a process.
-  local after master_after start_after boot_after
-  after="$(pids_on_port "$PROD_PORT")"
-  boot_after="$(cat /proc/sys/kernel/random/boot_id)"
-  if [ "$boot_after" != "$BOOT_ID" ]; then
+  # Production must be the same process it was, not merely a process. Each way
+  # this can go wrong is reported distinctly — "cannot tell" and "gone" and
+  # "different process" are three different facts and only one of them is benign.
+  local after boot_after master_after start_after st=0
+  after="$(pids_on_port "$PROD_PORT")" || st=$?
+  boot_after="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
+  if [ "$st" -eq 2 ]; then
+    echo "WARNING: cannot read port state; whether production still holds" >&2
+    echo "  $PROD_PORT is unknown, which is not the same as unchanged" >&2
+    CLEANUP_FAILED=1
+  elif [ "$boot_after" != "$BOOT_ID" ]; then
     echo "WARNING: the host rebooted during this run" >&2; CLEANUP_FAILED=1
   elif [ -z "$after" ]; then
-    echo "WARNING: nothing is listening on $PROD_PORT any more" >&2; CLEANUP_FAILED=1
+    echo "WARNING: nothing is listening on $PROD_PORT any more — production's" >&2
+    echo "  listener disappeared while this run was using the host" >&2
+    echo "  before: [$PROD_PIDS_BEFORE]" >&2
+    CLEANUP_FAILED=1
   else
-    master_after="$(master_of "$after" || true)"
-    start_after="$(starttime_of "${master_after:-0}" || true)"
-    # The master alone is not the whole picture. gunicorn's workers hold the same
-    # socket, and a worker that died and respawned changes the PID set while leaving
-    # the master untouched — which is exactly the collateral effect this run could
-    # cause by competing for the host's CPU and page cache. Compare the full set.
-    if [ "$master_after" != "$PROD_MASTER_BEFORE" ] || \
-       [ "$start_after" != "$PROD_START_BEFORE" ]; then
-      echo "WARNING: production's master on $PROD_PORT is not the process it was —" >&2
-      echo "  production restarted during this run" >&2
-      echo "  before: master $PROD_MASTER_BEFORE start $PROD_START_BEFORE [$PROD_PIDS_BEFORE]" >&2
-      echo "  after : master ${master_after:-?} start ${start_after:-?} [$after]" >&2
-      CLEANUP_FAILED=1
-    elif [ "$after" != "$PROD_PIDS_BEFORE" ]; then
-      echo "WARNING: production's master is unchanged but its listener set is not —" >&2
-      echo "  worker processes were recycled while this run was using the host" >&2
-      echo "  before: [$PROD_PIDS_BEFORE]" >&2
-      echo "  after : [$after]" >&2
+    master_after="$(master_of "$after")" || master_after=""
+    if [ -z "$master_after" ]; then
+      echo "WARNING: $PROD_PORT is held by [$after] but the master PID cannot be" >&2
+      echo "  resolved — a parent was unreadable, or the set has more than one root." >&2
+      echo "  Production's identity can be neither confirmed nor denied." >&2
       CLEANUP_FAILED=1
     else
-      echo "production on $PROD_PORT unchanged (master $PROD_MASTER_BEFORE," \
-           "listeners [$PROD_PIDS_BEFORE], boot id matches)"
+      start_after="$(starttime_of "$master_after")" || start_after=""
+      if [ -z "$start_after" ]; then
+        echo "WARNING: production's master $master_after has no readable start time;" >&2
+        echo "  identity cannot be confirmed" >&2
+        CLEANUP_FAILED=1
+      elif [ "$master_after" != "$PROD_MASTER_BEFORE" ] || \
+           [ "$start_after" != "$PROD_START_BEFORE" ]; then
+        echo "WARNING: production's master on $PROD_PORT is not the process it was —" >&2
+        echo "  production restarted during this run" >&2
+        echo "  before: master $PROD_MASTER_BEFORE start $PROD_START_BEFORE [$PROD_PIDS_BEFORE]" >&2
+        echo "  after : master $master_after start $start_after [$after]" >&2
+        CLEANUP_FAILED=1
+      elif [ "$after" != "$PROD_PIDS_BEFORE" ]; then
+        # The master alone is not the whole picture. gunicorn's workers hold the
+        # same inherited socket, so a worker that died and respawned changes the set
+        # while leaving the master untouched — precisely the collateral effect this
+        # run could cause by competing for the host's CPU and page cache.
+        echo "WARNING: production's master is unchanged but its listener set is not —" >&2
+        echo "  worker processes were recycled while this run was using the host" >&2
+        echo "  before: [$PROD_PIDS_BEFORE]" >&2
+        echo "  after : [$after]" >&2
+        CLEANUP_FAILED=1
+      else
+        echo "production on $PROD_PORT unchanged (master $PROD_MASTER_BEFORE," \
+             "listeners [$PROD_PIDS_BEFORE], boot id matches)"
+      fi
     fi
   fi
 
@@ -354,13 +365,18 @@ start_tracked candidate "$CAND_PORT" \
     "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
     -b "127.0.0.1:${CAND_PORT}" --timeout 120
 
+# Readiness: the OpenAPI document. It exercises the whole stack that has to be up —
+# gunicorn, the uvicorn worker, FastAPI routing — and reads **nothing** from the
+# Zarr store, so waiting for the servers to appear costs neither arm a chunk read.
+#
+# The previous probe issued a real data query, to the reference first. That gave the
+# reference a warm store handle and a populated page cache before the candidate had
+# served anything, and it did so on the one path the whole experiment measures.
 ready() {                   # ready <port>
   local out
   for _ in $(seq 1 30); do
-    # Bounded: without --max-time a hung backend makes each poll block for the
-    # default connect/read timeouts and the "30 s ceiling" is not one.
     out="$(curl -s --max-time 5 -o /dev/null -w '%{http_code} %{size_download}' \
-      "http://127.0.0.1:$1/api/woa23?lon0=135&lat0=15&parameter=temperature" || true)"
+      "http://127.0.0.1:$1/api/swagger/woa23/openapi.json" || true)"
     [ "${out%% *}" = "200" ] && [ "${out##* }" -gt 0 ] && return 0
     sleep 1
   done
@@ -368,6 +384,26 @@ ready() {                   # ready <port>
 }
 ready "$REF_PORT"  || { echo "reference not ready; see $RUN/reference.log" >&2; exit 1; }
 ready "$CAND_PORT" || { echo "candidate not ready; see $RUN/candidate.log" >&2; exit 1; }
+
+# The data path still has to work before committing to 64 contract cases — a store
+# the reference cannot open should fail here, not thirty requests in. But the probe
+# must not favour an arm either, so it runs once in each order: candidate-first,
+# then reference-first. Two requests per arm, exactly counterbalanced.
+probe() {                   # probe <label> <port>
+  local out
+  out="$(curl -s --max-time 60 -o /dev/null -w '%{http_code} %{size_download}' \
+    "http://127.0.0.1:$2/api/woa23?lon0=135&lat0=15&parameter=temperature" || true)"
+  if [ "${out%% *}" != "200" ] || [ "${out##* }" -le 0 ]; then
+    echo "$1 cannot serve the data path (got '$out'); see $RUN/$1.log" >&2
+    return 1
+  fi
+}
+for pair in "candidate:$CAND_PORT reference:$REF_PORT" \
+            "reference:$REF_PORT candidate:$CAND_PORT"; do
+  for entry in $pair; do
+    probe "${entry%%:*}" "${entry#*:}" || exit 1
+  done
+done
 echo "both arms ready"
 
 # ================================================================= provenance ===
