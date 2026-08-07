@@ -11,6 +11,10 @@
 #
 #   WOA23_D2B_GRANTED=yes ./scripts/run_controlled.sh
 #
+# Four services, six OS processes: `gunicorn -w 1` is an arbiter plus a forked
+# worker, so each API arm is two. The Dask worker runs with --no-nanny, which is one
+# rather than the two the default supervisor would make it.
+#
 # Requires D2b authorisation, which is separate from D2a and is not implied by it.
 # Nothing here touches production: not the process on 8050, not its configuration,
 # not the shared Dask scheduler on 8786, not ~/python/woa23. It does consume VM24's
@@ -37,10 +41,11 @@ RUN=$HERE/run
 VENV=$HERE/.venv
 
 if [ "${WOA23_D2B_GRANTED:-}" != "yes" ]; then
-  echo "D2b authorisation not stated. This starts FOUR processes on a production" >&2
-  echo "host: a Dask scheduler, a Dask worker, an unmodified reference API and the" >&2
-  echo "candidate API. Re-run with WOA23_D2B_GRANTED=yes once it is granted." >&2
-  echo "D2a does not imply D2b." >&2
+  echo "D2b authorisation not stated. This starts FOUR services on a production" >&2
+  echo "host — a Dask scheduler, a Dask worker, an unmodified reference API and the" >&2
+  echo "candidate API — which is SIX OS processes, because each of the two APIs is" >&2
+  echo "a gunicorn arbiter plus the worker it forks." >&2
+  echo "Re-run with WOA23_D2B_GRANTED=yes once it is granted. D2a does not imply D2b." >&2
   exit 3
 fi
 if [ "$(hostname -s)" != "$EXPECT_HOST" ]; then
@@ -58,6 +63,11 @@ mkdir -p "$RUN" results
 # these same shell options.
 # shellcheck source=lib_ports.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib_ports.sh"
+# Process identity and process-tree tracking. Every service started here is more
+# than one OS process, so cleanup is verified against a recorded tree rather than a
+# single PID. Covered offline by scripts/test_procs.sh.
+# shellcheck source=lib_procs.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_procs.sh"
 
 # ============================================================== environment ===
 # Built and verified before any process starts. A run that discovers its
@@ -129,26 +139,6 @@ for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
   esac
 done
 
-# ------------------------------------------------------------ /proc helpers ---
-starttime_of() {
-  local raw; raw="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
-  echo "${raw#*) }" | awk '{print $20}'
-}
-ppid_of() {
-  local raw; raw="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
-  echo "${raw#*) }" | awk '{print $2}'
-}
-master_of() {               # the one PID whose parent is not in the set
-  local pids="$1" roots="" p pp
-  [ -n "$pids" ] || return 1
-  for p in $pids; do
-    pp="$(ppid_of "$p")" || return 1      # unreadable parent -> ambiguous
-    case " $pids " in *" $pp "*) ;; *) roots="$roots $p" ;; esac
-  done
-  set -- $roots
-  [ $# -eq 1 ] || return 1
-  echo "$1"
-}
 BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
 
 # ------------------------------------------- production's identity, recorded ---
@@ -166,73 +156,6 @@ echo "production master $PROD_MASTER_BEFORE (start $PROD_START_BEFORE), listener
 
 # ================================================== tracked process handling ===
 CLEANUP_FAILED=0
-
-start_tracked() {           # start_tracked <name> <port|""> <cmd...>
-  local name="$1" port="$2"; shift 2
-  [ -f "$RUN/$name.pid" ] && { echo "$name already tracked" >&2; return 1; }
-  "$@" > "$RUN/$name.log" 2>&1 &
-  local pid=$!
-  echo "$pid" > "$RUN/$name.pid"
-  sleep 1
-  starttime_of "$pid" > "$RUN/$name.starttime" || {
-    echo "could not read the start time of $name (pid $pid)" >&2; return 1; }
-  echo "$name started (pid $pid${port:+, port $port})"
-}
-
-stop_tracked() {            # stop_tracked <name> <port|"">
-  local name="$1" port="${2:-}" pid now
-  [ -f "$RUN/$name.pid" ] || return 0
-  pid="$(cat "$RUN/$name.pid")"
-  now="$(starttime_of "$pid" || true)"
-
-  if [ -z "$now" ]; then
-    # A dead PID is not a released socket.
-    if [ -n "$port" ]; then
-      local i
-      for i in $(seq 1 20); do
-        port_released "$port" && break
-        sleep 1
-      done
-      if ! port_released "$port"; then
-        echo "$name: PID $pid gone but port ${port} STILL HELD — left for inspection" >&2
-        return 1
-      fi
-    fi
-    rm "$RUN/$name.pid"; [ -f "$RUN/$name.starttime" ] && rm "$RUN/$name.starttime"
-    echo "$name: process already gone, port ${port:-n/a} free"
-    return 0
-  fi
-  if [ "$now" != "$(cat "$RUN/$name.starttime" 2>/dev/null || echo none)" ]; then
-    echo "$name: REFUSING TO KILL — PID $pid has a different start time; the PID was" >&2
-    echo "  recycled. Left in place for inspection." >&2
-    return 1
-  fi
-  if [ -n "$port" ] && ! pid_holds_port "$pid" "$port"; then
-    echo "$name: REFUSING TO KILL — PID $pid no longer holds port ${port}." >&2
-    return 1
-  fi
-
-  kill "$pid" 2>/dev/null || true
-  local i
-  for i in $(seq 1 20); do
-    if [ -z "$port" ]; then
-      [ -d "/proc/$pid" ] || break
-    elif port_released "$port"; then
-      break
-    fi
-    sleep 1
-  done
-  if [ -n "$port" ] && ! port_released "$port"; then
-    echo "$name: FAILED TO RELEASE port ${port} — left for inspection" >&2
-    return 1
-  fi
-  if [ -z "$port" ] && [ -d "/proc/$pid" ]; then
-    echo "$name: PID $pid did not exit — left for inspection" >&2
-    return 1
-  fi
-  rm "$RUN/$name.pid"; [ -f "$RUN/$name.starttime" ] && rm "$RUN/$name.starttime"
-  echo "$name stopped, port ${port:-n/a} released"
-}
 
 cleanup() {
   local rc=$?
@@ -346,9 +269,12 @@ start_tracked dask_scheduler "$SCHED_PORT" \
   "$VENV/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
 for _ in $(seq 1 30); do port_held "$SCHED_PORT" && break; sleep 1; done
 port_held "$SCHED_PORT" || { echo "scheduler did not bind" >&2; exit 1; }
+# --no-nanny: `dask worker` defaults to --nanny, a supervisor process that forks
+# the worker. For a single worker the nanny buys nothing here and costs an extra
+# process to account for, so the worker runs in this process directly.
 start_tracked dask_worker "" \
   "$VENV/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
-  --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard
+  --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard --no-nanny
 
 # ==================================================================== the arms ===
 # One venv, both arms. That is the whole point of 5.2A: the packages stop being a
@@ -405,6 +331,17 @@ for pair in "candidate:$CAND_PORT reference:$REF_PORT" \
   done
 done
 echo "both arms ready"
+
+# Record each service's whole process tree, now that the children exist. A gunicorn
+# arbiter has not forked its worker in the first second after exec, so a snapshot
+# taken inside start_tracked would record the arbiter alone — which is exactly the
+# accounting error this run is being asked to avoid repeating.
+echo "== process trees (what cleanup will be held to) =="
+for svc in dask_scheduler dask_worker reference candidate; do
+  record_tree "$svc"
+done
+n_procs=$(cat "$RUN"/*.tree | wc -l | tr -d ' ')
+echo "  $n_procs OS processes started by this run"
 
 # ================================================================= provenance ===
 echo "== provenance =="
@@ -481,5 +418,6 @@ echo "artefacts: results/d2b_contract.json results/d2b_paired.json"
 echo "           results/d2b_meta_{candidate,reference}.json"
 echo "           results/d2b_noise_pilot_{reference,candidate}.json"
 echo "           results/d2b_environment.json"
-echo "== done; the trap now stops all four processes, verifies the ports, and"
-echo "   confirms production is the same process it was =="
+echo "== done; the trap now stops all four services, verifies every process in"
+echo "   their recorded trees has exited, verifies the ports, and confirms"
+echo "   production is the same process it was =="

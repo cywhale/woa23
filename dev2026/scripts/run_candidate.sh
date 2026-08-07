@@ -78,6 +78,13 @@ mkdir -p run results
 # scripts/test_ports.sh against a captured `ss` fixture.
 # shellcheck source=lib_ports.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib_ports.sh"
+# Process identity and process-tree tracking. `gunicorn -w 1` is an arbiter plus a
+# forked worker, so the PID this script launches is not the whole service.
+# Covered offline by scripts/test_procs.sh.
+# shellcheck source=lib_procs.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_procs.sh"
+RUN="$HERE/run"
+TRACK="candidate_${PORT}"
 
 st=0; port_held "$PORT" || st=$?
 case "$st" in
@@ -94,7 +101,7 @@ esac
 # port — and checking only the port would let this run overwrite that record and
 # orphan whatever it was pointing at. The leftover state has to be dealt with by a
 # person, not stepped over.
-for stale in "$PIDFILE" "$STARTFILE"; do
+for stale in "$PIDFILE" "$STARTFILE" "$RUN/$TRACK.tree"; do
   if [ -e "$stale" ]; then
     echo "leftover state from a previous run: $stale" >&2
     if [ -f "$PIDFILE" ]; then
@@ -112,22 +119,18 @@ for stale in "$PIDFILE" "$STARTFILE"; do
 done
 
 # --- process identity -------------------------------------------------------
-# A pidfile is a claim, not proof. PIDs are recycled, so a stale one can name a
-# process that has nothing to do with us. Field 22 of /proc/<pid>/stat is the
-# process start time, which distinguishes a recycled PID from the original.
-
-starttime_of() {
-  local pid="$1" raw
-  raw="$(cat "/proc/$pid/stat" 2>/dev/null)" || return 1
-  echo "${raw#*) }" | awk '{print $20}'
-}
+# A pidfile is a claim, not proof, and one PID is not a service. PIDs are recycled,
+# so a stale one can name an unrelated process; and `gunicorn -w 1` is an arbiter
+# that forks a worker, so killing the tracked PID releases the port while the worker
+# may still be running. `starttime_of`, `record_tree` and `tree_survivors` come from
+# lib_procs.sh.
 
 holds_port() {
   pid_holds_port "$1" "$PORT"
 }
 
 stop_candidate() {
-  local rc=$? pid now
+  local rc=$? pid now surv
   [ -f "$PIDFILE" ] || return $rc
   pid="$(cat "$PIDFILE")"
 
@@ -136,20 +139,26 @@ stop_candidate() {
     # A dead PID is not a released socket: a surviving worker, or something else
     # that grabbed the port, can still hold it. Reporting success here would leave
     # the next preflight to discover it.
-    echo "PID $pid is already gone — checking whether port ${PORT} is free" >&2
+    echo "PID $pid is already gone — accounting for its children and the port" >&2
     local j
     for j in $(seq 1 20); do
-      if port_released "$PORT"; then
+      if [ -z "$(tree_survivors "$TRACK")" ] && port_released "$PORT"; then
         rm "$PIDFILE"
         [ -f "$STARTFILE" ] && rm "$STARTFILE"
-        echo "port ${PORT} is free; pidfile removed"
+        [ -f "$RUN/$TRACK.tree" ] && rm "$RUN/$TRACK.tree"
+        echo "whole tree exited and port ${PORT} is free; state removed"
         return $rc
       fi
       sleep 1
     done
-    echo "PID $pid is gone but port ${PORT} is STILL HELD:" >&2
-    ss_rows_on_port "$PORT" >&2 || true
-    echo "pidfile left in place; do not start another instance until this is resolved" >&2
+    surv="$(tree_survivors "$TRACK")"
+    if [ -n "$surv" ]; then
+      echo "PID $pid is gone but its child process(es) are not: $surv" >&2
+    else
+      echo "PID $pid is gone but port ${PORT} could not be confirmed free:" >&2
+      ss_rows_on_port "$PORT" >&2 || true
+    fi
+    echo "state left in place; do not start another instance until this is resolved" >&2
     return 1
   fi
   if [ "$now" != "$(cat "$STARTFILE" 2>/dev/null || echo none)" ]; then
@@ -162,20 +171,27 @@ stop_candidate() {
     return 1
   fi
 
+  refresh_tree "$TRACK" "$pid"
   kill "$pid" 2>/dev/null || true
   local i
   for i in $(seq 1 20); do
-    if port_released "$PORT"; then
-      # Only once the port is confirmed released. A stop that reports success while
-      # something still holds the socket is worse than no stop at all.
+    # Both conditions. A released socket alone is not proof: the arbiter closing it
+    # says nothing about the worker it forked.
+    if [ -z "$(tree_survivors "$TRACK")" ] && port_released "$PORT"; then
       rm "$PIDFILE"
       [ -f "$STARTFILE" ] && rm "$STARTFILE"
-      echo "port ${PORT} released, pidfile removed"
+      [ -f "$RUN/$TRACK.tree" ] && rm "$RUN/$TRACK.tree"
+      echo "whole tree exited, port ${PORT} confirmed free, state removed"
       return $rc
     fi
     sleep 1
   done
-  echo "FAILED TO RELEASE port ${PORT} after 20 s — left in place for inspection" >&2
+  surv="$(tree_survivors "$TRACK")"
+  if [ -n "$surv" ]; then
+    echo "still running after stop: PID(s) $surv — left for inspection" >&2
+  else
+    echo "port ${PORT} could not be confirmed free after 20 s — left for inspection" >&2
+  fi
   return 1
 }
 # Cleans up THIS run only, and only after proving the PID is still the process it
@@ -208,6 +224,10 @@ if [ "$ready" != "1" ]; then
   exit 1
 fi
 echo "candidate ready on ${PORT} (pid $CANDIDATE_PID)"
+
+# Now that gunicorn has forked its worker, record the whole tree. Taken at launch
+# this would have recorded the arbiter alone.
+record_tree "$TRACK"   # $RUN/$TRACK.pid is $PIDFILE — same file, same naming
 
 # State the two things the campaign's validity rests on, before spending a single
 # production request on it.
