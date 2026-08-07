@@ -217,6 +217,68 @@ done
 rm "$RUN/bad.tree"
 
 echo
+echo "a live child is never silently dropped from the tree"
+# Both writers could fail to see everything, and both used to swallow it: process
+# enumeration failing vanished into a command substitution, and a PID that could not
+# be recorded was skipped with `continue`. Either left a SHORT tree — worse than a
+# corrupt one, because it looks entirely valid and reports every missing child as
+# exited.
+
+bash -c 'sleep 40 & sleep 40' & dropp=$!; STRAYS="$STRAYS $dropp"
+sleep 1
+echo "$dropp" > "$RUN/drop.pid"; starttime_of "$dropp" > "$RUN/drop.starttime"
+check "the parent really does have children" "yes" \
+      "$([ -n "$(descendants_of "$dropp")" ] && echo yes || echo no)"
+
+# (a) enumeration fails outright. Overridden here; re-sourcing the library below
+# puts the real definition back.
+_pid_ppid_snapshot() { return 1; }
+set +e; record_tree drop >/dev/null 2>&1; st=$?; set -e
+check "record_tree reports failure when enumeration fails" "1" "$st"
+check "the tree records why" "1" \
+      "$(grep -c '^incomplete:process-enumeration-failed' "$RUN/drop.tree")"
+check "the tracked pid is still there — only completeness is in doubt" "yes" \
+      "$(contains "$(tree_pids drop)" "$dropp")"
+set +e; tree_survivors drop >/dev/null 2>&1; st=$?; set -e
+check "tree_survivors cannot determine, rather than reporting none" "2" "$st"
+set +e; out="$(stop_tracked drop "" 2>&1)"; st=$?; set -e
+check "stop_tracked fails rather than reporting a clean stop" "1" "$st"
+check "state is kept" "yes" "$([ -f "$RUN/drop.pid" ] && echo yes || echo no)"
+# shellcheck source=lib_procs.sh
+. "$HERE/lib_procs.sh"      # restores the real definitions
+check "the real enumeration is back" "yes" \
+      "$([ -n "$(_pid_ppid_snapshot | head -1)" ] && echo yes || echo no)"
+kill "$dropp" 2>/dev/null || true
+rm "$RUN/drop.pid" "$RUN/drop.starttime" "$RUN/drop.tree"
+
+# (b) a process that is live but cannot be recorded. $FAKE/5555 is a pid directory
+# with no stat file: pid_exists sees it, starttime_of cannot read it.
+: > "$RUN/one.tree"
+set +e; PROC_ROOT="$FAKE" _record_one one 5555 >/dev/null 2>&1; st=$?; set -e
+check "_record_one fails on a live PID it cannot read" "1" "$st"
+check "and marks the tree, naming the PID" "1" \
+      "$(grep -c '^incomplete:unreadable-identity-5555' "$RUN/one.tree")"
+check "the unrecordable PID is absent from the pid lines" "no" \
+      "$(contains "$(tree_pids one)" "5555")"
+
+# (c) a process whose recorded identity would be malformed is also not dropped.
+mkdir -p "$FAKE/6666"
+printf '6666 (bad) S 4320 6666 0 0 -1 0 0 0 0 0 1 2 0 0 20 0 1 0 not-a-number 1 2\n' \
+  > "$FAKE/6666/stat"
+: > "$RUN/two.tree"
+set +e; PROC_ROOT="$FAKE" _record_one two 6666 >/dev/null 2>&1; st=$?; set -e
+check "_record_one fails on a malformed start time" "1" "$st"
+check "and marks the tree" "1" "$(grep -c '^incomplete:malformed-token-6666' "$RUN/two.tree")"
+
+# (d) the benign race: a child that exited between the snapshot and the read is
+# not a gap, and must not fail the write.
+: > "$RUN/three.tree"
+set +e; _record_one three 999999 >/dev/null 2>&1; st=$?; set -e
+check "a PID that has exited is not an error" "0" "$st"
+check "and leaves no marker" "0" "$(grep -c '^incomplete:' "$RUN/three.tree")"
+rm "$RUN/one.tree" "$RUN/two.tree" "$RUN/three.tree"
+
+echo
 echo "a stranded child fails the stop, even with the port free"
 # The exact defect: kill the parent only. The child is orphaned and keeps running,
 # and the listening socket — had there been one — is already released.

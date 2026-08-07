@@ -327,7 +327,10 @@ AUTHORISED_TOTAL=6
 n_procs=0
 seen_pids=""
 for svc in dask_scheduler dask_worker reference candidate; do
-  record_tree "$svc"
+  record_tree "$svc" || {
+    echo "cannot record a complete process tree for $svc — the authorised set" >&2
+    echo "  cannot be verified, so this run stops here and the trap cleans up" >&2
+    exit 1; }
   pids="$(tree_pids "$svc")"
   n="$(printf '%s' "$pids" | wc -w | tr -d ' ')"
   want="$(expected_procs "$svc")"

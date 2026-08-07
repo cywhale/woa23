@@ -267,6 +267,17 @@ is now reported, not required, and it is still part of the *success* criterion: 
 stop is clean only when every process in the tree has exited **and** the port is
 confirmed free.
 
+**A tree that omits a live process is worse than one that is corrupt**, because it
+looks valid. Both writers could fail to see everything and both used to carry on:
+`descendants_of` failing vanished into a command substitution, so the loop ran over
+nothing and recorded the master alone, and a PID that could not be recorded was
+skipped. Either way the missing children stopped being cleanup's problem and were
+reported as exited. Enumeration failure and an unrecordable live PID are now
+recorded *in the file* as an `incomplete:<reason>` line: the tree can still identify
+the tracked process, so cleanup may still signal it, but it can never be read as
+"everything exited". A process that simply exited between the snapshot and the read
+is a benign race and is not a gap.
+
 **A recorded start time is validated, not just compared.** The token is what
 distinguishes a recycled PID from the original, so the tree must be able to tell
 "a legal but different start time" (the PID was recycled — a normal observation)
@@ -326,7 +337,7 @@ uv run python -m bench.test_environment    # 22
 uv run python -m bench.test_contract       # 40
 uv run python -m bench.test_paired_stats   # 29
 ./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
-./scripts/test_procs.sh                    # 78, with real forked processes
+./scripts/test_procs.sh                    # 93, with real forked processes
 ```
 
 `test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
@@ -341,7 +352,7 @@ contain `) `. Stripping to the *first* `) ` instead of the last made
 and since the start time is the token that distinguishes a recycled PID from the
 original, two such processes both parsed as `0` and compared equal, so the
 recycled-PID guard would have passed on a process that was not ours. The remaining
-58 assertions need live processes.
+73 assertions need live processes.
 
 The author's own runs used the `ps` path; the `/proc` path is covered by the
 synthetic fixture but has not been exercised against a real Linux `/proc`. Running

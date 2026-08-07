@@ -179,51 +179,96 @@ descendants_of() {
   printf '%s' "${out# }"
 }
 
+# A tree that omits a live process is worse than one that is corrupt: it looks
+# valid. Both writers below can fail to see everything — process enumeration can
+# fail outright, and a PID found in the snapshot can become unreadable before its
+# start time is read — and both used to swallow that and carry on, leaving a
+# short tree that `tree_survivors` then reported as fully exited.
+#
+# So incompleteness is recorded *in the file*. A tree carrying this line can still
+# be used to identify the tracked process (so cleanup may still signal it), but it
+# can never be read as "everything exited".
+_mark_incomplete() {        # _mark_incomplete <name> <reason>
+  printf 'incomplete:%s\n' "$2" >> "$RUN/$1.tree"
+}
+
+# Append `pid:starttime` for one PID. Status 1 — and a marker — when the process is
+# live but cannot be recorded; status 0 with nothing written when it has simply
+# exited since the snapshot, which is a benign race, not a gap.
+_record_one() {             # _record_one <name> <pid>
+  local name="$1" p="$2" st
+  if ! st="$(starttime_of "$p" 2>/dev/null)" || [ -z "$st" ]; then
+    if pid_exists "$p"; then
+      echo "$name: PID $p is live but its start time cannot be read; the tree" >&2
+      echo "  cannot be completed" >&2
+      _mark_incomplete "$name" "unreadable-identity-$p"
+      return 1
+    fi
+    return 0                # exited during the walk
+  fi
+  if ! _valid_starttime "$st"; then
+    echo "$name: PID $p reported a malformed start time '$st'" >&2
+    _mark_incomplete "$name" "malformed-token-$p"
+    return 1
+  fi
+  printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
+}
+
 # Snapshot <name>'s whole tree. The file is self-describing: a `boot:<id>` header
-# followed by `pid:starttime` lines. Without a header that matches the running
-# kernel the PIDs below it cannot be interpreted at all, so the header and the body
-# live in one file rather than two that could drift apart.
+# followed by `pid:starttime` lines, plus an `incomplete:<reason>` line if anything
+# could not be captured. Without a header that matches the running kernel the PIDs
+# below it cannot be interpreted at all, so header and body live in one file rather
+# than two that could drift apart.
 #
 # Call once the children exist — a gunicorn arbiter has not forked its worker in the
 # first moments after exec, so a snapshot taken at launch records the arbiter alone.
 record_tree() {             # record_tree <name>
-  local name="$1" pid p st boot
+  local name="$1" pid p kids rc=0 boot
   pid="$(cat "$RUN/$name.pid")" || return 1
   boot="$(boot_id)" || { echo "cannot read the host boot id" >&2; return 1; }
   printf 'boot:%s\n' "$boot" > "$RUN/$name.tree"
-  # shellcheck disable=SC2046
-  for p in $pid $(descendants_of "$pid"); do
-    st="$(starttime_of "$p" || true)"
-    [ -n "$st" ] || continue
-    # Never record what tree_survivors would later have to reject.
-    _valid_starttime "$st" || {
-      echo "refusing to record PID $p: start time '$st' is not a well-formed" >&2
-      echo "  token on this host" >&2
-      return 1; }
-    printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
+
+  # Explicit status. In `for p in $(descendants_of "$pid")` the failure vanishes
+  # into the command substitution and the loop simply runs over nothing, so a
+  # broken enumeration produced a tree holding the master alone — and every child
+  # of it silently stopped being cleanup's problem.
+  if ! kids="$(descendants_of "$pid")"; then
+    echo "$name: cannot enumerate processes; the tree cannot be completed" >&2
+    _mark_incomplete "$name" "process-enumeration-failed"
+    rc=1; kids=""
+  fi
+  for p in $pid $kids; do
+    _record_one "$name" "$p" || rc=1
   done
-  printf '%s tree: %s\n' "$name" "$(tree_pids "$name")"
+  printf '%s tree: %s%s\n' "$name" "$(tree_pids "$name")" \
+    "$([ "$rc" -ne 0 ] && echo "  (INCOMPLETE)" || true)"
+  return $rc
 }
 
-# The PIDs in a recorded tree, header excluded.
+# The PIDs in a recorded tree; header and markers excluded.
 tree_pids() {               # tree_pids <name>
   [ -f "$RUN/$1.tree" ] || { printf ''; return 0; }
-  grep -v '^boot:' "$RUN/$1.tree" | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//'
+  grep -Ev '^(boot|incomplete):' "$RUN/$1.tree" | cut -d: -f1 | tr '\n' ' ' \
+    | sed 's/ $//'
 }
 
 # Merge any children that appeared since the snapshot. gunicorn respawns a worker
 # that died, so the tree recorded after startup can be stale by the time the run
 # ends; a respawned worker is just as much ours as the one it replaced.
 refresh_tree() {            # refresh_tree <name> <master-pid>
-  local name="$1" pid="$2" p st
+  local name="$1" pid="$2" p kids rc=0
   [ -f "$RUN/$name.tree" ] || return 1
-  for p in $(descendants_of "$pid"); do
+  if ! kids="$(descendants_of "$pid")"; then
+    echo "$name: cannot enumerate processes; the tree cannot be brought up to" >&2
+    echo "  date" >&2
+    _mark_incomplete "$name" "process-enumeration-failed"
+    return 1
+  fi
+  for p in $kids; do
     grep -q "^$p:" "$RUN/$name.tree" 2>/dev/null && continue
-    st="$(starttime_of "$p" || true)"
-    [ -n "$st" ] || continue
-    _valid_starttime "$st" || return 1
-    printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
+    _record_one "$name" "$p" || rc=1
   done
+  return $rc
 }
 
 # Status 2 — "cannot be interpreted" — when the tree has no boot header, the header
@@ -251,7 +296,12 @@ tree_survivors() {          # tree_survivors <name>
   tree_boot_matches "$name" || return 2
   while IFS= read -r line; do
     [ -n "$line" ] || continue
-    case "$line" in boot:*) continue ;; esac
+    case "$line" in
+      boot:*)       continue ;;
+      # The writer could not see everything. Whether every process exited is
+      # therefore unknown, and unknown is never an all-clear.
+      incomplete:*) return 2 ;;
+    esac
 
     # A line that cannot be parsed makes the whole tree uninterpretable. Skipping it
     # would silently shrink the set of processes cleanup is held to.
