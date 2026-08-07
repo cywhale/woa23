@@ -45,6 +45,50 @@ pid_holds_port() { return 0; }
 # shellcheck source=lib_procs.sh
 . "$HERE/lib_procs.sh"
 
+# ---------------------------------------------------------------------------
+# The Linux parsing path, verified anywhere.
+#
+# VM24 reads /proc and never invokes `ps`; this laptop has no /proc, so without
+# this the production path would go untested on the machine where the tests are
+# actually run. A synthetic procfs exercises the parsing, including the case that
+# breaks naive field splitting: `comm` is parenthesised and may itself contain
+# spaces and brackets.
+echo "the Linux /proc parsing path"
+FAKE="$RUN/fakeproc"
+mkdir -p "$FAKE/1" "$FAKE/4320" "$FAKE/4321" "$FAKE/999"
+printf '1 (systemd) S 0 1 1 0 -1 4194560 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/1/stat"
+printf '4320 (gunicorn) S 1 4320 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/4320/stat"
+# A comm with a space and nested parentheses — the reason the strip is greedy.
+printf '4321 (my (weird) app) S 4320 4320 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/4321/stat"
+printf '999 (dask) S 4321 999 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/999/stat"
+
+snap="$(PROC_ROOT="$FAKE" _pid_ppid_snapshot)"
+check "every process is listed" "4" "$(printf '%s\n' "$snap" | wc -l | tr -d ' ')"
+check "a plain comm parses" "yes" "$(has_text "$snap" "4320 1")"
+check "a comm containing spaces and parens parses" "yes" "$(has_text "$snap" "4321 4320")"
+check "the init entry parses" "yes" "$(has_text "$snap" "1 0")"
+kids="$(PROC_ROOT="$FAKE" descendants_of 4320)"
+check "descendants are found through /proc" "yes" "$(contains "$kids" "4321")"
+check "and recursively, at depth 2" "yes" "$(contains "$kids" "999")"
+check "an unrelated process is not included" "no" "$(contains "$kids" "1")"
+
+echo
+# These tests need to enumerate processes and read their start times. A sandbox that
+# denies `ps` cannot do that, and the run would otherwise die before the first
+# assertion and read as a failure. Exit 77 — the conventional "skipped" code — so a
+# harness can tell "cannot verify here" from "verified and wrong".
+#
+# On Linux this reads /proc directly and never invokes `ps`, so a denial here does
+# not say anything about the path taken on VM24.
+if ! can_enumerate_processes; then
+  echo "SKIPPED: this machine cannot enumerate processes (no readable /proc, and"
+  echo "  \`ps\` is unavailable or denied). These tests verify nothing here."
+  echo "  Source: $([ -r /proc/1/stat ] && echo /proc || echo ps)"
+  exit 77
+fi
+echo "process enumeration: $([ -r /proc/1/stat ] && echo "/proc (the VM24 path)" \
+                             || echo "ps (no procfs on this machine)")"
+
 echo "the tree is discovered, not assumed"
 # A parent that forks a child and waits, like a gunicorn arbiter.
 bash -c 'sleep 30 & echo $! > "$RUN/child.pid"; sleep 30' &
@@ -114,11 +158,49 @@ check "the wording does not overclaim" "no" "$(has_text "$out" "FAILED TO RELEAS
 PORT_IS_FREE=yes
 
 echo
+echo "a tree from another boot is never acted on"
+# After a reboot, PIDs are reused and start times are measured from boot — so the
+# same pid:starttime pair can name someone else's process. The only safe action is
+# none: do not signal, do not delete state.
+sleep 60 & bootp=$!; STRAYS="$STRAYS $bootp"
+sleep 1
+echo "$bootp" > "$RUN/b.pid"; starttime_of "$bootp" > "$RUN/b.starttime"
+record_tree b >/dev/null
+real_boot="$(boot_id)"
+# Rewrite the header as if the tree had been recorded before a reboot.
+sed "s|^boot:.*|boot:0000-a-different-boot-0000|" "$RUN/b.tree" > "$RUN/b.tree.tmp"
+mv "$RUN/b.tree.tmp" "$RUN/b.tree"
+
+set +e; tree_survivors b >/dev/null 2>&1; st=$?; set -e
+check "tree_survivors reports 2, not an empty all-clear" "2" "$st"
+set +e; out="$(stop_tracked b 8099 2>&1)"; st=$?; set -e
+check "stop_tracked refuses and returns non-zero" "1" "$st"
+check "it says why" "yes" "$(has_text "$out" "not from the")"
+check "nothing was signalled — the process is still alive" "alive" \
+      "$(kill -0 "$bootp" 2>/dev/null && echo alive || echo gone)"
+check "the pidfile is kept" "yes" "$([ -f "$RUN/b.pid" ] && echo yes || echo no)"
+check "the tree file is kept" "yes" "$([ -f "$RUN/b.tree" ] && echo yes || echo no)"
+
+# A tree with no header at all is equally uninterpretable.
+grep -v '^boot:' "$RUN/b.tree" > "$RUN/b.tree.tmp"; mv "$RUN/b.tree.tmp" "$RUN/b.tree"
+set +e; tree_survivors b >/dev/null 2>&1; st=$?; set -e
+check "a tree with no boot header is also status 2" "2" "$st"
+
+# And the matching header is what makes it usable again.
+printf 'boot:%s\n' "$real_boot" > "$RUN/b.tree.tmp"
+grep -v '^boot:' "$RUN/b.tree" >> "$RUN/b.tree.tmp"; mv "$RUN/b.tree.tmp" "$RUN/b.tree"
+set +e; surv="$(tree_survivors b)"; st=$?; set -e
+check "with the real boot id it is usable again" "0" "$st"
+check "and the live process is seen as a survivor" "yes" "$(contains "$surv" "$bootp")"
+kill "$bootp" 2>/dev/null || true
+
+echo
 echo "a recycled PID is not a survivor"
 sleep 60 & rec=$!; STRAYS="$STRAYS $rec"
 sleep 1
 echo "$rec" > "$RUN/r.pid"; starttime_of "$rec" > "$RUN/r.starttime"
-printf '%s:%s\n' "$rec" "definitely-not-its-start-time" > "$RUN/r.tree"
+{ printf 'boot:%s\n' "$(boot_id)"
+  printf '%s:%s\n' "$rec" "definitely-not-its-start-time"; } > "$RUN/r.tree"
 check "a live PID whose start time differs is not counted" "" "$(tree_survivors r)"
 kill "$rec" 2>/dev/null || true
 

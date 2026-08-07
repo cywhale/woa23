@@ -311,6 +311,47 @@ ready() {                   # ready <port>
 ready "$REF_PORT"  || { echo "reference not ready; see $RUN/reference.log" >&2; exit 1; }
 ready "$CAND_PORT" || { echo "candidate not ready; see $RUN/candidate.log" >&2; exit 1; }
 
+# The authorisation is for a specific set of processes, so the set is *verified*,
+# not merely printed. A run that has five or seven is outside what was granted —
+# a nanny that reappeared, a second gunicorn worker, a scheduler that forked — and
+# it stops here, before the gates, with the trap cleaning up what it started.
+echo "== process trees (what the authorisation covers and cleanup is held to) =="
+expected_procs() {
+  case "$1" in
+    dask_scheduler|dask_worker) echo 1 ;;   # --no-nanny; the default would be 2
+    reference|candidate)        echo 2 ;;   # gunicorn arbiter + one forked worker
+    *)                          echo 0 ;;
+  esac
+}
+AUTHORISED_TOTAL=6
+n_procs=0
+seen_pids=""
+for svc in dask_scheduler dask_worker reference candidate; do
+  record_tree "$svc"
+  pids="$(tree_pids "$svc")"
+  n="$(printf '%s' "$pids" | wc -w | tr -d ' ')"
+  want="$(expected_procs "$svc")"
+  if [ "$n" -ne "$want" ]; then
+    echo "$svc has $n OS process(es), expected $want: [$pids]" >&2
+    echo "  This run is outside the process count the authorisation was granted for." >&2
+    exit 1
+  fi
+  for pid in $pids; do
+    case " $seen_pids " in
+      *" $pid "*) echo "PID $pid appears in more than one service tree — the trees" >&2
+                  echo "  overlap, so cleanup cannot attribute processes correctly" >&2
+                  exit 1 ;;
+    esac
+    seen_pids="$seen_pids $pid"
+  done
+  n_procs=$((n_procs + n))
+done
+if [ "$n_procs" -ne "$AUTHORISED_TOTAL" ]; then
+  echo "this run has $n_procs OS processes; the authorisation is for $AUTHORISED_TOTAL" >&2
+  exit 1
+fi
+echo "  $n_procs OS processes, matching the authorised set: [$seen_pids ]"
+
 # The data path still has to work before committing to 64 contract cases — a store
 # the reference cannot open should fail here, not thirty requests in. But the probe
 # must not favour an arm either, so it runs once in each order: candidate-first,
@@ -336,12 +377,6 @@ echo "both arms ready"
 # arbiter has not forked its worker in the first second after exec, so a snapshot
 # taken inside start_tracked would record the arbiter alone — which is exactly the
 # accounting error this run is being asked to avoid repeating.
-echo "== process trees (what cleanup will be held to) =="
-for svc in dask_scheduler dask_worker reference candidate; do
-  record_tree "$svc"
-done
-n_procs=$(cat "$RUN"/*.tree | wc -l | tr -d ' ')
-echo "  $n_procs OS processes started by this run"
 
 # ================================================================= provenance ===
 echo "== provenance =="

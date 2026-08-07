@@ -242,6 +242,15 @@ State files are now removed only when **every** recorded process has exited *and
 the port is confirmed free. A PID whose start time has changed is treated as
 recycled, not as a survivor, so the check does not raise false alarms either.
 
+**Every recorded tree is stamped with the host's boot id**, in the tree file itself
+rather than beside it, so a tree without a matching header cannot be interpreted at
+all. This matters because a PID is reused after a reboot *and* its start time is
+measured from boot — so the same `pid:starttime` pair can name a completely
+different process, belonging to someone else. On a mismatch, a missing header, or an
+unreadable boot id, `stop_tracked` refuses before signalling anything: nothing is
+killed, nothing is deleted, the run fails and the state is left for a person. The
+same check runs again after the wait, in case the boot id changed mid-stop.
+
 Survivors are named and left alone. They are identity-verified as ours, so
 signalling them would be defensible, but the standing rule here is to refuse to act
 on anything ambiguous and leave it for a person — so the run fails loudly with the
@@ -275,6 +284,32 @@ any change to production's package environment.
 
 ## 9. What is ready now
 
+**How to verify this without VM24.** Every check below runs offline:
+
+```
+uv run python -m bench.test_provenance     # 259
+uv run python -m bench.test_environment    # 22
+uv run python -m bench.test_contract       # 40
+uv run python -m bench.test_paired_stats   # 29
+./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
+./scripts/test_procs.sh                    # 34, with real forked processes
+```
+
+`test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
+invokes `ps`; on a machine without procfs it falls back to `ps`, and in a sandbox
+that denies `ps` it **exits 77 (skipped) with an explanation** rather than dying
+before the first assertion and reading as a failure. Its first seven assertions
+exercise the Linux parsing path against a synthetic procfs and run everywhere,
+including the sandbox — they cover the case that defeats naive field splitting, a
+`comm` containing spaces and parentheses. The remaining 27 need live processes.
+
+The author's own runs used the `ps` path; the `/proc` path is covered by the
+synthetic fixture but has not been exercised against a real Linux `/proc`. Running
+`./scripts/test_procs.sh` on VM24 would close that gap — it starts a handful of
+`sleep` processes and no service, but it does start processes on the host, so it is
+**not** covered by any authorisation granted so far and is not included in this
+request. It can be added if that evidence is wanted before the run.
+
 `scripts/run_controlled.sh` is written, syntax-checked, and its refusal paths are
 verified: it exits 3 without `WOA23_D2B_GRANTED=yes`, exits 4 off `odb24` or without
 `env -C`, and exits 1 on a held port, leftover run state, an existing work directory,
@@ -283,10 +318,18 @@ a reference source digest that does not match production, arms whose environment
 disagree with each other or with the environment this run built, a failed contract
 gate, or a cleanup that did not complete.
 
-Its refusal message names **four** processes, which is what it starts. The count is
-worth stating correctly in the message the PI reads at the moment of granting: an
-earlier draft said three, having omitted the Dask worker — the process that does the
-actual reading on the reference arm.
+Its refusal message names **four services / six OS processes**, which is what it
+starts. The count has been wrong twice in the message the PI reads at the moment of
+granting: a draft said three, omitting the Dask worker; the next said four, counting
+services as processes and missing that `gunicorn -w 1` is an arbiter plus a forked
+worker. It is now stated both ways so neither reading can be taken for the other.
+
+**The count is enforced, not printed.** Before the data probe and before either
+gate, each service's tree is checked against what the authorisation covers — Dask
+scheduler 1, Dask worker 1, reference 2, candidate 2 — with no PID appearing in two
+trees and a total of exactly 6. A five or a seven aborts the run there, and the trap
+cleans up what was started. Printing a number the run then ignores would let an
+execution drift outside its authorisation while looking compliant.
 
 ## 10. Known imprecision, stated rather than discovered later
 

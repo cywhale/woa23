@@ -55,10 +55,59 @@ master_of() {
   echo "$1"
 }
 
-# Every PID below $1, at any depth. One `ps` snapshot, so the walk is consistent.
+# The host's boot identifier. A PID means nothing across a reboot: the number is
+# reused and the start time is measured from boot, so a *different* process can
+# carry the same pid:starttime pair. Every recorded tree is stamped with this.
+boot_id() {
+  local raw
+  if [ -r /proc/sys/kernel/random/boot_id ]; then
+    cat /proc/sys/kernel/random/boot_id
+    return 0
+  fi
+  # No procfs — the offline tests. Boot time is a stable per-boot token.
+  raw="$(sysctl -n kern.boottime 2>/dev/null)" || return 1
+  [ -n "$raw" ] || return 1
+  printf '%s\n' "$raw" | tr -s ' ' '_'
+}
+
+# `pid ppid` for every process. On Linux this reads procfs directly and never
+# invokes `ps`, so the path taken on VM24 needs no process-listing privilege beyond
+# what /proc already grants. The `ps` branch is for machines without procfs.
+# $PROC_ROOT is a test seam only: scripts/test_procs.sh points it at a synthetic
+# procfs so the Linux parsing path — the one VM24 takes — can be verified on a
+# machine that has no /proc. It is never set in the runners.
+_pid_ppid_snapshot() {
+  local root="${PROC_ROOT:-/proc}"
+  if [ -r "$root/1/stat" ]; then
+    # One awk over every stat file. The comm field is parenthesised and may itself
+    # contain spaces and brackets, so it is stripped greedily before splitting.
+    awk 'FNR==1 {
+           line = $0; pid = $1
+           sub(/^[0-9]+ \(.*\) /, "", line)
+           split(line, f, " ")
+           print pid, f[2]
+         }' "$root"/[0-9]*/stat 2>/dev/null
+    return 0
+  fi
+  ps -eo pid=,ppid= 2>/dev/null
+}
+
+# True when this machine can enumerate processes at all. The offline tests check
+# this first so a sandbox that denies `ps` reports "cannot verify here" instead of
+# dying before the first assertion and looking like a failure.
+can_enumerate_processes() {
+  local snap
+  snap="$(_pid_ppid_snapshot)" || return 1
+  [ -n "$snap" ] || return 1
+  starttime_of $$ >/dev/null 2>&1 || return 1
+  boot_id >/dev/null 2>&1 || return 1
+}
+
+# Every PID below $1, at any depth. One snapshot, so the walk is consistent.
 descendants_of() {
   local snapshot frontier next out="" parent child c
-  snapshot="$(ps -eo pid=,ppid= 2>/dev/null)" || return 1
+  snapshot="$(_pid_ppid_snapshot)" || return 1
+  [ -n "$snapshot" ] || return 1
   frontier="$1"
   while [ -n "$frontier" ]; do
     next=""
@@ -76,20 +125,30 @@ descendants_of() {
   printf '%s' "${out# }"
 }
 
-# Snapshot <name>'s whole tree as `pid:starttime` lines. Call once the children
-# exist — a gunicorn arbiter has not forked its worker in the first moments after
-# exec, so a snapshot taken at launch records the arbiter alone.
+# Snapshot <name>'s whole tree. The file is self-describing: a `boot:<id>` header
+# followed by `pid:starttime` lines. Without a header that matches the running
+# kernel the PIDs below it cannot be interpreted at all, so the header and the body
+# live in one file rather than two that could drift apart.
+#
+# Call once the children exist — a gunicorn arbiter has not forked its worker in the
+# first moments after exec, so a snapshot taken at launch records the arbiter alone.
 record_tree() {             # record_tree <name>
-  local name="$1" pid p st
+  local name="$1" pid p st boot
   pid="$(cat "$RUN/$name.pid")" || return 1
-  : > "$RUN/$name.tree"
+  boot="$(boot_id)" || { echo "cannot read the host boot id" >&2; return 1; }
+  printf 'boot:%s\n' "$boot" > "$RUN/$name.tree"
   # shellcheck disable=SC2046
   for p in $pid $(descendants_of "$pid"); do
     st="$(starttime_of "$p" || true)"
     [ -n "$st" ] && printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
   done
-  printf '%s tree: %s\n' "$name" \
-    "$(cut -d: -f1 "$RUN/$name.tree" | tr '\n' ' ')"
+  printf '%s tree: %s\n' "$name" "$(tree_pids "$name")"
+}
+
+# The PIDs in a recorded tree, header excluded.
+tree_pids() {               # tree_pids <name>
+  [ -f "$RUN/$1.tree" ] || { printf ''; return 0; }
+  grep -v '^boot:' "$RUN/$1.tree" | cut -d: -f1 | tr '\n' ' ' | sed 's/ $//'
 }
 
 # Merge any children that appeared since the snapshot. gunicorn respawns a worker
@@ -97,7 +156,7 @@ record_tree() {             # record_tree <name>
 # ends; a respawned worker is just as much ours as the one it replaced.
 refresh_tree() {            # refresh_tree <name> <master-pid>
   local name="$1" pid="$2" p st
-  [ -f "$RUN/$name.tree" ] || : > "$RUN/$name.tree"
+  [ -f "$RUN/$name.tree" ] || return 1
   for p in $(descendants_of "$pid"); do
     grep -q "^$p:" "$RUN/$name.tree" 2>/dev/null && continue
     st="$(starttime_of "$p" || true)"
@@ -105,15 +164,32 @@ refresh_tree() {            # refresh_tree <name> <master-pid>
   done
 }
 
+# Status 2 — "cannot be interpreted" — when the tree has no boot header, the header
+# does not match the running kernel, or the boot id cannot be read. This is not the
+# same as "nothing survived": after a reboot the recorded PIDs may well be live
+# processes belonging to someone else, so the only safe action is none.
+tree_boot_matches() {       # tree_boot_matches <name>
+  local name="$1" recorded current
+  [ -f "$RUN/$name.tree" ] || return 2
+  recorded="$(grep '^boot:' "$RUN/$name.tree" 2>/dev/null | head -1 | cut -d: -f2-)"
+  current="$(boot_id || true)"
+  [ -n "$recorded" ] && [ -n "$current" ] || return 2
+  [ "$recorded" = "$current" ] || return 2
+}
+
 # Which of <name>'s recorded processes are still running *and* still the same
 # process. A PID that no longer exists, or that now carries a different start time
 # because the number was recycled, is not ours and is not a survivor — reporting a
 # recycled PID as a stranded worker would be a false alarm that erodes the check.
+#
+# Status 2 if the tree is from another boot; the caller must not read the empty
+# output as "all clear".
 tree_survivors() {          # tree_survivors <name>
   local name="$1" p want now out=""
-  [ -f "$RUN/$name.tree" ] || { printf ''; return 0; }
+  tree_boot_matches "$name" || return 2
   while IFS=: read -r p want; do
     [ -n "$p" ] || continue
+    [ "$p" = "boot" ] && continue
     now="$(starttime_of "$p" || true)"
     [ -n "$now" ] && [ "$now" = "$want" ] && out="$out $p"
   done < "$RUN/$name.tree"
@@ -148,9 +224,25 @@ start_tracked() {           # start_tracked <name> <port|""> <cmd...>
 # anything ambiguous and leave it for a human — so survivors are named, the state
 # files are kept, and the run fails.
 stop_tracked() {            # stop_tracked <name> <port|"">
-  local name="$1" port="${2:-}" pid recorded now surv i
+  local name="$1" port="${2:-}" pid recorded now surv i st
   [ -f "$RUN/$name.pid" ] || return 0
   pid="$(cat "$RUN/$name.pid")"
+
+  # Before anything else, and before any signal: does the recorded tree even
+  # describe this boot? A PID is reused after a reboot and its start time is
+  # measured from boot, so the same pid:starttime pair can name a completely
+  # different process — someone else's. Killing on that basis is the worst thing
+  # this script could do, so a mismatch stops it here, with nothing signalled and
+  # nothing deleted.
+  st=0; tree_boot_matches "$name" || st=$?
+  if [ "$st" -ne 0 ]; then
+    echo "$name: REFUSING TO ACT — the recorded process tree is not from the" >&2
+    echo "  running kernel (missing, unreadable, or a different boot id). The PIDs" >&2
+    echo "  in it may now belong to unrelated processes. Nothing signalled, nothing" >&2
+    echo "  removed; state left for inspection." >&2
+    return 1
+  fi
+
   recorded="$(cat "$RUN/$name.starttime" 2>/dev/null || echo none)"
   now="$(starttime_of "$pid" || true)"
 
@@ -171,7 +263,7 @@ stop_tracked() {            # stop_tracked <name> <port|"">
   fi
 
   for i in $(seq 1 20); do
-    surv="$(tree_survivors "$name")"
+    surv="$(tree_survivors "$name")" || break     # boot changed mid-stop
     if [ -z "$surv" ]; then
       [ -z "$port" ] && break
       port_released "$port" && break
@@ -179,7 +271,12 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     sleep 1
   done
 
-  surv="$(tree_survivors "$name")"
+  st=0; surv="$(tree_survivors "$name")" || st=$?
+  if [ "$st" -ne 0 ]; then
+    echo "$name: the host boot id changed while stopping; the recorded tree can no" >&2
+    echo "  longer be interpreted. State left for inspection." >&2
+    return 1
+  fi
   if [ -n "$surv" ]; then
     echo "$name: still running after stop: PID(s) $surv" >&2
     echo "  pidfile and tree left for inspection; do not start another instance" >&2
