@@ -14,28 +14,33 @@
 # Requires D2b authorisation, which is separate from D2a and is not implied by it.
 # Nothing here touches production: not the process on 8050, not its configuration,
 # not the shared Dask scheduler on 8786, not ~/python/woa23. It does consume VM24's
-# CPU, RAM, page cache and Zarr read I/O — see D2b-request.md section "What this
-# costs". "Does not modify production" is not "does not affect the host".
+# CPU, RAM, page cache and Zarr read I/O — see D2b-request.md, "What this costs".
+# "Does not modify production" is not "does not affect the host".
 
 set -euo pipefail
 
 export PATH="$HOME/.local/bin:$PATH"
 
 EXPECT_HOST=odb24
+EXPECT_PY=3.11.4
 PROD_DIR=$HOME/python/woa23
+PROD_PY=$HOME/.pyenv/versions/py311/bin/python3.11
 STORE=$PROD_DIR/data
 WORK=$HOME/woa23-s1-controlled
 REF_DIR=$WORK/reference
 CAND_PORT=8051
 REF_PORT=8052
 SCHED_PORT=8787            # isolated; production's is 8786 and is never touched
+PROD_PORT=8050
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN=$HERE/run
+VENV=$HERE/.venv
 
 if [ "${WOA23_D2B_GRANTED:-}" != "yes" ]; then
-  echo "D2b authorisation not stated. This starts three processes on a production" >&2
-  echo "host, including a Dask scheduler and worker. Re-run with" >&2
-  echo "WOA23_D2B_GRANTED=yes once it is granted. D2a does not imply D2b." >&2
+  echo "D2b authorisation not stated. This starts FOUR processes on a production" >&2
+  echo "host: a Dask scheduler, a Dask worker, an unmodified reference API and the" >&2
+  echo "candidate API. Re-run with WOA23_D2B_GRANTED=yes once it is granted." >&2
+  echo "D2a does not imply D2b." >&2
   exit 3
 fi
 if [ "$(hostname -s)" != "$EXPECT_HOST" ]; then
@@ -43,11 +48,57 @@ if [ "$(hostname -s)" != "$EXPECT_HOST" ]; then
   exit 4
 fi
 [ -d "$STORE" ] || { echo "store $STORE not found" >&2; exit 4; }
+env -C / true 2>/dev/null || { echo "env -C is required (coreutils >= 8.28)" >&2; exit 4; }
 
 cd "$HERE"
 mkdir -p "$RUN" results
 
-# ---------------------------------------------------------------- preflight ---
+# ============================================================== environment ===
+# Built and verified before any process starts. A run that discovers its
+# environment is wrong after the servers are up has already perturbed the host for
+# nothing.
+echo "== preparing the shared environment =="
+[ -x "$PROD_PY" ] || { echo "production interpreter $PROD_PY not found" >&2; exit 1; }
+prod_py_version="$("$PROD_PY" --version 2>&1 | awk '{print $2}')"
+[ "$prod_py_version" = "$EXPECT_PY" ] || {
+  echo "production interpreter is $prod_py_version, expected $EXPECT_PY" >&2; exit 1; }
+
+# --locked, not --frozen: it fails if uv.lock does not match pyproject.toml, rather
+# than quietly installing from a lock that has drifted from its inputs.
+uv sync --locked --python "$PROD_PY" >&2
+
+uv run python - <<PYEOF || exit 1
+import hashlib, json, subprocess, sys
+sys.path.insert(0, ".")
+from bench.collect_backend_meta import dependencies
+
+venv_py = "$VENV/bin/python"
+want_py = "$EXPECT_PY"
+
+deps = dependencies(venv_py, __import__("pathlib").Path("uv.lock"))
+if "distributions_error" in deps:
+    print(f"cannot list the venv's distributions: {deps['distributions_error']}",
+          file=sys.stderr)
+    raise SystemExit(1)
+if deps["python_version"] != want_py:
+    print(f"venv interpreter is {deps['python_version']}, expected {want_py} — the "
+          f"benchmark would not be measuring production's runtime", file=sys.stderr)
+    raise SystemExit(1)
+
+json.dump({"kind": "controlled_environment",
+           "python_version": deps["python_version"],
+           "env_python": venv_py,
+           "lockfile_sha256": deps["lockfile_sha256"],
+           "distributions_sha256": deps["distributions_sha256"],
+           "n_distributions": len(deps["distributions"]),
+           "distributions": deps["distributions"]},
+          open("results/d2b_environment.json", "w"), indent=2)
+print(f"  python {deps['python_version']}  "
+      f"{len(deps['distributions'])} distributions  "
+      f"lock {deps['lockfile_sha256'][:16]}  dists {deps['distributions_sha256'][:16]}")
+PYEOF
+
+# ================================================================ preflight ===
 # Leftover state first: a free port is not an all-clear, because cleanup
 # deliberately leaves its pidfile when it refuses to kill.
 shopt -s nullglob
@@ -67,96 +118,163 @@ for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
     exit 1
   fi
 done
-# Production must be left exactly as it is. Assert it is up now so that the
-# post-run check can assert it is still up, unchanged.
-PROD_BEFORE="$(ss -lntp | grep -E ':8050\b' || true)"
-[ -n "$PROD_BEFORE" ] || { echo "production is not listening on 8050; stopping" >&2; exit 1; }
 
-# --------------------------------------------------------- process identity ---
+# ------------------------------------------------------------ /proc helpers ---
 starttime_of() {
   local raw; raw="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
   echo "${raw#*) }" | awk '{print $20}'
 }
-holds_port() { ss -lntp 2>/dev/null | grep -E ":$2\b" | grep -qE "pid=$1,"; }
+ppid_of() {
+  local raw; raw="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
+  echo "${raw#*) }" | awk '{print $2}'
+}
+pids_on_port() {            # every PID holding the socket, across all ss rows
+  ss -lntp 2>/dev/null | awk -v p=":$1" '$0 ~ p' \
+    | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -un | tr '\n' ' '
+}
+master_of() {               # the one PID whose parent is not in the set
+  local pids="$1" roots="" p pp
+  [ -n "$pids" ] || return 1
+  for p in $pids; do
+    pp="$(ppid_of "$p")" || return 1      # unreadable parent -> ambiguous
+    case " $pids " in *" $pp "*) ;; *) roots="$roots $p" ;; esac
+  done
+  set -- $roots
+  [ $# -eq 1 ] || return 1
+  echo "$1"
+}
+BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
 
-# name -> pidfile/startfile under run/. Every start records both; every stop
-# proves identity before signalling anything.
-start_tracked() {           # start_tracked <name> <port> <cmd...>
+# ------------------------------------------- production's identity, recorded ---
+# "Someone is still listening on 8050" is not the same as "production is the process
+# it was". A restart between the two checks would leave the port occupied and every
+# comparison in this run describing a different backend.
+PROD_PIDS_BEFORE="$(pids_on_port "$PROD_PORT")"
+[ -n "$PROD_PIDS_BEFORE" ] || { echo "production is not listening on $PROD_PORT" >&2; exit 1; }
+PROD_MASTER_BEFORE="$(master_of "$PROD_PIDS_BEFORE")" || {
+  echo "cannot identify production's master among [$PROD_PIDS_BEFORE]" >&2; exit 1; }
+PROD_START_BEFORE="$(starttime_of "$PROD_MASTER_BEFORE")"
+echo "production master $PROD_MASTER_BEFORE (start $PROD_START_BEFORE), listeners: $PROD_PIDS_BEFORE"
+
+# ================================================== tracked process handling ===
+CLEANUP_FAILED=0
+
+start_tracked() {           # start_tracked <name> <port|""> <cmd...>
   local name="$1" port="$2"; shift 2
+  [ -f "$RUN/$name.pid" ] && { echo "$name already tracked" >&2; return 1; }
   "$@" > "$RUN/$name.log" 2>&1 &
   local pid=$!
   echo "$pid" > "$RUN/$name.pid"
   sleep 1
   starttime_of "$pid" > "$RUN/$name.starttime" || {
-    echo "could not read start time of $name (pid $pid)" >&2; return 1; }
-  echo "$name started (pid $pid, port $port)"
+    echo "could not read the start time of $name (pid $pid)" >&2; return 1; }
+  echo "$name started (pid $pid${port:+, port $port})"
 }
 
-stop_tracked() {            # stop_tracked <name> <port>
-  local name="$1" port="$2" pid now
+stop_tracked() {            # stop_tracked <name> <port|"">
+  local name="$1" port="${2:-}" pid now
   [ -f "$RUN/$name.pid" ] || return 0
   pid="$(cat "$RUN/$name.pid")"
   now="$(starttime_of "$pid" || true)"
 
   if [ -z "$now" ]; then
     # A dead PID is not a released socket.
-    for _ in $(seq 1 20); do
-      ss -lntp | grep -qE ":${port}\b" || {
-        rm "$RUN/$name.pid"; [ -f "$RUN/$name.starttime" ] && rm "$RUN/$name.starttime"
-        echo "$name: process gone, port ${port} free"; return 0; }
-      sleep 1
-    done
-    echo "$name: PID $pid gone but port ${port} STILL HELD — left for inspection" >&2
-    return 1
+    if [ -n "$port" ]; then
+      local i
+      for i in $(seq 1 20); do
+        ss -lntp | grep -qE ":${port}\b" || break
+        sleep 1
+      done
+      if ss -lntp | grep -qE ":${port}\b"; then
+        echo "$name: PID $pid gone but port ${port} STILL HELD — left for inspection" >&2
+        return 1
+      fi
+    fi
+    rm "$RUN/$name.pid"; [ -f "$RUN/$name.starttime" ] && rm "$RUN/$name.starttime"
+    echo "$name: process already gone, port ${port:-n/a} free"
+    return 0
   fi
   if [ "$now" != "$(cat "$RUN/$name.starttime" 2>/dev/null || echo none)" ]; then
     echo "$name: REFUSING TO KILL — PID $pid has a different start time; the PID was" >&2
     echo "  recycled. Left in place for inspection." >&2
     return 1
   fi
-  if [ -n "$port" ] && ! holds_port "$pid" "$port"; then
+  if [ -n "$port" ] && ! ss -lntp 2>/dev/null | grep -E ":${port}\b" | grep -qE "pid=$pid,"; then
     echo "$name: REFUSING TO KILL — PID $pid no longer holds port ${port}." >&2
     return 1
   fi
 
   kill "$pid" 2>/dev/null || true
-  for _ in $(seq 1 20); do
-    if [ -z "$port" ] || ! ss -lntp | grep -qE ":${port}\b"; then
-      rm "$RUN/$name.pid"; [ -f "$RUN/$name.starttime" ] && rm "$RUN/$name.starttime"
-      echo "$name stopped, port ${port:-n/a} released"; return 0
+  local i
+  for i in $(seq 1 20); do
+    if [ -z "$port" ]; then
+      [ -d "/proc/$pid" ] || break
+    elif ! ss -lntp | grep -qE ":${port}\b"; then
+      break
     fi
     sleep 1
   done
-  echo "$name: FAILED TO RELEASE port ${port} — left for inspection" >&2
-  return 1
+  if [ -n "$port" ] && ss -lntp | grep -qE ":${port}\b"; then
+    echo "$name: FAILED TO RELEASE port ${port} — left for inspection" >&2
+    return 1
+  fi
+  if [ -z "$port" ] && [ -d "/proc/$pid" ]; then
+    echo "$name: PID $pid did not exit — left for inspection" >&2
+    return 1
+  fi
+  rm "$RUN/$name.pid"; [ -f "$RUN/$name.starttime" ] && rm "$RUN/$name.starttime"
+  echo "$name stopped, port ${port:-n/a} released"
 }
 
 cleanup() {
   local rc=$?
   # Reverse order of start. Each refuses to signal anything it cannot prove it
-  # started; none of them ever touches a process it did not launch.
-  stop_tracked candidate "$CAND_PORT" || true
-  stop_tracked reference "$REF_PORT"  || true
-  stop_tracked dask_worker ""         || true
-  stop_tracked dask_scheduler "$SCHED_PORT" || true
+  # started, and a refusal is a run failure — not something to swallow. An earlier
+  # draft ended every one of these with `|| true`, which would have let a stranded
+  # process or a held port exit zero and read as a clean run.
+  stop_tracked candidate      "$CAND_PORT"  || CLEANUP_FAILED=1
+  stop_tracked reference      "$REF_PORT"   || CLEANUP_FAILED=1
+  stop_tracked dask_worker    ""            || CLEANUP_FAILED=1
+  stop_tracked dask_scheduler "$SCHED_PORT" || CLEANUP_FAILED=1
 
-  local prod_after; prod_after="$(ss -lntp | grep -E ':8050\b' || true)"
-  if [ -z "$prod_after" ]; then
-    echo "WARNING: production is no longer listening on 8050 — investigate" >&2
+  # Production must be the same process it was, not merely a process.
+  local after master_after start_after boot_after
+  after="$(pids_on_port "$PROD_PORT")"
+  boot_after="$(cat /proc/sys/kernel/random/boot_id)"
+  if [ "$boot_after" != "$BOOT_ID" ]; then
+    echo "WARNING: the host rebooted during this run" >&2; CLEANUP_FAILED=1
+  elif [ -z "$after" ]; then
+    echo "WARNING: nothing is listening on $PROD_PORT any more" >&2; CLEANUP_FAILED=1
   else
-    echo "production on 8050 still listening, unchanged"
+    master_after="$(master_of "$after" || true)"
+    start_after="$(starttime_of "${master_after:-0}" || true)"
+    if [ "$master_after" != "$PROD_MASTER_BEFORE" ] || \
+       [ "$start_after" != "$PROD_START_BEFORE" ]; then
+      echo "WARNING: production on $PROD_PORT is not the process it was" >&2
+      echo "  before: master $PROD_MASTER_BEFORE start $PROD_START_BEFORE [$PROD_PIDS_BEFORE]" >&2
+      echo "  after : master ${master_after:-?} start ${start_after:-?} [$after]" >&2
+      CLEANUP_FAILED=1
+    else
+      echo "production on $PROD_PORT unchanged (master $PROD_MASTER_BEFORE)"
+    fi
+  fi
+
+  if [ "$CLEANUP_FAILED" != "0" ]; then
+    echo "CLEANUP DID NOT COMPLETE — this run is a failure regardless of its gates" >&2
+    [ "$rc" -eq 0 ] && rc=1
   fi
   return $rc
 }
 trap cleanup EXIT INT TERM
 
-# ------------------------------------------------- isolated reference source ---
+# ================================================== isolated reference source ===
 # An unmodified copy of the production app, outside the production directory. The
-# copy is read-only and its digests are checked against the originals, so "we ran
-# the same code" is verified rather than assumed.
-# Refuse an existing directory rather than clearing it. A forced recursive delete on
-# a path built from $HOME is one substitution away from being catastrophic, and the
-# D2a deploy step already set the standard: verify the target, do not clean it.
+# copy is read-only and its digests are checked against the originals, so "we ran the
+# same code" is verified rather than assumed.
+#
+# The directory is refused if it exists rather than cleared: a forced recursive
+# delete on a path built from $HOME is one substitution away from catastrophic, and
+# the D2a deploy step already set the standard — verify the target, do not clean it.
 if [ -e "$WORK" ]; then
   echo "$WORK already exists. Inspect and remove it deliberately before re-running;" >&2
   echo "this script will not clear a directory it did not create." >&2
@@ -166,7 +284,7 @@ mkdir -p "$REF_DIR"
 cp "$PROD_DIR/woa23_app.py" "$REF_DIR/"
 cp -r "$PROD_DIR/src" "$REF_DIR/src"
 # woa23_app.py:63 hard-codes the relative `data/`. A symlink gives it the real store
-# without copying 32 GB and without write access through this path.
+# without copying 31.9 GiB and without a writable path to it.
 ln -s "$STORE" "$REF_DIR/data"
 chmod -R a-w "$REF_DIR/woa23_app.py" "$REF_DIR/src"
 
@@ -179,45 +297,40 @@ for f in woa23_app.py src/__init__.py src/config.py src/dask_client_manager.py \
   echo "  $f  $a"
 done
 
-# ------------------------------------------------------- isolated Dask cluster ---
+# ===================================================== isolated Dask cluster ===
 # `src/dask_client_manager.py` reads DASK_SCHEDULER_ADDRESS and falls back to
 # tcp://localhost:8786 — production's shared scheduler, serving tide_app and
 # mhw_app. The reference must never reach it, so it gets its own on $SCHED_PORT and
-# the variable is set explicitly rather than relying on a default.
+# the variable is set explicitly rather than relying on a default being overridden.
 start_tracked dask_scheduler "$SCHED_PORT" \
-  "$HERE/.venv/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
+  "$VENV/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
 for _ in $(seq 1 30); do ss -lntp | grep -qE ":${SCHED_PORT}\b" && break; sleep 1; done
 ss -lntp | grep -qE ":${SCHED_PORT}\b" || { echo "scheduler did not bind" >&2; exit 1; }
 start_tracked dask_worker "" \
-  "$HERE/.venv/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
+  "$VENV/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
   --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard
 
-# ------------------------------------------------------------------- the arms ---
+# ==================================================================== the arms ===
 # One venv, both arms. That is the whole point of 5.2A: the packages stop being a
-# variable because there is only one set of them.
-VENV="$HERE/.venv"
+# variable because there is only one set of them. Both go through start_tracked, so
+# identity is recorded the same way for every process this run owns.
+start_tracked reference "$REF_PORT" \
+  env -C "$REF_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
+    DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
+    "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker \
+    -b "127.0.0.1:${REF_PORT}" --timeout 120
 
-( cd "$REF_DIR" && \
-  PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
-  DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
-  exec "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker \
-    -b "127.0.0.1:${REF_PORT}" --timeout 120 ) > "$RUN/reference.log" 2>&1 &
-REF_PID=$!
-echo "$REF_PID" > "$RUN/reference.pid"
-sleep 1
-starttime_of "$REF_PID" > "$RUN/reference.starttime"
-
-PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" WOA23_ZARR_STORE="$STORE" \
-  "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
-  -b "127.0.0.1:${CAND_PORT}" --timeout 120 > "$RUN/candidate.log" 2>&1 &
-CAND_PID=$!
-echo "$CAND_PID" > "$RUN/candidate.pid"
-sleep 1
-starttime_of "$CAND_PID" > "$RUN/candidate.starttime"
+start_tracked candidate "$CAND_PORT" \
+  env -C "$HERE" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" WOA23_ZARR_STORE="$STORE" \
+    "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
+    -b "127.0.0.1:${CAND_PORT}" --timeout 120
 
 ready() {                   # ready <port>
+  local out
   for _ in $(seq 1 30); do
-    out="$(curl -s -o /dev/null -w '%{http_code} %{size_download}' \
+    # Bounded: without --max-time a hung backend makes each poll block for the
+    # default connect/read timeouts and the "30 s ceiling" is not one.
+    out="$(curl -s --max-time 5 -o /dev/null -w '%{http_code} %{size_download}' \
       "http://127.0.0.1:$1/api/woa23?lon0=135&lat0=15&parameter=temperature" || true)"
     [ "${out%% *}" = "200" ] && [ "${out##* }" -gt 0 ] && return 0
     sleep 1
@@ -228,7 +341,7 @@ ready "$REF_PORT"  || { echo "reference not ready; see $RUN/reference.log" >&2; 
 ready "$CAND_PORT" || { echo "candidate not ready; see $RUN/candidate.log" >&2; exit 1; }
 echo "both arms ready"
 
-# --------------------------------------------------------------- provenance ---
+# ================================================================= provenance ===
 echo "== provenance =="
 uv run python -m bench.collect_backend_meta --port "$CAND_PORT" --manifest candidate \
   --expect-argv-contains api.app:app --lockfile uv.lock \
@@ -244,8 +357,16 @@ sys.path.insert(0, ".")
 from bench.provenance import verify_environment_match, validate_meta
 cand = json.load(open("results/d2b_meta_candidate.json"))
 ref = json.load(open("results/d2b_meta_reference.json"))
+env = json.load(open("results/d2b_environment.json"))
 problems = (validate_meta(cand, "candidate") + validate_meta(ref, "reference")
             + verify_environment_match(cand, ref))
+# Both arms must also be the environment this run built and recorded, not some
+# other venv that happens to agree with itself.
+for label, meta in (("candidate", cand), ("reference", ref)):
+    got = (meta.get("dependencies") or {}).get("distributions_sha256")
+    if got != env["distributions_sha256"]:
+        problems.append(f"{label}: distributions digest {got} is not the environment "
+                        f"this run prepared ({env['distributions_sha256']})")
 if problems:
     print("arms are not comparable:", file=sys.stderr)
     for p in problems:
@@ -256,7 +377,7 @@ print(f"both arms: python {cand['env_python_version']}, "
       f"digest {cand['dependencies']['distributions_sha256'][:16]}")
 PYEOF
 
-# ------------------------------------------------------------ contract first ---
+# =============================================================== contract first ===
 # The latency gate is not run unless the contract gate passes. A speed number for a
 # backend that returns different bytes is not a result.
 echo "== contract gate, variant 5.2A (byte-exact), 64 cases per arm =="
@@ -268,10 +389,6 @@ uv run python -m bench.contract_diff \
   --out results/d2b_contract.json \
   || { echo "contract gate did not pass — stopping before the latency gate" >&2; exit 1; }
 
-echo "== sample-size planning =="
-uv run python -m bench.noise_pilot --base-url "http://127.0.0.1:${REF_PORT}" \
-  --warm 25 --out results/d2b_noise_pilot.json
-
 echo "== latency gate, rung 21, variant 5.2A =="
 uv run python -m bench.paired_bench \
   --candidate "http://127.0.0.1:${CAND_PORT}" \
@@ -281,7 +398,24 @@ uv run python -m bench.paired_bench \
   --reference-meta results/d2b_meta_reference.json \
   --out results/d2b_paired.json
 
+# The pilot runs LAST, and against both arms.
+#
+# Before the latency gate it would have sampled one arm 208 times and the other not
+# at all, warming one side's page cache and connection state ahead of a paired
+# measurement — an asymmetry introduced by the very tool meant to characterise noise.
+# Its output is sample-size planning for the *next* rung, which does not need to
+# precede this one; the gate's own confidence interval carries the noise for this
+# one. Running it against both arms keeps the recorded floor a property of the pair.
+echo "== sample-size planning for any escalation, both arms, after the measurement =="
+uv run python -m bench.noise_pilot --base-url "http://127.0.0.1:${REF_PORT}" \
+  --warm 25 --out results/d2b_noise_pilot_reference.json
+uv run python -m bench.noise_pilot --base-url "http://127.0.0.1:${CAND_PORT}" \
+  --warm 25 --out results/d2b_noise_pilot_candidate.json
+
 echo
 echo "artefacts: results/d2b_contract.json results/d2b_paired.json"
-echo "           results/d2b_meta_{candidate,reference}.json results/d2b_noise_pilot.json"
-echo "== done; the trap now stops all four processes and verifies the ports =="
+echo "           results/d2b_meta_{candidate,reference}.json"
+echo "           results/d2b_noise_pilot_{reference,candidate}.json"
+echo "           results/d2b_environment.json"
+echo "== done; the trap now stops all four processes, verifies the ports, and"
+echo "   confirms production is the same process it was =="

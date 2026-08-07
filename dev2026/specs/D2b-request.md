@@ -29,12 +29,20 @@ arms is the two lines of §4.4.
 | phase | → our reference 8052 | → our candidate 8051 | → **production 8050** |
 |---|---|---|---|
 | contract gate, 5.2A, 64 cases | 64 | 64 | **0** |
-| sample-size pilot | 208 | 0 | **0** |
 | latency gate, rung 21 | 176 | 176 | **0** |
-| **total** | **448** | **240** | **0** |
+| sample-size pilot, *after* the gate, both arms | 208 | 208 | **0** |
+| **total** | **448** | **448** | **0** |
 
 Every request goes to a process this run started. The public API and its backend are
 never contacted.
+
+**The pilot runs last, and against both arms.** Placed before the gate it would have
+sampled one arm 208 times and the other not at all — warming one side's page cache
+and connection state immediately before a paired latency measurement, an asymmetry
+introduced by the very tool meant to characterise noise. Its output is sample-size
+planning for a possible rung 60, which does not need to precede rung 21; the gate's
+own bootstrap interval carries the noise for this run. Sampling both arms keeps the
+recorded floor a property of the pair rather than of one side.
 
 ## 3. What this costs anyway
 
@@ -94,28 +102,49 @@ environment is not modified either way.
 
 ## 5. Preflight — the run aborts before any HTTP request unless all of this holds
 
+**The environment is built and verified before any process starts.** A run that
+discovers its environment is wrong once the servers are up has already spent the
+host's CPU and evicted production's page cache for nothing. In order:
+
 1. Host is `odb24` and the store exists.
-2. **No leftover run state.** A free port is not an all-clear: cleanup deliberately
+2. Production's interpreter is present and **is 3.11.4**. The venv is then created or
+   updated with `uv sync --locked` against that interpreter — `--locked`, not
+   `--frozen`, so a `uv.lock` that has drifted from `pyproject.toml` is an error
+   rather than a silent install from stale inputs.
+3. The venv is re-interrogated from **inside itself**: interpreter version equals
+   3.11.4, the full distribution list and its digest, and the `uv.lock` digest are
+   all recorded to `results/d2b_environment.json`. `requires-python = ">=3.11"` once
+   let `uv` pick 3.14 on VM24; the version is checked, not requested.
+4. **No leftover run state.** A free port is not an all-clear: cleanup deliberately
    leaves its pidfile when it refuses to kill, and starting over it would orphan
    whatever it names.
-3. Ports 8051, 8052 and 8787 are free. If any is held, abort — never displace it.
-4. Production **is** listening on 8050, recorded so the post-run check can confirm
-   it still is.
-5. `~/woa23-s1-controlled` does not already exist. The script refuses rather than
+5. Ports 8051, 8052 and 8787 are free. If any is held, abort — never displace it.
+6. Production **is** listening on 8050. Its **listener PID set, master PID and the
+   master's `/proc` start time** are recorded, along with the host's **boot ID**, so
+   the post-run check can compare identity rather than mere occupancy.
+7. `~/woa23-s1-controlled` does not already exist. The script refuses rather than
    clearing it.
-6. Every reference source file's SHA-256 equals production's original.
-7. Both arms' provenance passes full schema validation, and
+8. Every reference source file's SHA-256 equals production's original.
+9. Both arms' provenance passes full schema validation;
    `verify_environment_match()` confirms they agree on **interpreter version**,
    **`env_python`**, the **digest of the full distribution list** and the
-   **`uv.lock` digest**. A subset comparison is how the last discrepancy stayed
+   **`uv.lock` digest**; and both digests equal the environment recorded in step 3,
+   so the arms are the venv this run built rather than some other one that merely
+   agrees with itself. A subset comparison is how the last discrepancy stayed
    invisible, so this compares the whole list and names any package that differs.
+
+Every process this run owns — scheduler, worker, reference, candidate — is started
+through the **same tracked-start path**, which writes a pidfile, reads the PID's
+`/proc` start time and refuses to start over an existing record. Identity is
+established the same way for all four rather than inline per process.
 
 ## 6. Order of work
 
 1. Contract gate, **variant 5.2A, byte-exact**, all 64 cases.
-2. **Only if it passes**, the sample-size pilot and then the latency gate at rung 21.
-   A speed number for a backend that returns different bytes is not a result.
-3. Post-run drift: process, port, sources and store re-checked in the same run
+2. **Only if it passes**, the latency gate at rung 21. A speed number for a backend
+   that returns different bytes is not a result.
+3. The sample-size pilot, last, against both arms.
+4. Post-run drift: process, port, sources and store re-checked in the same run
    (`post_run_runtime_check`).
 
 **Nothing is reused.** The 2026-08-07 contract and latency artefacts are historical,
@@ -129,7 +158,19 @@ longer matches or which no longer holds its port**, leaving the pidfile for
 inspection instead. A pidfile is removed only after its port is confirmed released.
 A dead PID is not treated as a released socket.
 
-Afterwards the script confirms production is still listening on 8050 and says so.
+**A cleanup failure fails the run.** Any process left running, any port still held,
+any refusal to signal — each sets a failure flag and the script exits non-zero even
+if both gates passed. An earlier draft ended each stop with `|| true`, under which a
+stranded gunicorn worker or a held 8051 would have exited zero and read as a clean
+run; the artefacts would have looked complete while the host was left dirty. A gate
+result from a run that could not clean up after itself is not reportable.
+
+Afterwards the script compares production against what it recorded at preflight —
+**listener PID set, master PID, the master's start time, and the host's boot ID**. A
+restart between the two checks would leave 8050 occupied by a different process, so
+"someone is listening" would pass while every comparison in the run described a
+backend that no longer exists. A mismatch, a reboot, or an empty 8050 is reported and
+fails the run.
 
 ## 8. Not covered by this request
 
@@ -140,6 +181,14 @@ any change to production's package environment.
 ## 9. What is ready now
 
 `scripts/run_controlled.sh` is written, syntax-checked, and its refusal paths are
-verified: it exits 3 without `WOA23_D2B_GRANTED=yes`, exits 4 off `odb24`, and exits
-1 on a held port, leftover run state, an existing work directory, a reference source
-digest that does not match production, or arms whose environments disagree.
+verified: it exits 3 without `WOA23_D2B_GRANTED=yes`, exits 4 off `odb24` or without
+`env -C`, and exits 1 on a held port, leftover run state, an existing work directory,
+an interpreter that is not 3.11.4, a `uv.lock` that does not match `pyproject.toml`,
+a reference source digest that does not match production, arms whose environments
+disagree with each other or with the environment this run built, a failed contract
+gate, or a cleanup that did not complete.
+
+Its refusal message names **four** processes, which is what it starts. The count is
+worth stating correctly in the message the PI reads at the moment of granting: an
+earlier draft said three, having omitted the Dask worker — the process that does the
+actual reading on the reference arm.
