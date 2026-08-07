@@ -28,6 +28,16 @@ trap cleanup_strays EXIT
 contains() { case " $1 " in *" $2 "*) echo yes ;; *) echo no ;; esac; }
 has_text() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 
+# Fixture processes must outlive the entire suite. They used to be `sleep 30`, and
+# once enough tests were added the suite ran longer than that: the "stranded child"
+# fixture exited on its own and six assertions failed for a reason that had nothing
+# to do with the code. The exit trap kills these regardless, so the value only needs
+# to be comfortably larger than the run.
+export FIXTURE_LIFE=900   # exported: the `bash -c` fixtures are separate shells
+# Several cases are designed never to drain — a stranded child, a port that stays
+# held — so the full production wait would be spent on each of them.
+export STOP_WAIT_SECS=3
+
 pass=0; fail=0
 check() {                   # check <name> <expected> <actual>
   if [ "$2" = "$3" ]; then
@@ -123,7 +133,11 @@ echo "process enumeration: $([ -r /proc/1/stat ] && echo "/proc (the VM24 path)"
 
 echo "the tree is discovered, not assumed"
 # A parent that forks a child and waits, like a gunicorn arbiter.
-bash -c 'sleep 30 & echo $! > "$RUN/child.pid"; sleep 30' &
+# `wait` rather than a second `sleep`: the foreground sleep would be a THIRD
+# process that survives the parent, and this block's last assertion needs the tree
+# empty after exactly one child is killed. (It passed before only because the
+# fixtures were short-lived enough to expire on their own.)
+bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "$RUN/child.pid"; wait' >/dev/null 2>&1 &
 parent=$!; STRAYS="$STRAYS $parent"
 sleep 1
 child="$(cat "$RUN/child.pid")"; STRAYS="$STRAYS $child"
@@ -145,7 +159,7 @@ echo "a tracked service always has an interpretable tree"
 # stop_tracked refuses to signal anything whose tree it cannot interpret. If
 # start_tracked did not record one, an abort before the first explicit record_tree —
 # a port that never binds, a readiness timeout — would leave the process running.
-start_tracked early "" sleep 45 >/dev/null
+start_tracked early "" sleep "$FIXTURE_LIFE" >/dev/null
 early_pid="$(cat "$RUN/early.pid")"; STRAYS="$STRAYS $early_pid"
 check "start_tracked leaves a tree file behind" "yes" \
       "$([ -f "$RUN/early.tree" ] && echo yes || echo no)"
@@ -164,7 +178,7 @@ echo "a service that never bound is still stopped"
 # check that failed, a scheduler that never came up. The PID is live and holds
 # nothing. Requiring port ownership before signalling left it running.
 PORT_HELD_BY_PID=no
-start_tracked unbound 8099 sleep 45 >/dev/null
+start_tracked unbound 8099 sleep "$FIXTURE_LIFE" >/dev/null
 unbound_pid="$(cat "$RUN/unbound.pid")"; STRAYS="$STRAYS $unbound_pid"
 set +e; out="$(stop_tracked unbound 8099 2>&1)"; st=$?; set -e
 check "stop_tracked signals it rather than refusing" "0" "$st"
@@ -191,7 +205,7 @@ check "tree_survivors returns 2, not an empty all-clear" "2" "$st"
 # The same, through stop_tracked. The tracked process is a real one that will exit;
 # the unreadable 5555 is an extra entry in its tree, so the only thing keeping the
 # stop from succeeding is the entry whose identity cannot be read.
-sleep 45 & unread=$!; STRAYS="$STRAYS $unread"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unread=$!; STRAYS="$STRAYS $unread"
 sleep 1
 echo "$unread" > "$RUN/unreadable.pid"
 starttime_of "$unread" > "$RUN/unreadable.starttime"
@@ -224,7 +238,7 @@ echo "a live child is never silently dropped from the tree"
 # corrupt one, because it looks entirely valid and reports every missing child as
 # exited.
 
-bash -c 'sleep 40 & sleep 40' & dropp=$!; STRAYS="$STRAYS $dropp"
+bash -c 'sleep "$FIXTURE_LIFE" & sleep "$FIXTURE_LIFE"' >/dev/null 2>&1 & dropp=$!; STRAYS="$STRAYS $dropp"
 sleep 1
 echo "$dropp" > "$RUN/drop.pid"; starttime_of "$dropp" > "$RUN/drop.starttime"
 check "the parent really does have children" "yes" \
@@ -279,6 +293,71 @@ check "and leaves no marker" "0" "$(grep -c '^incomplete:' "$RUN/three.tree")"
 rm "$RUN/one.tree" "$RUN/two.tree" "$RUN/three.tree"
 
 echo
+echo "an unwritable marker never leaves a tree that looks complete"
+# Every function in lib_procs.sh is called in a context that tests its status, and
+# bash switches `set -e` OFF inside such a function body — so an unchecked write
+# failure there does not abort anything, it just carries on. _mark_incomplete was
+# unchecked, which meant a short tree could end up with no marker at all.
+: > "$RUN/ro.tree"
+printf 'boot:%s\n' "$(boot_id)" > "$RUN/ro.tree"
+chmod 0444 "$RUN/ro.tree"
+if printf 'probe\n' >> "$RUN/ro.tree" 2>/dev/null; then
+  echo "  (skipped: this user can write a 0444 file, so the failure cannot be staged)"
+  chmod 0644 "$RUN/ro.tree"; rm "$RUN/ro.tree"
+else
+  set +e; _mark_incomplete ro "process-enumeration-failed" >/dev/null 2>&1; st=$?; set -e
+  check "_mark_incomplete reports the failed write" "1" "$st"
+  check "and the unmarked tree is gone, not left looking complete" "no" \
+        "$([ -f "$RUN/ro.tree" ] && echo yes || echo no)"
+  # A missing tree is the fail-closed answer for every later reader.
+  set +e; tree_survivors ro >/dev/null 2>&1; st=$?; set -e
+  check "a later read of the removed tree cannot determine" "2" "$st"
+fi
+
+echo
+echo "an incomplete tree still stops the process it does know about"
+# The point of marking rather than refusing: what is provably ours is still stopped,
+# so the host is left cleaner, while the run still fails because completeness is
+# unknown. Both halves are asserted here.
+bash -c 'sleep "$FIXTURE_LIFE" & sleep "$FIXTURE_LIFE"' >/dev/null 2>&1 & inc=$!; STRAYS="$STRAYS $inc"
+sleep 1
+echo "$inc" > "$RUN/inc.pid"; starttime_of "$inc" > "$RUN/inc.starttime"
+record_tree inc >/dev/null
+_mark_incomplete inc "staged-for-test" >/dev/null
+check "the tree is marked incomplete" "1" "$(grep -c '^incomplete:' "$RUN/inc.tree")"
+check "the known process is alive before the stop" "alive" \
+      "$(kill -0 "$inc" 2>/dev/null && echo alive || echo gone)"
+set +e; out="$(stop_tracked inc "" 2>&1)"; st=$?; set -e
+check "stop_tracked returns non-zero" "1" "$st"
+check "THE KNOWN PROCESS WAS ACTUALLY STOPPED" "gone" \
+      "$(kill -0 "$inc" 2>/dev/null && echo alive || echo gone)"
+check "it reports the outcome as undetermined" "yes" \
+      "$(has_text "$out" "cannot determine whether every tracked process exited")"
+check "state is kept for inspection" "yes" \
+      "$([ -f "$RUN/inc.pid" ] && echo yes || echo no)"
+rm "$RUN/inc.pid" "$RUN/inc.starttime" "$RUN/inc.tree"
+
+echo
+echo "a refresh that fails is carried even if its marker never lands"
+bash -c 'sleep "$FIXTURE_LIFE" & sleep "$FIXTURE_LIFE"' >/dev/null 2>&1 & ref=$!; STRAYS="$STRAYS $ref"
+sleep 1
+echo "$ref" > "$RUN/ref.pid"; starttime_of "$ref" > "$RUN/ref.starttime"
+record_tree ref >/dev/null
+# refresh_tree fails, and its marker write is staged to fail too, so the only
+# surviving signal is stop_tracked's own local flag.
+_pid_ppid_snapshot() { return 1; }
+_mark_incomplete() { return 1; }
+set +e; out="$(stop_tracked ref "" 2>&1)"; st=$?; set -e
+check "stop_tracked still returns non-zero" "1" "$st"
+check "the known process was still stopped" "gone" \
+      "$(kill -0 "$ref" 2>/dev/null && echo alive || echo gone)"
+check "and it says the stop could not be verified" "yes" \
+      "$(has_text "$out" "could not be")"
+# shellcheck source=lib_procs.sh
+. "$HERE/lib_procs.sh"      # restores the real definitions
+rm "$RUN/ref.pid" "$RUN/ref.starttime" "$RUN/ref.tree"
+
+echo
 echo "a stranded child fails the stop, even with the port free"
 # The exact defect: kill the parent only. The child is orphaned and keeps running,
 # and the listening socket — had there been one — is already released.
@@ -313,7 +392,7 @@ check "the tree file is removed" "no" "$([ -f "$RUN/svc.tree" ] && echo yes || e
 echo
 echo "a released port is not proof on its own"
 # Both halves of the claim, isolated: tree gone but port held must still fail.
-sleep 60 & lone=$!; STRAYS="$STRAYS $lone"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & lone=$!; STRAYS="$STRAYS $lone"
 sleep 1
 echo "$lone" > "$RUN/p.pid"; starttime_of "$lone" > "$RUN/p.starttime"
 record_tree p >/dev/null
@@ -333,7 +412,7 @@ echo "a tree from another boot is never acted on"
 # After a reboot, PIDs are reused and start times are measured from boot — so the
 # same pid:starttime pair can name someone else's process. The only safe action is
 # none: do not signal, do not delete state.
-sleep 60 & bootp=$!; STRAYS="$STRAYS $bootp"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & bootp=$!; STRAYS="$STRAYS $bootp"
 sleep 1
 echo "$bootp" > "$RUN/b.pid"; starttime_of "$bootp" > "$RUN/b.starttime"
 record_tree b >/dev/null
@@ -370,7 +449,7 @@ echo "a legal-but-different start time is a recycled PID; garbage is a corrupt t
 # These two must not collapse into each other. The previous version of this test
 # used a garbage value to stand in for "a different start time", so it asserted the
 # fail-open behaviour — a malformed tree reporting no survivors — as correct.
-sleep 60 & rec=$!; STRAYS="$STRAYS $rec"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & rec=$!; STRAYS="$STRAYS $rec"
 sleep 1
 echo "$rec" > "$RUN/r.pid"; starttime_of "$rec" > "$RUN/r.starttime"
 real_st="$(starttime_of "$rec")"

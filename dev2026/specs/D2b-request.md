@@ -267,6 +267,21 @@ is now reported, not required, and it is still part of the *success* criterion: 
 stop is clean only when every process in the tree has exited **and** the port is
 confirmed free.
 
+**No function here relies on `set -e`.** Every one of them is called in a context
+that tests its status — `record_tree … || {…}`, `stop_tracked … || CLEANUP_FAILED=1`,
+`if ! …` — and bash switches errexit **off** for the whole body of a function
+invoked that way. An unchecked failure inside does not abort; it carries on to the
+next line. So every write is checked explicitly, and `stop_tracked` carries a
+refresh failure in a local flag rather than inferring it from the file afterwards:
+the marker write can itself fail, and then the file would be the only record of
+something the file could not record.
+
+If the incompleteness marker cannot be written, the partial tree is **removed**
+rather than left behind — a missing tree makes `tree_boot_matches` return 2, which
+is the fail-closed answer for every later reader as well. If it cannot even be
+removed, that is said plainly, because the file on disk may then understate what the
+run started.
+
 **A tree that omits a live process is worse than one that is corrupt**, because it
 looks valid. Both writers could fail to see everything and both used to carry on:
 `descendants_of` failing vanished into a command substitution, so the loop ran over
@@ -337,7 +352,7 @@ uv run python -m bench.test_environment    # 22
 uv run python -m bench.test_contract       # 40
 uv run python -m bench.test_paired_stats   # 29
 ./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
-./scripts/test_procs.sh                    # 93, with real forked processes
+./scripts/test_procs.sh                    # 105, with real forked processes
 ```
 
 `test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
@@ -352,7 +367,7 @@ contain `) `. Stripping to the *first* `) ` instead of the last made
 and since the start time is the token that distinguishes a recycled PID from the
 original, two such processes both parsed as `0` and compared equal, so the
 recycled-PID guard would have passed on a process that was not ours. The remaining
-73 assertions need live processes.
+85 assertions need live processes.
 
 The author's own runs used the `ps` path; the `/proc` path is covered by the
 synthetic fixture but has not been exercised against a real Linux `/proc`. Running

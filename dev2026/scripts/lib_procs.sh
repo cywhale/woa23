@@ -9,6 +9,12 @@
 # that actually serves requests or reads the store.
 #
 # Requires $RUN to be set to the run-state directory.
+#
+# $STOP_WAIT_SECS bounds how long a stop waits for a tree to drain and a port to be
+# released. The runners leave it at the default; scripts/test_procs.sh shortens it,
+# because several of its cases are *designed* never to drain and would otherwise
+# spend the full wait each time.
+: "${STOP_WAIT_SECS:=20}"
 
 # The PID's start time — an identity token that PID number alone is not, because
 # PIDs are recycled. Field 22 of /proc/<pid>/stat, parsed past the parenthesised
@@ -188,8 +194,28 @@ descendants_of() {
 # So incompleteness is recorded *in the file*. A tree carrying this line can still
 # be used to identify the tracked process (so cleanup may still signal it), but it
 # can never be read as "everything exited".
+# Every function in this file is called in a context that tests its status —
+# `record_tree ... || {...}`, `stop_tracked ... || CLEANUP_FAILED=1`, `if ! ...`.
+# In bash that switches `set -e` OFF for the whole function body, so an unchecked
+# failure inside does not abort anything; it simply carries on to the next line.
+# Nothing here may rely on errexit. Every write is checked.
 _mark_incomplete() {        # _mark_incomplete <name> <reason>
-  printf 'incomplete:%s\n' "$2" >> "$RUN/$1.tree"
+  local f="$RUN/$1.tree"
+  if printf 'incomplete:%s\n' "$2" >> "$f"; then
+    return 0
+  fi
+  # The marker is the only thing standing between a short tree and a reader that
+  # believes it. If it cannot be written, the file must not survive looking
+  # complete — a missing tree makes tree_boot_matches return 2, which is the
+  # fail-closed answer for every later reader too.
+  echo "$1: CANNOT WRITE the incompleteness marker to $f" >&2
+  if rm -- "$f" 2>/dev/null; then
+    echo "  the partial tree has been removed so it cannot be misread as complete" >&2
+  else
+    echo "  AND the partial tree could not be removed: $f may now understate what" >&2
+    echo "  this run started. Inspect it before trusting any later cleanup." >&2
+  fi
+  return 1
 }
 
 # Append `pid:starttime` for one PID. Status 1 — and a marker — when the process is
@@ -201,17 +227,23 @@ _record_one() {             # _record_one <name> <pid>
     if pid_exists "$p"; then
       echo "$name: PID $p is live but its start time cannot be read; the tree" >&2
       echo "  cannot be completed" >&2
-      _mark_incomplete "$name" "unreadable-identity-$p"
+      _mark_incomplete "$name" "unreadable-identity-$p" || true
       return 1
     fi
     return 0                # exited during the walk
   fi
   if ! _valid_starttime "$st"; then
     echo "$name: PID $p reported a malformed start time '$st'" >&2
-    _mark_incomplete "$name" "malformed-token-$p"
+    _mark_incomplete "$name" "malformed-token-$p" || true
     return 1
   fi
-  printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
+  # A pid line that fails to write is a live process dropped from the tree — the
+  # same gap as never having looked, so it is marked and reported, not ignored.
+  if ! printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"; then
+    echo "$name: cannot write PID $p to the tree" >&2
+    _mark_incomplete "$name" "unwritable-$p" || true
+    return 1
+  fi
 }
 
 # Snapshot <name>'s whole tree. The file is self-describing: a `boot:<id>` header
@@ -226,7 +258,11 @@ record_tree() {             # record_tree <name>
   local name="$1" pid p kids rc=0 boot
   pid="$(cat "$RUN/$name.pid")" || return 1
   boot="$(boot_id)" || { echo "cannot read the host boot id" >&2; return 1; }
-  printf 'boot:%s\n' "$boot" > "$RUN/$name.tree"
+  if ! printf 'boot:%s\n' "$boot" > "$RUN/$name.tree"; then
+    echo "$name: cannot write the tree header to $RUN/$name.tree" >&2
+    rm -- "$RUN/$name.tree" 2>/dev/null || true
+    return 1
+  fi
 
   # Explicit status. In `for p in $(descendants_of "$pid")` the failure vanishes
   # into the command substitution and the loop simply runs over nothing, so a
@@ -234,7 +270,7 @@ record_tree() {             # record_tree <name>
   # of it silently stopped being cleanup's problem.
   if ! kids="$(descendants_of "$pid")"; then
     echo "$name: cannot enumerate processes; the tree cannot be completed" >&2
-    _mark_incomplete "$name" "process-enumeration-failed"
+    _mark_incomplete "$name" "process-enumeration-failed" || true
     rc=1; kids=""
   fi
   for p in $pid $kids; do
@@ -261,7 +297,7 @@ refresh_tree() {            # refresh_tree <name> <master-pid>
   if ! kids="$(descendants_of "$pid")"; then
     echo "$name: cannot enumerate processes; the tree cannot be brought up to" >&2
     echo "  date" >&2
-    _mark_incomplete "$name" "process-enumeration-failed"
+    _mark_incomplete "$name" "process-enumeration-failed" || true
     return 1
   fi
   for p in $kids; do
@@ -364,7 +400,7 @@ start_tracked() {           # start_tracked <name> <port|""> <cmd...>
 # anything ambiguous and leave it for a human — so survivors are named, the state
 # files are kept, and the run fails.
 stop_tracked() {            # stop_tracked <name> <port|"">
-  local name="$1" port="${2:-}" pid recorded now surv i st
+  local name="$1" port="${2:-}" pid recorded now surv i st incomplete=0
   [ -f "$RUN/$name.pid" ] || return 0
   pid="$(cat "$RUN/$name.pid")"
 
@@ -406,13 +442,25 @@ stop_tracked() {            # stop_tracked <name> <port|"">
       echo "  or already released. Stopping it anyway; it is provably the process" >&2
       echo "  this run started." >&2
     fi
-    refresh_tree "$name" "$pid"
+    # The status is carried in a local, not inferred from the file afterwards.
+    # refresh_tree does try to mark the tree, but that write can itself fail — and
+    # then the only record that this stop is unverifiable would be a log line.
+    #
+    # Still signal: this PID's identity is already established by start time and
+    # boot id, so stopping it is safe and leaves the host cleaner than refusing
+    # would. What must not happen is *reporting* a clean stop.
+    if ! refresh_tree "$name" "$pid"; then
+      incomplete=1
+      echo "$name: the tree could not be brought up to date; stopping the tracked" >&2
+      echo "  process anyway (its identity is established), but this stop cannot" >&2
+      echo "  be verified complete and the run will fail." >&2
+    fi
     kill "$pid" 2>/dev/null || true
   else
     echo "$name: PID $pid is already gone; its children are still accounted for" >&2
   fi
 
-  for i in $(seq 1 20); do
+  for i in $(seq 1 "$STOP_WAIT_SECS"); do
     surv="$(tree_survivors "$name")" || break     # boot changed mid-stop
     if [ -z "$surv" ]; then
       [ -z "$port" ] && break
@@ -422,6 +470,12 @@ stop_tracked() {            # stop_tracked <name> <port|"">
   done
 
   st=0; surv="$(tree_survivors "$name")" || st=$?
+  if [ "$incomplete" -ne 0 ] && [ "$st" -eq 0 ]; then
+    echo "$name: the tracked process was stopped, but the tree could not be" >&2
+    echo "  brought up to date during this stop, so whether every process it had" >&2
+    echo "  forked has exited is unknown. State left for inspection." >&2
+    return 1
+  fi
   if [ "$st" -ne 0 ]; then
     # Status 2 covers three things and the message must not name only one: the boot
     # id changed mid-stop, a recorded line is malformed, or a PID is live but its
