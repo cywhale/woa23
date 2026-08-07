@@ -74,9 +74,23 @@ fi
 cd "$HERE"
 mkdir -p run results
 
-if ss -lntp | grep -qE ":${PORT}\b"; then
+# `ss` writes the local address as `addr:port`, and the address half may contain
+# colons of its own, so a substring test for ":${PORT}" also matches an unrelated
+# service at `[fe80::8051]:9000`, and a `\b`-anchored one matches an IPv6 address
+# ending in the port's digits. Parse the port out of the local-address column and
+# compare it as a number; count only LISTEN rows, which also drops the header.
+ss_rows_on_port() {
+  ss -lntp 2>/dev/null | awk -v want="$1" '
+    $1 == "LISTEN" && NF >= 4 {
+      n = split($4, part, ":")
+      if (n >= 2 && part[n] ~ /^[0-9]+$/ && part[n] + 0 == want + 0) print
+    }'
+}
+port_held() { [ -n "$(ss_rows_on_port "$1")" ]; }
+
+if port_held "$PORT"; then
   echo "port ${PORT} is already in use — aborting rather than touching it" >&2
-  ss -lntp | grep -E ":${PORT}\b" >&2
+  ss_rows_on_port "$PORT" >&2
   exit 1
 fi
 
@@ -114,7 +128,7 @@ starttime_of() {
 }
 
 holds_port() {
-  ss -lntp 2>/dev/null | grep -E ":${PORT}\b" | grep -qE "pid=$1,"
+  ss_rows_on_port "$PORT" | grep -qE "pid=$1,"
 }
 
 stop_candidate() {
@@ -130,7 +144,7 @@ stop_candidate() {
     echo "PID $pid is already gone — checking whether port ${PORT} is free" >&2
     local j
     for j in $(seq 1 20); do
-      if ! ss -lntp | grep -qE ":${PORT}\b"; then
+      if ! port_held "$PORT"; then
         rm "$PIDFILE"
         [ -f "$STARTFILE" ] && rm "$STARTFILE"
         echo "port ${PORT} is free; pidfile removed"
@@ -139,7 +153,7 @@ stop_candidate() {
       sleep 1
     done
     echo "PID $pid is gone but port ${PORT} is STILL HELD:" >&2
-    ss -lntp | grep -E ":${PORT}\b" >&2
+    ss_rows_on_port "$PORT" >&2
     echo "pidfile left in place; do not start another instance until this is resolved" >&2
     return 1
   fi
@@ -156,7 +170,7 @@ stop_candidate() {
   kill "$pid" 2>/dev/null || true
   local i
   for i in $(seq 1 20); do
-    if ! ss -lntp | grep -qE ":${PORT}\b"; then
+    if ! port_held "$PORT"; then
       # Only once the port is confirmed released. A stop that reports success while
       # something still holds the socket is worse than no stop at all.
       rm "$PIDFILE"

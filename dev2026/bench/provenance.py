@@ -674,3 +674,48 @@ def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None
                 problems.append(f"  {name}: candidate {am.get(name)} vs "
                                 f"reference {bm.get(name)}")
     return problems
+
+
+# The environment record a controlled run writes before starting anything, and the
+# meta field each of its keys must equal. `dependencies.` marks a nested lookup.
+ENVIRONMENT_RECORD_FIELDS = (
+    ("env_python", "env_python", "package environment path"),
+    ("python_version", "env_python_version", "interpreter version"),
+    ("lockfile_sha256", "dependencies.lockfile_sha256", "lockfile digest"),
+    ("distributions_sha256", "dependencies.distributions_sha256",
+     "installed distribution set digest"),
+)
+
+
+def verify_environment_record(env_record: dict | None, meta: dict | None,
+                              label: str) -> list[str]:
+    """Is this arm running the environment the run built, or merely *an* environment?
+
+    `verify_environment_match` only asks whether the two arms agree with each other.
+    Two arms can agree perfectly while both run a venv that has nothing to do with
+    the one this run prepared and recorded — a stale `.venv` from a previous
+    invocation satisfies it exactly. The environment record is the anchor, so every
+    field it carries is compared, not just the distribution digest.
+
+    Fails closed: a missing record, a missing field on either side, or a value that
+    is not a string is a problem, never a pass.
+    """
+    if not isinstance(env_record, dict):
+        return [f"{label}: no environment record to compare against"]
+    if not isinstance(meta, dict):
+        return [f"{label}: metadata missing, cannot compare to the environment record"]
+
+    problems = []
+    for env_key, meta_path, note in ENVIRONMENT_RECORD_FIELDS:
+        want = env_record.get(env_key)
+        got: object = meta
+        for part in meta_path.split("."):
+            got = (got or {}).get(part) if isinstance(got, dict) else None
+        if not isinstance(want, str) or not want:
+            problems.append(f"{label}: environment record has no usable {env_key!r}")
+        elif not isinstance(got, str) or not got:
+            problems.append(f"{label}: metadata has no usable {meta_path!r}")
+        elif want != got:
+            problems.append(f"{label}: {note} is not the environment this run built "
+                            f"({meta_path}={got!r}, record {env_key}={want!r})")
+    return problems

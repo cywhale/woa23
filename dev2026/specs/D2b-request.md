@@ -125,13 +125,30 @@ host's CPU and evicted production's page cache for nothing. In order:
 7. `~/woa23-s1-controlled` does not already exist. The script refuses rather than
    clearing it.
 8. Every reference source file's SHA-256 equals production's original.
-9. Both arms' provenance passes full schema validation;
-   `verify_environment_match()` confirms they agree on **interpreter version**,
-   **`env_python`**, the **digest of the full distribution list** and the
-   **`uv.lock` digest**; and both digests equal the environment recorded in step 3,
-   so the arms are the venv this run built rather than some other one that merely
-   agrees with itself. A subset comparison is how the last discrepancy stayed
-   invisible, so this compares the whole list and names any package that differs.
+9. Both arms' provenance passes full schema validation, then **two separate
+   questions** are asked:
+   - `verify_environment_match()` — do the arms agree *with each other* on
+     **interpreter version**, **`env_python`**, the **digest of the full
+     distribution list** and the **`uv.lock` digest**? A subset comparison is how
+     the last discrepancy stayed invisible, so this compares the whole list and
+     names any package that differs.
+   - `verify_environment_record()` — is what they agree on **the environment step 3
+     built**? Every field of `d2b_environment.json` is compared against each arm:
+     `env_python`, `python_version`, `lockfile_sha256`, `distributions_sha256`. Two
+     arms sharing a stale `.venv` from an earlier invocation agree with each other
+     perfectly, so the first check alone passes while both run the wrong
+     environment. Both fail closed: a missing record, a missing field, or a
+     non-string value is a problem, never a pass.
+
+**Ports are parsed, not pattern-matched.** Every port test in both runner scripts
+was a substring match on `ss` output. `ss` writes the local address as `addr:port`
+and the address half may contain colons, so `[fe80::8050]:9000` — an unrelated
+service — read as a listener on 8050, and a `\b`-anchored grep for port 50 matched
+any IPv6 address ending in `:50`. Production's listener set is what the whole
+identity check rests on, so a false member there corrupts the master election and
+every comparison downstream. The port is now taken from the local-address column,
+after the last colon, compared as an integer, and only in `LISTEN` rows — which also
+stops a *client* of 8050 being counted as holding it.
 
 Every process this run owns — scheduler, worker, reference, candidate — is started
 through the **same tracked-start path**, which writes a pidfile, reads the PID's
@@ -166,11 +183,17 @@ run; the artefacts would have looked complete while the host was left dirty. A g
 result from a run that could not clean up after itself is not reportable.
 
 Afterwards the script compares production against what it recorded at preflight —
-**listener PID set, master PID, the master's start time, and the host's boot ID**. A
-restart between the two checks would leave 8050 occupied by a different process, so
-"someone is listening" would pass while every comparison in the run described a
-backend that no longer exists. A mismatch, a reboot, or an empty 8050 is reported and
-fails the run.
+**the full listener PID set, the master PID, the master's start time, and the host's
+boot ID**. A restart between the two checks would leave 8050 occupied by a different
+process, so "someone is listening" would pass while every comparison in the run
+described a backend that no longer exists.
+
+The full set matters and the master alone does not cover it. gunicorn's workers hold
+the same inherited socket, so a worker that died and respawned changes the PID set
+while leaving the master untouched — and that is precisely the collateral effect this
+run could cause by competing for the host's CPU and page cache. The two are reported
+differently ("production restarted" vs "workers were recycled while this run was
+using the host") and **both fail the run**, as does a reboot or an empty 8050.
 
 ## 8. Not covered by this request
 

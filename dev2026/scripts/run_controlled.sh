@@ -111,10 +111,31 @@ if [ ${#leftovers[@]} -gt 0 ]; then
 fi
 shopt -u nullglob
 
+# --------------------------------------------------------- port parsing ---
+# `ss` writes the local address as `addr:port`, and the address half may contain
+# colons of its own. Every port test here used to be a substring match, under which
+# `[fe80::8050]:9000` — an unrelated service — read as a listener on 8050, and a
+# `\b`-anchored grep additionally matched an IPv6 address ending in `:50` when
+# looking for port 50. The port is now taken from the local-address column, after
+# the last colon, and compared as a number. Only LISTEN rows count, which also
+# drops the header.
+ss_rows_on_port() {
+  ss -lntp 2>/dev/null | awk -v want="$1" '
+    $1 == "LISTEN" && NF >= 4 {
+      n = split($4, part, ":")
+      if (n >= 2 && part[n] ~ /^[0-9]+$/ && part[n] + 0 == want + 0) print
+    }'
+}
+port_held()      { [ -n "$(ss_rows_on_port "$1")" ]; }
+pid_holds_port() { ss_rows_on_port "$2" | grep -qE "pid=$1,"; }
+pids_on_port() {            # every PID holding the socket, across all ss rows
+  ss_rows_on_port "$1" | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -un | tr '\n' ' '
+}
+
 for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
-  if ss -lntp | grep -qE ":${port}\b"; then
+  if port_held "$port"; then
     echo "port ${port} is already in use — aborting rather than touching it" >&2
-    ss -lntp | grep -E ":${port}\b" >&2
+    ss_rows_on_port "$port" >&2
     exit 1
   fi
 done
@@ -127,10 +148,6 @@ starttime_of() {
 ppid_of() {
   local raw; raw="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
   echo "${raw#*) }" | awk '{print $2}'
-}
-pids_on_port() {            # every PID holding the socket, across all ss rows
-  ss -lntp 2>/dev/null | awk -v p=":$1" '$0 ~ p' \
-    | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -un | tr '\n' ' '
 }
 master_of() {               # the one PID whose parent is not in the set
   local pids="$1" roots="" p pp
@@ -182,10 +199,10 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     if [ -n "$port" ]; then
       local i
       for i in $(seq 1 20); do
-        ss -lntp | grep -qE ":${port}\b" || break
+        port_held "$port" || break
         sleep 1
       done
-      if ss -lntp | grep -qE ":${port}\b"; then
+      if port_held "$port"; then
         echo "$name: PID $pid gone but port ${port} STILL HELD — left for inspection" >&2
         return 1
       fi
@@ -199,7 +216,7 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     echo "  recycled. Left in place for inspection." >&2
     return 1
   fi
-  if [ -n "$port" ] && ! ss -lntp 2>/dev/null | grep -E ":${port}\b" | grep -qE "pid=$pid,"; then
+  if [ -n "$port" ] && ! pid_holds_port "$pid" "$port"; then
     echo "$name: REFUSING TO KILL — PID $pid no longer holds port ${port}." >&2
     return 1
   fi
@@ -209,12 +226,12 @@ stop_tracked() {            # stop_tracked <name> <port|"">
   for i in $(seq 1 20); do
     if [ -z "$port" ]; then
       [ -d "/proc/$pid" ] || break
-    elif ! ss -lntp | grep -qE ":${port}\b"; then
+    elif ! port_held "$port"; then
       break
     fi
     sleep 1
   done
-  if [ -n "$port" ] && ss -lntp | grep -qE ":${port}\b"; then
+  if [ -n "$port" ] && port_held "$port"; then
     echo "$name: FAILED TO RELEASE port ${port} — left for inspection" >&2
     return 1
   fi
@@ -248,14 +265,26 @@ cleanup() {
   else
     master_after="$(master_of "$after" || true)"
     start_after="$(starttime_of "${master_after:-0}" || true)"
+    # The master alone is not the whole picture. gunicorn's workers hold the same
+    # socket, and a worker that died and respawned changes the PID set while leaving
+    # the master untouched — which is exactly the collateral effect this run could
+    # cause by competing for the host's CPU and page cache. Compare the full set.
     if [ "$master_after" != "$PROD_MASTER_BEFORE" ] || \
        [ "$start_after" != "$PROD_START_BEFORE" ]; then
-      echo "WARNING: production on $PROD_PORT is not the process it was" >&2
+      echo "WARNING: production's master on $PROD_PORT is not the process it was —" >&2
+      echo "  production restarted during this run" >&2
       echo "  before: master $PROD_MASTER_BEFORE start $PROD_START_BEFORE [$PROD_PIDS_BEFORE]" >&2
       echo "  after : master ${master_after:-?} start ${start_after:-?} [$after]" >&2
       CLEANUP_FAILED=1
+    elif [ "$after" != "$PROD_PIDS_BEFORE" ]; then
+      echo "WARNING: production's master is unchanged but its listener set is not —" >&2
+      echo "  worker processes were recycled while this run was using the host" >&2
+      echo "  before: [$PROD_PIDS_BEFORE]" >&2
+      echo "  after : [$after]" >&2
+      CLEANUP_FAILED=1
     else
-      echo "production on $PROD_PORT unchanged (master $PROD_MASTER_BEFORE)"
+      echo "production on $PROD_PORT unchanged (master $PROD_MASTER_BEFORE," \
+           "listeners [$PROD_PIDS_BEFORE], boot id matches)"
     fi
   fi
 
@@ -304,8 +333,8 @@ done
 # the variable is set explicitly rather than relying on a default being overridden.
 start_tracked dask_scheduler "$SCHED_PORT" \
   "$VENV/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
-for _ in $(seq 1 30); do ss -lntp | grep -qE ":${SCHED_PORT}\b" && break; sleep 1; done
-ss -lntp | grep -qE ":${SCHED_PORT}\b" || { echo "scheduler did not bind" >&2; exit 1; }
+for _ in $(seq 1 30); do port_held "$SCHED_PORT" && break; sleep 1; done
+port_held "$SCHED_PORT" || { echo "scheduler did not bind" >&2; exit 1; }
 start_tracked dask_worker "" \
   "$VENV/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
   --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard
@@ -354,19 +383,18 @@ echo "== the arms must share an environment, or 5.2A proves nothing =="
 uv run python - <<'PYEOF' || exit 1
 import json, sys
 sys.path.insert(0, ".")
-from bench.provenance import verify_environment_match, validate_meta
+from bench.provenance import (validate_meta, verify_environment_match,
+                              verify_environment_record)
 cand = json.load(open("results/d2b_meta_candidate.json"))
 ref = json.load(open("results/d2b_meta_reference.json"))
 env = json.load(open("results/d2b_environment.json"))
 problems = (validate_meta(cand, "candidate") + validate_meta(ref, "reference")
-            + verify_environment_match(cand, ref))
-# Both arms must also be the environment this run built and recorded, not some
-# other venv that happens to agree with itself.
-for label, meta in (("candidate", cand), ("reference", ref)):
-    got = (meta.get("dependencies") or {}).get("distributions_sha256")
-    if got != env["distributions_sha256"]:
-        problems.append(f"{label}: distributions digest {got} is not the environment "
-                        f"this run prepared ({env['distributions_sha256']})")
+            # do the two arms agree with each other?
+            + verify_environment_match(cand, ref)
+            # and is what they agree on the environment this run actually built?
+            # Two arms sharing a stale .venv agree perfectly and prove nothing.
+            + verify_environment_record(env, cand, "candidate")
+            + verify_environment_record(env, ref, "reference"))
 if problems:
     print("arms are not comparable:", file=sys.stderr)
     for p in problems:

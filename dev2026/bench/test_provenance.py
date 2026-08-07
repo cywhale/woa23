@@ -16,11 +16,12 @@ from pathlib import Path
 
 from bench.manifests import MANIFESTS, expand
 from bench.collect_backend_meta import (
-    build_meta, compare_identity, compare_store, master_of, parse_ss_listeners,
-    resolve_store)
+    build_meta, compare_identity, compare_store, local_port_of, master_of,
+    parse_ss_listeners, resolve_store)
 from bench.provenance import (
     REQUIRED_META_FIELDS, load_meta, validate_meta, validate_store_agreement,
-    verify_environment_match, verify_prior_contract, verify_prior_rung)
+    verify_environment_match, verify_environment_record, verify_prior_contract,
+    verify_prior_rung)
 
 failures: list[str] = []
 
@@ -244,6 +245,20 @@ LISTEN 0 200 [::]:5433 [::]:* users:(("postgres",pid=101,fd=8))
 LISTEN 0 2048 127.0.0.1:8050 0.0.0.0:* users:(("gunicorn",pid=4366,fd=6),("gunicorn",pid=4334,fd=6),("gunicorn",pid=3960,fd=6))
 LISTEN 0 128 127.0.0.1:8040 0.0.0.0:* users:(("gunicorn",pid=7000,fd=5))"""
 
+# Every row here defeated an earlier port test, in the parser or in its shell twin.
+SS_PORT_TRAPS = """LISTEN 0 2048 127.0.0.1:18050 0.0.0.0:* users:(("other",pid=111,fd=3))
+LISTEN 0 2048 [fe80::8050]:9000 [::]:* users:(("v6svc",pid=222,fd=3))
+LISTEN 0 2048 127.0.0.1:8050 0.0.0.0:* users:(("gunicorn",pid=3960,fd=5))
+LISTEN 0 2048 [::]:8050 [::]:* users:(("gunicorn",pid=4366,fd=5))
+LISTEN 0 2048 [fe80::1%eth0]:50 [::]:* users:(("zoned",pid=777,fd=3))
+LISTEN 0 2048 0.0.0.0:* 0.0.0.0:* users:(("noport",pid=888,fd=3))
+ESTAB 0 0 127.0.0.1:54321 127.0.0.1:8050 users:(("curl",pid=9999,fd=3))"""
+
+SS_ESTABLISHED_ONLY = """ESTAB 0 0 127.0.0.1:54321 127.0.0.1:8050 users:(("curl",pid=9999,fd=3))"""
+
+SS_WITH_HEADER = """State Recv-Q Send-Q Local Address:Port Peer Address:Port Process
+LISTEN 0 2048 127.0.0.1:8050 0.0.0.0:* users:(("gunicorn",pid=3960,fd=5))"""
+
 
 def test_ss_parsing_accumulates_rows() -> None:
     """A server appears once per address family; stopping at the first row loses one."""
@@ -255,6 +270,52 @@ def test_ss_parsing_accumulates_rows() -> None:
     check("an unused port yields nothing", parse_ss_listeners(SS_FIXTURE, 9999) == [])
     check("a port that is a suffix of another is not matched",
           parse_ss_listeners(SS_FIXTURE, 50) == [])
+
+
+def test_ss_port_matching_is_exact() -> None:
+    """Substring matching on `ss` output finds ports that are not there.
+
+    Each row below broke an earlier form of this parser or of its shell equivalent.
+    """
+    check("a longer port containing the wanted one is not matched",
+          parse_ss_listeners(SS_PORT_TRAPS, 8050) == [3960, 4366],
+          str(parse_ss_listeners(SS_PORT_TRAPS, 8050)))
+    check("18050's own listener is still found",
+          parse_ss_listeners(SS_PORT_TRAPS, 18050) == [111])
+
+    # `[fe80::8050]:9000` is a different service on a different port whose *address*
+    # happens to contain the digits. The shell's `$0 ~ ":8050"` matched it.
+    check("the port's digits appearing in an IPv6 address are not a match",
+          222 not in parse_ss_listeners(SS_PORT_TRAPS, 8050))
+    check("that row is found under its real port",
+          parse_ss_listeners(SS_PORT_TRAPS, 9000) == [222])
+
+    # `[fe80::1%eth0]:50` ends in `:50` after a word boundary, which a `\b`-anchored
+    # grep for port 50 matched even when nothing listened on 50.
+    check("an IPv6 address ending in the port's digits is not a match",
+          parse_ss_listeners(SS_PORT_TRAPS, 50) == [777],
+          str(parse_ss_listeners(SS_PORT_TRAPS, 50)))
+
+    # A client *connected to* 8050 has it in the peer column. Scanning the first
+    # five fields reported the client's PID as holding the port.
+    check("a peer address is not a listening socket",
+          9999 not in parse_ss_listeners(SS_PORT_TRAPS, 8050))
+    check("only LISTEN rows are considered",
+          parse_ss_listeners(SS_ESTABLISHED_ONLY, 8050) == [],
+          str(parse_ss_listeners(SS_ESTABLISHED_ONLY, 8050)))
+
+    check("a header line is not parsed as a row",
+          parse_ss_listeners(SS_WITH_HEADER, 8050) == [3960])
+    check("an address column with no port is skipped",
+          parse_ss_listeners(SS_PORT_TRAPS, 0) == [])
+
+    check("both address families of one service are still collected",
+          parse_ss_listeners(SS_PORT_TRAPS, 8050) == sorted([3960, 4366]))
+    for field, want in (("127.0.0.1:8050", 8050), ("[::]:8050", 8050),
+                        ("[fe80::1%eth0]:50", 50), ("0.0.0.0:*", None),
+                        ("Address:Port", None), ("nocolon", None)):
+        check(f"local_port_of({field!r}) == {want}", local_port_of(field) == want,
+              str(local_port_of(field)))
 
 
 def test_master_selection() -> None:
@@ -818,6 +879,80 @@ def test_verify_environment_match() -> None:
               "digest missing on reference"))
 
 
+def test_verify_environment_record() -> None:
+    """Agreeing with each other is not the same as being the right environment.
+
+    `verify_environment_match` is satisfied by two arms sharing any venv at all —
+    including a stale `.venv` left by an earlier run, which is the case this exists
+    to catch. The record written before the processes start is the anchor.
+    """
+    record = {"kind": "controlled_environment", "python_version": "3.11.4",
+              "env_python": "/w/.venv/bin/python", "lockfile_sha256": "b" * 64,
+              "distributions_sha256": "a" * 64}
+    arm = {"env_python_version": "3.11.4", "env_python": "/w/.venv/bin/python",
+           "dependencies": {"distributions_sha256": "a" * 64,
+                            "lockfile_sha256": "b" * 64}}
+    check("an arm running the recorded environment passes",
+          verify_environment_record(record, arm, "candidate") == [])
+
+    # The case the digest-only check missed: both arms on a stale venv agree with
+    # each other, so verify_environment_match passes and proves nothing.
+    stale = {"env_python_version": "3.11.4", "env_python": "/old/.venv/bin/python",
+             "dependencies": {"distributions_sha256": "a" * 64,
+                              "lockfile_sha256": "b" * 64}}
+    check("two arms on a stale venv still satisfy the arms-agree check",
+          verify_environment_match(stale, stale) == [],
+          "which is why the record must also be compared")
+    check("but the record catches the wrong environment path",
+          has(verify_environment_record(record, stale, "candidate"),
+              "package environment path is not the environment this run built"))
+
+    check("a mismatched interpreter version is caught",
+          has(verify_environment_record(
+              record, dict(arm, env_python_version="3.14.0"), "reference"),
+              "interpreter version is not the environment this run built"))
+    check("a mismatched lockfile digest is caught",
+          has(verify_environment_record(
+              record, dict(arm, dependencies={**arm["dependencies"],
+                                              "lockfile_sha256": "z" * 64}),
+              "candidate"), "lockfile digest is not the environment this run built"))
+    check("a mismatched distribution digest is caught",
+          has(verify_environment_record(
+              record, dict(arm, dependencies={**arm["dependencies"],
+                                              "distributions_sha256": "z" * 64}),
+              "candidate"),
+              "installed distribution set digest is not the environment"))
+    check("the failing arm is named",
+          has(verify_environment_record(record, stale, "reference"), "reference:"))
+
+    # Fail closed: nothing here may be read as a pass.
+    check("a missing record is a problem, not a pass",
+          has(verify_environment_record(None, arm, "candidate"),
+              "no environment record"))
+    check("missing metadata is a problem, not a pass",
+          has(verify_environment_record(record, None, "candidate"),
+              "metadata missing"))
+    for key in ("env_python", "python_version", "lockfile_sha256",
+                "distributions_sha256"):
+        holed = {k: v for k, v in record.items() if k != key}
+        check(f"a record missing {key} is reported",
+              has(verify_environment_record(holed, arm, "candidate"),
+                  f"no usable {key!r}"))
+    check("metadata with a null digest is reported, not skipped",
+          has(verify_environment_record(
+              record, dict(arm, dependencies={**arm["dependencies"],
+                                              "distributions_sha256": None}),
+              "candidate"), "no usable 'dependencies.distributions_sha256'"))
+    check("a non-string value is not compared as equal",
+          verify_environment_record(record, dict(arm, env_python=None),
+                                    "candidate") != [])
+    check("every field is checked, so a wholly wrong arm reports all four",
+          len(verify_environment_record(
+              {**record, "python_version": "9", "env_python": "/x",
+               "lockfile_sha256": "c" * 64, "distributions_sha256": "d" * 64},
+              arm, "candidate")) == 4)
+
+
 def test_gate_precedence() -> None:
     """Pin the findings-to-verdict mapping itself, not just the findings.
 
@@ -1008,12 +1143,13 @@ def test_manifest_expansion() -> None:
 
 def main() -> int:
     for fn in (test_good_meta_passes, test_source_set_must_match_manifest,
-               test_ss_parsing_accumulates_rows, test_master_selection,
+               test_ss_parsing_accumulates_rows, test_ss_port_matching_is_exact,
+               test_master_selection,
                test_post_run_listener_change, test_post_run_source_drift,
                test_identity_fields_are_required, test_listener_pids_contents,
                test_against_validates_both_records,
                test_verify_prior_rung, test_verify_prior_contract,
-               test_verify_environment_match,
+               test_verify_environment_match, test_verify_environment_record,
                test_gate_precedence,
                test_schema_matches_sidecar_output,
                test_source_digests_are_recomputed,

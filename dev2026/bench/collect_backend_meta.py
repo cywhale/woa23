@@ -45,21 +45,51 @@ ENV_WHITELIST = (
 )
 
 
+def local_port_of(field: str) -> int | None:
+    """The port from an `ss` address column, or None if the column has no port.
+
+    `ss` writes the local address as `addr:port`, and the address half may itself
+    contain colons (`[::]:8050`, `[fe80::8050]:9000`) or a zone suffix
+    (`[fe80::1%eth0]:8050`). Only the text after the **last** colon is the port, and
+    only if it is entirely digits — `0.0.0.0:*` has none.
+    """
+    host, sep, port = field.rpartition(":")
+    if not sep or not port.isdigit():
+        return None
+    return int(port)
+
+
 def parse_ss_listeners(output: str, port: int) -> list[int]:
-    """Every PID holding a listening socket on `port`, across **all** matching rows.
+    """Every PID holding a *listening* socket on `port`, across **all** matching rows.
 
     A service usually appears more than once — a separate row per address family, so
     `0.0.0.0:5433` and `[::]:5433` are two lines for one server. An earlier version
     returned at the first matching row, which silently dropped whichever family came
     second and could therefore miss the master entirely.
 
+    Two things this must not do, both of which earlier forms did:
+
+    - **Match a port as a substring.** An IPv6 address may contain the port's digits
+      as a hextet, so `[fe80::8050]:9000` is a different service that a substring
+      test reads as a listener on 8050. The port is parsed from the local-address
+      column and compared as an integer.
+    - **Look outside the local-address column.** Scanning the first five fields also
+      scans the *peer* column, so a client connected to `127.0.0.1:8050` was reported
+      as holding that port. `-l` output makes peers `0.0.0.0:*` and hides this, which
+      is exactly why it should not be relied on.
+
+    Rows are taken only in state LISTEN, which also skips the header line.
+
     Pure so it can be tested against captured `ss` output rather than a live host.
     """
     pids: set[int] = set()
     for line in output.splitlines():
         fields = line.split()
-        if any(f.endswith(f":{port}") for f in fields[:5]):
-            pids.update(int(m) for m in re.findall(r"pid=(\d+)", line))
+        if len(fields) < 4 or fields[0] != "LISTEN":
+            continue
+        if local_port_of(fields[3]) != port:
+            continue
+        pids.update(int(m) for m in re.findall(r"pid=(\d+)", line))
     return sorted(pids)
 
 
