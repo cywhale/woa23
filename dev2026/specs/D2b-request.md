@@ -267,6 +267,16 @@ is now reported, not required, and it is still part of the *success* criterion: 
 stop is clean only when every process in the tree has exited **and** the port is
 confirmed free.
 
+**A recorded start time is validated, not just compared.** The token is what
+distinguishes a recycled PID from the original, so the tree must be able to tell
+"a legal but different start time" (the PID was recycled — a normal observation)
+from "not a start time at all" (the file is corrupt). Comparing without validating
+collapsed the two: a garbage value simply compared unequal to the live process's
+real token, so a malformed tree reported **no survivors** and cleanup deleted its
+state over whatever was still running. On Linux the token is `/proc` field 22, an
+integer, and anything else is rejected. `record_tree` and `refresh_tree` also refuse
+to write a token they would later reject.
+
 **A live PID whose identity cannot be read is not treated as exited.** If the
 process exists but its start time is unreadable — a restricted `/proc`, a tree line
 that is malformed — the answer is "cannot determine", not "gone". Treating it as
@@ -316,13 +326,13 @@ uv run python -m bench.test_environment    # 22
 uv run python -m bench.test_contract       # 40
 uv run python -m bench.test_paired_stats   # 29
 ./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
-./scripts/test_procs.sh                    # 59, with real forked processes
+./scripts/test_procs.sh                    # 78, with real forked processes
 ```
 
 `test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
 invokes `ps`; on a machine without procfs it falls back to `ps`, and in a sandbox
 that denies `ps` it **exits 77 (skipped) with an explanation** rather than dying
-before the first assertion and reading as a failure. Its first 13 assertions
+before the first assertion and reading as a failure. Its first 20 assertions
 exercise the Linux parsing path against a synthetic procfs and run everywhere,
 including the sandbox. They cover the case that defeats naive field splitting:
 `comm` is the executable's basename, is parenthesised but **not escaped**, and may
@@ -331,7 +341,7 @@ contain `) `. Stripping to the *first* `) ` instead of the last made
 and since the start time is the token that distinguishes a recycled PID from the
 original, two such processes both parsed as `0` and compared equal, so the
 recycled-PID guard would have passed on a process that was not ours. The remaining
-46 assertions need live processes.
+58 assertions need live processes.
 
 The author's own runs used the `ps` path; the `/proc` path is covered by the
 synthetic fixture but has not been exercised against a real Linux `/proc`. Running

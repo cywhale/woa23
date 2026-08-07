@@ -56,6 +56,32 @@ ppid_of() {
   printf '%s\n' "$raw" | tr -d ' '
 }
 
+# Is this a start-time token that `starttime_of` on this host could have produced?
+#
+# The distinction that matters: a *legal but different* token means the PID was
+# recycled and the process is not ours — a normal, expected observation. A token
+# that is not well formed at all means the tree file is corrupt, and nothing in it
+# can be trusted. Without this check the two collapsed: a garbage value simply
+# compared unequal to the live process's real start time, so a malformed tree
+# reported "no survivors" and cleanup deleted its state over whatever was running.
+#
+# On Linux the token is /proc field 22, an integer. The `ps` form exists only so the
+# tests can run on a machine without procfs; its charset check is weaker than the
+# integer one, which is acceptable because production never takes that path.
+_valid_starttime() {        # _valid_starttime <token>
+  local root="${PROC_ROOT:-/proc}"
+  [ -n "$1" ] || return 1
+  if [ -r "$root/1/stat" ]; then
+    case "$1" in *[!0-9]*) return 1 ;; esac
+    return 0
+  fi
+  # `ps -o lstart=` with runs of spaces collapsed: alphanumerics, `_` and the
+  # colons of the clock time, which is always present.
+  case "$1" in *[!A-Za-z0-9_:]*) return 1 ;; esac
+  case "$1" in *:*) ;; *) return 1 ;; esac
+  return 0
+}
+
 # Does this PID name a live process? On Linux /proc answers regardless of who owns
 # it; `kill -0` would report EPERM for another user's process and is only the
 # fallback for machines without procfs.
@@ -168,7 +194,13 @@ record_tree() {             # record_tree <name>
   # shellcheck disable=SC2046
   for p in $pid $(descendants_of "$pid"); do
     st="$(starttime_of "$p" || true)"
-    [ -n "$st" ] && printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
+    [ -n "$st" ] || continue
+    # Never record what tree_survivors would later have to reject.
+    _valid_starttime "$st" || {
+      echo "refusing to record PID $p: start time '$st' is not a well-formed" >&2
+      echo "  token on this host" >&2
+      return 1; }
+    printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
   done
   printf '%s tree: %s\n' "$name" "$(tree_pids "$name")"
 }
@@ -188,7 +220,9 @@ refresh_tree() {            # refresh_tree <name> <master-pid>
   for p in $(descendants_of "$pid"); do
     grep -q "^$p:" "$RUN/$name.tree" 2>/dev/null && continue
     st="$(starttime_of "$p" || true)"
-    [ -n "$st" ] && printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
+    [ -n "$st" ] || continue
+    _valid_starttime "$st" || return 1
+    printf '%s:%s\n' "$p" "$st" >> "$RUN/$name.tree"
   done
 }
 
@@ -224,11 +258,13 @@ tree_survivors() {          # tree_survivors <name>
     case "$line" in *:*) ;; *) return 2 ;; esac
     p="${line%%:*}"; want="${line#*:}"
     case "$p" in ''|*[!0-9]*) return 2 ;; esac
-    [ -n "$want" ] || return 2
+    # A recorded start time that is not a well-formed token is a corrupt file, not
+    # a process that has exited.
+    _valid_starttime "$want" || return 2
 
     if pid_exists "$p"; then
       now="$(starttime_of "$p" || true)"
-      if [ -z "$now" ]; then
+      if [ -z "$now" ] || ! _valid_starttime "$now"; then
         # The PID is live but its identity cannot be read — a restricted /proc, a
         # process that changed hands. "Exited" is the one thing it is definitely
         # not, and treating it as exited is what would let cleanup delete the state

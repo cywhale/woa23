@@ -81,6 +81,19 @@ check "the two parenthesised processes get DIFFERENT start times" "differ" \
 check "an unreadable pid is an error, not a value" "1" \
       "$(PROC_ROOT="$FAKE" starttime_of 424242 >/dev/null 2>&1; echo $?)"
 
+# The validator on the Linux branch, which is the one VM24 takes: field 22 is an
+# integer, so anything else is a corrupt record rather than a different process.
+check "procfs branch accepts an integer" "0" \
+      "$(PROC_ROOT="$FAKE" _valid_starttime 987654321; echo $?)"
+check "procfs branch rejects the ps-shaped token" "1" \
+      "$(PROC_ROOT="$FAKE" _valid_starttime "Mon_Jan_1_00:00:01_2001"; echo $?)"
+for bad in "definitely-not-its-start-time" "98765432a" "" "9876 5432"; do
+  check "procfs branch rejects '$bad'" "1" \
+        "$(PROC_ROOT="$FAKE" _valid_starttime "$bad"; echo $?)"
+done
+check "a real /proc start time validates" "0" \
+      "$(PROC_ROOT="$FAKE" _valid_starttime "$(PROC_ROOT="$FAKE" starttime_of 4321)"; echo $?)"
+
 snap="$(PROC_ROOT="$FAKE" _pid_ppid_snapshot)"
 check "every process is listed" "4" "$(printf '%s\n' "$snap" | wc -l | tr -d ' ')"
 check "a plain comm parses" "yes" "$(has_text "$snap" "4320 1")"
@@ -291,13 +304,47 @@ check "and the live process is seen as a survivor" "yes" "$(contains "$surv" "$b
 kill "$bootp" 2>/dev/null || true
 
 echo
-echo "a recycled PID is not a survivor"
+echo "a legal-but-different start time is a recycled PID; garbage is a corrupt tree"
+# These two must not collapse into each other. The previous version of this test
+# used a garbage value to stand in for "a different start time", so it asserted the
+# fail-open behaviour — a malformed tree reporting no survivors — as correct.
 sleep 60 & rec=$!; STRAYS="$STRAYS $rec"
 sleep 1
 echo "$rec" > "$RUN/r.pid"; starttime_of "$rec" > "$RUN/r.starttime"
+real_st="$(starttime_of "$rec")"
+
+# A well-formed token this host could have produced, but not this process's.
+if [ -r "${PROC_ROOT:-/proc}/1/stat" ]; then other_st=$(( ${real_st} + 1 ))
+else other_st="Mon_Jan_1_00:00:01_2001"; fi
+check "the substitute token is well formed" "0" \
+      "$(_valid_starttime "$other_st"; echo $?)"
+check "and is not the real one" "differ" \
+      "$([ "$other_st" != "$real_st" ] && echo differ || echo same)"
+
+{ printf 'boot:%s\n' "$(boot_id)"
+  printf '%s:%s\n' "$rec" "$other_st"; } > "$RUN/r.tree"
+set +e; surv="$(tree_survivors r)"; st=$?; set -e
+check "a recycled PID is interpretable" "0" "$st"
+check "and is not counted as a survivor" "" "$surv"
+
+# The same PID, still alive, with a value that is not a token at all.
 { printf 'boot:%s\n' "$(boot_id)"
   printf '%s:%s\n' "$rec" "definitely-not-its-start-time"; } > "$RUN/r.tree"
-check "a live PID whose start time differs is not counted" "" "$(tree_survivors r)"
+set +e; tree_survivors r >/dev/null 2>&1; st=$?; set -e
+check "a malformed start time is status 2, not 'no survivors'" "2" "$st"
+
+# ...and it must not be possible to reach a clean stop through it.
+starttime_of "$rec" > "$RUN/r.starttime"
+set +e; out="$(stop_tracked r "" 2>&1)"; st=$?; set -e
+check "stop_tracked fails on a corrupt tree" "1" "$st"
+check "the state files are kept" "yes" "$([ -f "$RUN/r.pid" ] && echo yes || echo no)"
+
+# $rec was stopped above, so ask a process that is certainly alive: this shell.
+check "a real live process yields a token the validator accepts" "0" \
+      "$(_valid_starttime "$(starttime_of $$)"; echo $?)"
+for bad in "" "12 34" "abc" "-5" "1e6"; do
+  check "'$bad' is rejected as a start time" "1" "$(_valid_starttime "$bad"; echo $?)"
+done
 kill "$rec" 2>/dev/null || true
 
 echo
