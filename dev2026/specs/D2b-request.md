@@ -111,8 +111,32 @@ its machine.
 | **reference store** | `~/woa23-s1-controlled/reference/data` → symlink to `~/python/woa23/data`. `woa23_app.py:63` hard-codes the relative `data/`, so this gives it the real store without copying 31.9 GiB and without a writable path to it |
 | **candidate store** | absolute `WOA23_ZARR_STORE=/home/odbadmin/python/woa23/data` |
 | **environment** | **one venv, shared by both arms** — `dev2026/.venv`, Python 3.11.4, built from this branch's `uv.lock` |
-| **ports** | candidate `127.0.0.1:8051`, reference `127.0.0.1:8052`, isolated Dask scheduler `127.0.0.1:8787` |
+| **ports** | candidate `127.0.0.1:8051`, reference `127.0.0.1:8052`, isolated Dask scheduler `127.0.0.1:18787` |
 | **both arms** | `PYTHONHASHSEED=0`, `-w 1`, no `--reload`, plain HTTP, never contacting 8050 |
+
+### The scheduler port: 8787 was never free
+
+The first version of this request specified `127.0.0.1:8787` for the isolated
+scheduler, chosen to stay clear of production's shared cluster on 8786. **That was
+wrong, and it was never checked against the host.** `dask scheduler` binds its
+dashboard to `:8787` by default, so production's own scheduler — PID 4058,
+`dask-scheduler --port 8786`, running since 2026-06-11 — holds **both** ports, on
+`0.0.0.0` rather than loopback:
+
+```
+LISTEN 0.0.0.0:8787  pid=4058
+LISTEN 0.0.0.0:8786  pid=4058     # the same process
+```
+
+The port I picked to avoid production's scheduler belonged to production's scheduler.
+The runner's preflight would have refused to start — it aborts on a held port rather
+than displacing it — so nothing would have been damaged, but the authorised
+configuration could not have run at all.
+
+**`18787` replaces it, and this time the port was confirmed free on VM24 before the
+number was written down** (nothing listening on 18780–18795). The lesson is recorded
+rather than quietly fixed: a port in a spec is a claim about a specific host, and it
+is worth no more than the check behind it.
 
 ### The Dask scheduler is the subtle one
 
@@ -121,7 +145,7 @@ the thing under test. `src/dask_client_manager.py` reads `DASK_SCHEDULER_ADDRESS
 and **falls back to `tcp://localhost:8786`**, which is production's shared scheduler
 serving `tide_app` and `mhw_app`. Left to the default, the reference would join it.
 
-So this run starts **its own scheduler and worker on 8787** and sets
+So this run starts **its own scheduler and worker on 18787** and sets
 `DASK_SCHEDULER_ADDRESS` explicitly rather than relying on the default being
 overridden. Production's cluster on 8786 is never contacted.
 
@@ -155,7 +179,7 @@ host's CPU and evicted production's page cache for nothing. In order:
 4. **No leftover run state.** A free port is not an all-clear: cleanup deliberately
    leaves its pidfile when it refuses to kill, and starting over it would orphan
    whatever it names.
-5. Ports 8051, 8052 and 8787 are free. If any is held, abort — never displace it.
+5. Ports 8051, 8052 and 18787 are free. If any is held, abort — never displace it.
 6. Production **is** listening on 8050. Its **listener PID set, master PID and the
    master's `/proc` start time** are recorded, along with the host's **boot ID**, so
    the post-run check can compare identity rather than mere occupancy.
@@ -481,7 +505,7 @@ Authorisation is requested for **one execution** of
 |---|---|
 | **services** | 4 — Dask scheduler, Dask worker, reference API, candidate API |
 | **OS processes** | **6** — each API is a gunicorn arbiter plus one forked worker |
-| **ports** | `127.0.0.1:8051`, `127.0.0.1:8052`, `127.0.0.1:8787` — all loopback |
+| **ports** | `127.0.0.1:8051`, `127.0.0.1:8052`, `127.0.0.1:18787` — all loopback |
 | **requests, per arm** | **≤480** |
 | **requests to production 8050** | **0** |
 | **writes under `~/python/woa23`** | **none** — read-only symlink to the store |

@@ -34,7 +34,8 @@ WORK=$HOME/woa23-s1-controlled
 REF_DIR=$WORK/reference
 CAND_PORT=8051
 REF_PORT=8052
-SCHED_PORT=8787            # isolated; production's is 8786 and is never touched
+SCHED_PORT=18787           # see D2b-request.md §4: 8787 is NOT free — it is
+                           # production's own scheduler dashboard, same PID as 8786
 PROD_PORT=8050
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN=$HERE/run
