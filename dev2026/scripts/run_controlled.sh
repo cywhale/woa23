@@ -118,7 +118,9 @@ PYEOF
 # Leftover state first: a free port is not an all-clear, because cleanup
 # deliberately leaves its pidfile when it refuses to kill.
 shopt -s nullglob
-leftovers=("$RUN"/*.pid "$RUN"/*.starttime)
+# `.uncertain` too: it is written precisely when a previous run could not record
+# what it had started, which is the state that most needs a person to look.
+leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.uncertain)
 if [ ${#leftovers[@]} -gt 0 ]; then
   echo "leftover run state from a previous invocation:" >&2
   printf '  %s\n' "${leftovers[@]}" >&2

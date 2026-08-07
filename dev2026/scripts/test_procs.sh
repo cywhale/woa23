@@ -315,6 +315,78 @@ else
 fi
 
 echo
+echo "when the marker cannot be written AND the tree cannot be removed"
+# The residual hole: an unwritable marker plus a failed removal used to leave a
+# tree on disk carrying a valid boot header and pid lines but no `incomplete:`
+# line — a legal-looking tree that a later cleanup would trust.
+LOCKED="$RUN/locked"
+mkdir -p "$LOCKED"
+bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "'"$LOCKED"'/lk.child"; wait' \
+  >/dev/null 2>&1 &
+lockp=$!; STRAYS="$STRAYS $lockp"
+sleep 1
+lockc="$(cat "$LOCKED/lk.child")"; STRAYS="$STRAYS $lockc"
+RUN_REAL="$RUN"; RUN="$LOCKED"
+echo "$lockp" > "$RUN/lk.pid"; starttime_of "$lockp" > "$RUN/lk.starttime"
+record_tree lk >/dev/null
+check "the tree looks complete before the failure is staged" "0" \
+      "$(grep -c '^incomplete:' "$RUN/lk.tree")"
+# Both permissions are needed, and they are not the same thing: appending needs
+# write on the FILE, while removing it and creating the sentinel need write on the
+# DIRECTORY. Locking only the directory left the append working.
+chmod 0444 "$RUN/lk.tree"
+chmod 0555 "$LOCKED"
+if printf 'probe\n' >> "$RUN/lk.tree" 2>/dev/null \
+   || printf 'probe\n' > "$RUN/probe" 2>/dev/null; then
+  echo "  (skipped: this user can write a read-only file in a 0555 directory)"
+  chmod 0755 "$LOCKED"; chmod 0644 "$RUN/lk.tree"
+  rm -- "$RUN/probe" 2>/dev/null || true
+else
+  set +e; _mark_incomplete lk "process-enumeration-failed" >/dev/null 2>&1; st=$?; set -e
+  check "_mark_incomplete reports failure" "1" "$st"
+  check "the tree really could not be removed" "yes" \
+        "$([ -f "$RUN/lk.tree" ] && echo yes || echo no)"
+  check "and it really has no marker in it" "0" "$(grep -c '^incomplete:' "$RUN/lk.tree")"
+  check "the .uncertain sentinel could not be written either" "no" \
+        "$([ -f "$RUN/lk.uncertain" ] && echo yes || echo no)"
+
+  # With nothing on disk to say so, the runtime layer is what must hold.
+  set +e; tree_boot_matches lk >/dev/null 2>&1; st=$?; set -e
+  check "tree_boot_matches refuses the tree anyway" "2" "$st"
+  set +e; tree_survivors lk >/dev/null 2>&1; st=$?; set -e
+  check "tree_survivors cannot determine" "2" "$st"
+  set +e; out="$(stop_tracked lk "" 2>&1)"; st=$?; set -e
+  check "stop_tracked returns non-zero" "1" "$st"
+  check "it refuses before signalling, so the process is untouched" "alive" \
+        "$(kill -0 "$lockp" 2>/dev/null && echo alive || echo gone)"
+  check "state is not removed" "yes" "$([ -f "$RUN/lk.pid" ] && echo yes || echo no)"
+  chmod 0755 "$LOCKED"; chmod 0644 "$RUN/lk.tree"
+fi
+RUN="$RUN_REAL"
+kill "$lockp" "$lockc" 2>/dev/null || true
+
+echo
+echo "a persisted .uncertain sentinel outlives the process that wrote it"
+# The layer that covers a *later* invocation, which has no runtime flag at all.
+bash -c 'sleep "$FIXTURE_LIFE" & wait' >/dev/null 2>&1 &
+sentp=$!; STRAYS="$STRAYS $sentp"
+sleep 1
+echo "$sentp" > "$RUN/sent.pid"; starttime_of "$sentp" > "$RUN/sent.starttime"
+record_tree sent >/dev/null
+check "the tree is usable to begin with" "0" \
+      "$(tree_boot_matches sent >/dev/null 2>&1; echo $?)"
+printf 'tree write uncertain\n' > "$RUN/sent.uncertain"
+check "a sentinel alone makes it uninterpretable" "2" \
+      "$(tree_boot_matches sent >/dev/null 2>&1; echo $?)"
+check "even though the tree itself still looks complete" "0" \
+      "$(grep -c '^incomplete:' "$RUN/sent.tree")"
+set +e; out="$(stop_tracked sent "" 2>&1)"; st=$?; set -e
+check "stop_tracked refuses" "1" "$st"
+check "state is kept" "yes" "$([ -f "$RUN/sent.pid" ] && echo yes || echo no)"
+kill "$sentp" 2>/dev/null || true
+rm "$RUN/sent.pid" "$RUN/sent.starttime" "$RUN/sent.tree" "$RUN/sent.uncertain"
+
+echo
 echo "an incomplete tree still stops the process it does know about"
 # The point of marking rather than refusing: what is provably ours is still stopped,
 # so the host is left cleaner, while the run still fails because completeness is

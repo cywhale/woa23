@@ -101,7 +101,7 @@ esac
 # port — and checking only the port would let this run overwrite that record and
 # orphan whatever it was pointing at. The leftover state has to be dealt with by a
 # person, not stepped over.
-for stale in "$PIDFILE" "$STARTFILE" "$RUN/$TRACK.tree"; do
+for stale in "$PIDFILE" "$STARTFILE" "$RUN/$TRACK.tree" "$RUN/$TRACK.uncertain"; do
   if [ -e "$stale" ]; then
     echo "leftover state from a previous run: $stale" >&2
     if [ -f "$PIDFILE" ]; then

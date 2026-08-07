@@ -199,6 +199,34 @@ descendants_of() {
 # In bash that switches `set -e` OFF for the whole function body, so an unchecked
 # failure inside does not abort anything; it simply carries on to the next line.
 # Nothing here may rely on errexit. Every write is checked.
+# "This tree may understate what was started" as a state, not just as a line in a
+# file that could not be written.
+#
+# Three layers, because each can fail where the next still works:
+#   1. the `incomplete:` line inside the tree — survives across invocations;
+#   2. a `<name>.uncertain` sentinel beside it — a *new* file, so it still works
+#      when the tree itself is unwritable (a read-only file in a writable
+#      directory, which is the common case);
+#   3. a shell variable — needs no filesystem at all, so it holds even on a
+#      read-only mount, for the remainder of this process.
+# Layers 1 and 2 persist; layer 3 does not, which is why 2 exists.
+_uncertain_var() {          # _uncertain_var <name>
+  printf '_TREE_UNCERTAIN_%s' "$(printf '%s' "$1" | tr -c 'A-Za-z0-9_' '_')"
+}
+
+_set_uncertain() {          # _set_uncertain <name>
+  local v; v="$(_uncertain_var "$1")"
+  printf -v "$v" '1'
+  printf 'tree write uncertain\n' > "$RUN/$1.uncertain" 2>/dev/null || return 1
+}
+
+# Is this tree's completeness in doubt? Checked before the tree is read at all.
+_is_uncertain() {           # _is_uncertain <name>
+  local v; v="$(_uncertain_var "$1")"
+  [ "${!v:-0}" = "1" ] && return 0
+  [ -f "$RUN/$1.uncertain" ]
+}
+
 _mark_incomplete() {        # _mark_incomplete <name> <reason>
   local f="$RUN/$1.tree"
   if printf 'incomplete:%s\n' "$2" >> "$f"; then
@@ -209,11 +237,18 @@ _mark_incomplete() {        # _mark_incomplete <name> <reason>
   # complete — a missing tree makes tree_boot_matches return 2, which is the
   # fail-closed answer for every later reader too.
   echo "$1: CANNOT WRITE the incompleteness marker to $f" >&2
+  # Whatever else happens, this tree is now in doubt for the rest of this process.
+  _set_uncertain "$1"
+  local sentinel=$?
   if rm -- "$f" 2>/dev/null; then
     echo "  the partial tree has been removed so it cannot be misread as complete" >&2
+  elif [ "$sentinel" -eq 0 ]; then
+    echo "  and it could not be removed either, so $RUN/$1.uncertain now marks it" >&2
+    echo "  unusable — for this run and for any later one" >&2
   else
-    echo "  AND the partial tree could not be removed: $f may now understate what" >&2
-    echo "  this run started. Inspect it before trusting any later cleanup." >&2
+    echo "  AND it could not be removed, AND the .uncertain sentinel could not be" >&2
+    echo "  written. This process will refuse to trust the tree, but nothing on" >&2
+    echo "  disk records that. INSPECT $f BEFORE RUNNING ANY CLEANUP AGAINST IT." >&2
   fi
   return 1
 }
@@ -313,6 +348,9 @@ refresh_tree() {            # refresh_tree <name> <master-pid>
 # processes belonging to someone else, so the only safe action is none.
 tree_boot_matches() {       # tree_boot_matches <name>
   local name="$1" recorded current
+  # A tree whose write could not be confirmed cannot be interpreted, whatever it
+  # happens to contain — it may simply be missing the line that says so.
+  _is_uncertain "$name" && return 2
   [ -f "$RUN/$name.tree" ] || return 2
   recorded="$(grep '^boot:' "$RUN/$name.tree" 2>/dev/null | head -1 | cut -d: -f2-)"
   current="$(boot_id || true)"
@@ -496,6 +534,11 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     echo "$name: every tracked process has exited but port ${port} could not be" >&2
     echo "  confirmed free — either something else holds it, or the port state is" >&2
     echo "  unreadable. State left for inspection." >&2
+    return 1
+  fi
+  if _is_uncertain "$name"; then
+    echo "$name: refusing to remove state — this tree's completeness was never" >&2
+    echo "  confirmed, so a clean stop cannot be claimed for it." >&2
     return 1
   fi
   rm "$RUN/$name.pid"

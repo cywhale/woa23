@@ -276,11 +276,24 @@ refresh failure in a local flag rather than inferring it from the file afterward
 the marker write can itself fail, and then the file would be the only record of
 something the file could not record.
 
-If the incompleteness marker cannot be written, the partial tree is **removed**
-rather than left behind — a missing tree makes `tree_boot_matches` return 2, which
-is the fail-closed answer for every later reader as well. If it cannot even be
-removed, that is said plainly, because the file on disk may then understate what the
-run started.
+"This tree may understate what was started" is a **state**, not just a line in a
+file that might not be writable. Three layers, because each fails where the next
+still works:
+
+1. the `incomplete:` line inside the tree — persists across invocations;
+2. a `<name>.uncertain` sentinel beside it — a *new* file, so it still works when
+   the tree itself is unwritable, which is the common case (appending needs write
+   on the file; creating the sentinel needs write on the directory);
+3. a shell variable — needs no filesystem at all, so it holds even on a read-only
+   mount, for the remainder of the process.
+
+`tree_boot_matches` consults the state before reading the tree, so a tree in doubt
+is uninterpretable whatever it happens to contain — including a tree that looks
+complete only because the line saying otherwise could not be written. `stop_tracked`
+additionally refuses to remove state for such a tree. Both runners treat a leftover
+`.uncertain` as blocking preflight state, since it is written exactly when a
+previous run could not record what it had started. If all three layers fail, the
+message says so in as many words and names the file to inspect.
 
 **A tree that omits a live process is worse than one that is corrupt**, because it
 looks valid. Both writers could fail to see everything and both used to carry on:
@@ -352,7 +365,7 @@ uv run python -m bench.test_environment    # 22
 uv run python -m bench.test_contract       # 40
 uv run python -m bench.test_paired_stats   # 29
 ./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
-./scripts/test_procs.sh                    # 105, with real forked processes
+./scripts/test_procs.sh                    # 120, with real forked processes
 ```
 
 `test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
@@ -367,7 +380,7 @@ contain `) `. Stripping to the *first* `) ` instead of the last made
 and since the start time is the token that distinguishes a recycled PID from the
 original, two such processes both parsed as `0` and compared equal, so the
 recycled-PID guard would have passed on a process that was not ours. The remaining
-85 assertions need live processes.
+100 assertions need live processes.
 
 The author's own runs used the `ps` path; the `/proc` path is covered by the
 synthetic fixture but has not been exercised against a real Linux `/proc`. Running
