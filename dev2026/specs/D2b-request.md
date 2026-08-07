@@ -1,6 +1,8 @@
 # D2b — request to run a controlled two-arm comparison on VM24
 
-**Status:** requested, not granted. Nothing here has been run.
+**Status:** **formally requested, 2026-08-07. Not granted. Nothing here has been
+run.** Reviewed and cleared to request at `422e236`; the review explicitly did *not*
+grant execution.
 **Asks for:** four processes on VM24, all loopback, for the duration of one run.
 **Independent of D2a.** D2a authorised one candidate against live production; this
 authorises a self-contained pair. Neither implies the other.
@@ -251,3 +253,47 @@ Its refusal message names **four** processes, which is what it starts. The count
 worth stating correctly in the message the PI reads at the moment of granting: an
 earlier draft said three, having omitted the Dask worker — the process that does the
 actual reading on the reference arm.
+
+## 10. Known imprecision, stated rather than discovered later
+
+Two diagnostics are less specific than they should be. Both **fail safe** — the run
+stops or is marked failed in every case — but the message a reader gets can be
+narrower than the truth, and this request is partly a request to trust those
+messages, so they are listed here rather than left to be found in a transcript.
+
+1. **A `LISTEN` row with no readable `pid=`** (another user's process, no privilege
+   to see it) yields an empty PID set. Preflight then reports "production is not
+   listening on 8050" and aborts, when the accurate statement is "a listener exists
+   but its PID cannot be resolved". The refusal is correct; the reason given is not.
+2. **`stop_tracked` when `ss` cannot be read** describes the port as not released.
+   Refusing to declare an unreadable socket released is the behaviour we want — the
+   wording just says "FAILED TO RELEASE" when it means "could not confirm release".
+
+Neither affects whether the run proceeds or how it is scored. They can be fixed
+before the run if that is preferred; the review classified them as non-blocking.
+
+## 11. The ask
+
+Authorisation is requested for **one execution** of
+`scripts/run_controlled.sh` on VM24 as `odbadmin`, gated on
+`WOA23_D2B_GRANTED=yes`, with:
+
+| | |
+|---|---|
+| **processes** | 4 — Dask scheduler, Dask worker, reference API, candidate API |
+| **ports** | `127.0.0.1:8051`, `127.0.0.1:8052`, `127.0.0.1:8787` — all loopback |
+| **requests, per arm** | **≤480** |
+| **requests to production 8050** | **0** |
+| **writes under `~/python/woa23`** | **none** — read-only symlink to the store |
+| **duration** | one run; the trap stops all four processes on every exit path |
+
+**Not authorised by this request:** rung 60, rung 150, any second execution, any
+public cutover, restarting or reconfiguring production, contact with the shared Dask
+cluster on 8786, or any change to production's package environment. Each is a
+separate decision.
+
+**On completion the report will state** the contract gate verdict, the latency gate
+verdict with its bootstrap intervals, both arms' provenance, the environment digests,
+the recorded `request_order_counts`, and the cleanup result including production's
+listener set, master PID, start time and boot ID before and after — or, if cleanup
+did not complete, that the run is a failure regardless of its gates.
