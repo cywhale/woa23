@@ -57,10 +57,28 @@ echo "the Linux /proc parsing path"
 FAKE="$RUN/fakeproc"
 mkdir -p "$FAKE/1" "$FAKE/4320" "$FAKE/4321" "$FAKE/999"
 printf '1 (systemd) S 0 1 1 0 -1 4194560 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/1/stat"
-printf '4320 (gunicorn) S 1 4320 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/4320/stat"
+printf '4320 (gunicorn) S 1 4320 0 0 -1 0 0 0 0 0 1 2 0 0 20 0 1 0 987654301 1 2\n' \
+  > "$FAKE/4320/stat"
 # A comm with a space and nested parentheses — the reason the strip is greedy.
-printf '4321 (my (weird) app) S 4320 4320 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/4321/stat"
-printf '999 (dask) S 4321 999 %s\n' "$(seq -s' ' 1 30)" > "$FAKE/999/stat"
+printf '4321 (my (weird) app) S 4320 4320 0 0 -1 0 0 0 0 0 1 2 0 0 20 0 1 0 987654321 1 2\n' \
+  > "$FAKE/4321/stat"
+printf '999 (dask (worker) x) S 4321 999 0 0 -1 0 0 0 0 0 1 2 0 0 20 0 1 0 987654399 1 2\n' \
+  > "$FAKE/999/stat"
+
+# starttime_of / ppid_of read the same line and must agree with the snapshot.
+# 4321 is deliberately named `my (weird) app`: comm is parenthesised but not
+# escaped, so it can contain `) `, and a shortest-match strip truncates there.
+check "ppid_of parses a plain comm" "1" "$(PROC_ROOT="$FAKE" ppid_of 4320)"
+check "ppid_of parses a comm containing ') '" "4320" "$(PROC_ROOT="$FAKE" ppid_of 4321)"
+check "starttime_of parses a plain comm" "987654301" \
+      "$(PROC_ROOT="$FAKE" starttime_of 4320)"
+check "starttime_of parses a comm containing ') '" "987654321" \
+      "$(PROC_ROOT="$FAKE" starttime_of 4321)"
+check "the two parenthesised processes get DIFFERENT start times" "differ" \
+      "$([ "$(PROC_ROOT="$FAKE" starttime_of 4321)" \
+           != "$(PROC_ROOT="$FAKE" starttime_of 999)" ] && echo differ || echo same)"
+check "an unreadable pid is an error, not a value" "1" \
+      "$(PROC_ROOT="$FAKE" starttime_of 424242 >/dev/null 2>&1; echo $?)"
 
 snap="$(PROC_ROOT="$FAKE" _pid_ppid_snapshot)"
 check "every process is listed" "4" "$(printf '%s\n' "$snap" | wc -l | tr -d ' ')"
@@ -106,6 +124,25 @@ check "the recorded tree holds the parent" "yes" "$(contains "$tree_pids" "$pare
 check "the recorded tree holds the forked child" "yes" "$(contains "$tree_pids" "$child")"
 check "every live survivor is recorded" "yes" \
       "$(contains "$(tree_survivors svc)" "$child")"
+
+echo
+echo "a tracked service always has an interpretable tree"
+# The window this closes: the trap is armed the moment a service is tracked, and
+# stop_tracked refuses to signal anything whose tree it cannot interpret. If
+# start_tracked did not record one, an abort before the first explicit record_tree —
+# a port that never binds, a readiness timeout — would leave the process running.
+start_tracked early "" sleep 45 >/dev/null
+early_pid="$(cat "$RUN/early.pid")"; STRAYS="$STRAYS $early_pid"
+check "start_tracked leaves a tree file behind" "yes" \
+      "$([ -f "$RUN/early.tree" ] && echo yes || echo no)"
+check "it carries a boot header" "yes" \
+      "$(has_text "$(head -1 "$RUN/early.tree")" "boot:")"
+set +e; tree_survivors early >/dev/null 2>&1; st=$?; set -e
+check "so the tree is interpretable straight away" "0" "$st"
+set +e; out="$(stop_tracked early "" 2>&1)"; st=$?; set -e
+check "an immediate stop succeeds rather than refusing" "0" "$st"
+check "and the process is actually gone" "gone" \
+      "$(kill -0 "$early_pid" 2>/dev/null && echo alive || echo gone)"
 
 echo
 echo "a stranded child fails the stop, even with the port free"

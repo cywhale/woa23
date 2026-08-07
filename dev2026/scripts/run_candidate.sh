@@ -125,74 +125,26 @@ done
 # may still be running. `starttime_of`, `record_tree` and `tree_survivors` come from
 # lib_procs.sh.
 
-holds_port() {
-  pid_holds_port "$1" "$PORT"
-}
-
+# The stop path is `stop_tracked` from lib_procs.sh, not a second implementation.
+# It is the one covered by scripts/test_procs.sh, and it enforces, in this order:
+#
+#   1. the recorded tree is from the running kernel — checked BEFORE any signal,
+#      because a PID is reused across a reboot and its start time is measured from
+#      boot, so the same pid:starttime pair can name someone else's process;
+#   2. the tracked PID still has the start time we recorded (not recycled);
+#   3. it still holds the port;
+#   4. after the signal, every process in the tree has exited AND the port is
+#      confirmed free — an arbiter closing its socket says nothing about the worker
+#      it forked;
+#   5. "cannot be interpreted" (status 2) is never read as "nothing survived".
+#
+# On any of those it refuses, leaves the state files, and returns non-zero. This
+# used to be a parallel copy here, which meant the fixes landed in one place and the
+# tests exercised the other.
 stop_candidate() {
-  local rc=$? pid now surv
-  [ -f "$PIDFILE" ] || return $rc
-  pid="$(cat "$PIDFILE")"
-
-  now="$(starttime_of "$pid" || true)"
-  if [ -z "$now" ]; then
-    # A dead PID is not a released socket: a surviving worker, or something else
-    # that grabbed the port, can still hold it. Reporting success here would leave
-    # the next preflight to discover it.
-    echo "PID $pid is already gone — accounting for its children and the port" >&2
-    local j
-    for j in $(seq 1 20); do
-      if [ -z "$(tree_survivors "$TRACK")" ] && port_released "$PORT"; then
-        rm "$PIDFILE"
-        [ -f "$STARTFILE" ] && rm "$STARTFILE"
-        [ -f "$RUN/$TRACK.tree" ] && rm "$RUN/$TRACK.tree"
-        echo "whole tree exited and port ${PORT} is free; state removed"
-        return $rc
-      fi
-      sleep 1
-    done
-    surv="$(tree_survivors "$TRACK")"
-    if [ -n "$surv" ]; then
-      echo "PID $pid is gone but its child process(es) are not: $surv" >&2
-    else
-      echo "PID $pid is gone but port ${PORT} could not be confirmed free:" >&2
-      ss_rows_on_port "$PORT" >&2 || true
-    fi
-    echo "state left in place; do not start another instance until this is resolved" >&2
-    return 1
-  fi
-  if [ "$now" != "$(cat "$STARTFILE" 2>/dev/null || echo none)" ]; then
-    echo "REFUSING TO KILL: PID $pid has a different start time than the process we" >&2
-    echo "started — the PID was recycled. Pidfile left in place for inspection." >&2
-    return 1
-  fi
-  if ! holds_port "$pid"; then
-    echo "REFUSING TO KILL: PID $pid no longer holds port ${PORT}. Left in place." >&2
-    return 1
-  fi
-
-  refresh_tree "$TRACK" "$pid"
-  kill "$pid" 2>/dev/null || true
-  local i
-  for i in $(seq 1 20); do
-    # Both conditions. A released socket alone is not proof: the arbiter closing it
-    # says nothing about the worker it forked.
-    if [ -z "$(tree_survivors "$TRACK")" ] && port_released "$PORT"; then
-      rm "$PIDFILE"
-      [ -f "$STARTFILE" ] && rm "$STARTFILE"
-      [ -f "$RUN/$TRACK.tree" ] && rm "$RUN/$TRACK.tree"
-      echo "whole tree exited, port ${PORT} confirmed free, state removed"
-      return $rc
-    fi
-    sleep 1
-  done
-  surv="$(tree_survivors "$TRACK")"
-  if [ -n "$surv" ]; then
-    echo "still running after stop: PID(s) $surv — left for inspection" >&2
-  else
-    echo "port ${PORT} could not be confirmed free after 20 s — left for inspection" >&2
-  fi
-  return 1
+  local rc=$?
+  stop_tracked "$TRACK" "$PORT" || return 1
+  return $rc
 }
 # Cleans up THIS run only, and only after proving the PID is still the process it
 # started. It never kills anything else: a preflight that finds the port bound
@@ -207,6 +159,12 @@ echo "$CANDIDATE_PID" > "$PIDFILE"
 sleep 1
 starttime_of "$CANDIDATE_PID" > "$STARTFILE" || {
   echo "could not read the start time of PID $CANDIDATE_PID" >&2; exit 1; }
+# Immediately, before readiness. The trap is already armed, and stop_candidate
+# refuses to signal a service whose tree it cannot interpret — so without this, a
+# readiness timeout would leave gunicorn running. It holds the arbiter alone at this
+# point; the worker is added below, and refresh_tree catches it at stop time anyway.
+record_tree "$TRACK" > /dev/null || {
+  echo "could not record the process tree for $TRACK" >&2; exit 1; }
 
 # Ready means 200 AND a non-empty body, polled to a 30 s ceiling. A timeout is a
 # failure, not something to wait through.

@@ -242,6 +242,13 @@ State files are now removed only when **every** recorded process has exited *and
 the port is confirmed free. A PID whose start time has changed is treated as
 recycled, not as a survivor, so the check does not raise false alarms either.
 
+A tree is recorded the moment a service is tracked, not once it is ready. The trap
+is armed from the first `start_tracked`, and a service whose tree cannot be
+interpreted is one this script refuses to signal — so a tree written only after
+readiness would leave gunicorn running on exactly the abort paths where cleanup
+matters most: a port that never binds, a readiness timeout. The first snapshot may
+hold the arbiter alone; `refresh_tree` picks up the forked worker at stop time.
+
 **Every recorded tree is stamped with the host's boot id**, in the tree file itself
 rather than beside it, so a tree without a matching header cannot be interpreted at
 all. This matters because a PID is reused after a reboot *and* its start time is
@@ -292,16 +299,22 @@ uv run python -m bench.test_environment    # 22
 uv run python -m bench.test_contract       # 40
 uv run python -m bench.test_paired_stats   # 29
 ./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
-./scripts/test_procs.sh                    # 34, with real forked processes
+./scripts/test_procs.sh                    # 45, with real forked processes
 ```
 
 `test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
 invokes `ps`; on a machine without procfs it falls back to `ps`, and in a sandbox
 that denies `ps` it **exits 77 (skipped) with an explanation** rather than dying
-before the first assertion and reading as a failure. Its first seven assertions
+before the first assertion and reading as a failure. Its first thirteen assertions
 exercise the Linux parsing path against a synthetic procfs and run everywhere,
-including the sandbox — they cover the case that defeats naive field splitting, a
-`comm` containing spaces and parentheses. The remaining 27 need live processes.
+including the sandbox. They cover the case that defeats naive field splitting:
+`comm` is the executable's basename, is parenthesised but **not escaped**, and may
+contain `) `. Stripping to the *first* `) ` instead of the last made
+`4321 (my (weird) app) S 4320 … 987654321` parse as ppid `S` and start time `0` —
+and since the start time is the token that distinguishes a recycled PID from the
+original, two such processes both parsed as `0` and compared equal, so the
+recycled-PID guard would have passed on a process that was not ours. The remaining
+32 assertions need live processes.
 
 The author's own runs used the `ps` path; the `/proc` path is covered by the
 synthetic fixture but has not been exercised against a real Linux `/proc`. Running

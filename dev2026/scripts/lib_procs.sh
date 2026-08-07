@@ -16,11 +16,27 @@
 #
 # The `ps` branch exists so the offline tests can run on a machine without procfs.
 # On VM24 the /proc branch is always the one taken.
+# Strip `<pid> (<comm>) ` from a /proc/<pid>/stat line, leaving state as the first
+# field — so /proc field N is token N-2.
+#
+# The `##` is load-bearing. `comm` is the executable's basename, it is only
+# parenthesised — not escaped — and it may contain `) `. With the shortest match
+# (`#`) a process named `my (weird) app` truncates at the first `) `, and the line
+# `4321 (my (weird) app) S 4320 ... 987654321 ...` yields ppid `S` and start time
+# `0`. The start time is the identity token that distinguishes a recycled PID from
+# the original, so two such processes would both parse as `0` and compare equal —
+# the recycled-PID guard would pass on a process that is not ours. The longest match
+# is correct because no field after `comm` can contain `) `: they are a single
+# character and then numbers.
+_stat_fields() {            # _stat_fields <stat-line>
+  printf '%s\n' "${1##*) }"
+}
+
 starttime_of() {
-  local raw
-  if [ -r "/proc/$1/stat" ]; then
-    raw="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
-    printf '%s\n' "${raw#*) }" | awk '{print $20}'
+  local raw root="${PROC_ROOT:-/proc}"
+  if [ -r "$root/$1/stat" ]; then
+    raw="$(cat "$root/$1/stat" 2>/dev/null)" || return 1
+    _stat_fields "$raw" | awk '{print $20}'          # field 22: starttime
     return 0
   fi
   raw="$(ps -o lstart= -p "$1" 2>/dev/null)" || return 1
@@ -29,10 +45,10 @@ starttime_of() {
 }
 
 ppid_of() {
-  local raw
-  if [ -r "/proc/$1/stat" ]; then
-    raw="$(cat "/proc/$1/stat" 2>/dev/null)" || return 1
-    printf '%s\n' "${raw#*) }" | awk '{print $2}'
+  local raw root="${PROC_ROOT:-/proc}"
+  if [ -r "$root/$1/stat" ]; then
+    raw="$(cat "$root/$1/stat" 2>/dev/null)" || return 1
+    _stat_fields "$raw" | awk '{print $2}'           # field 4: ppid
     return 0
   fi
   raw="$(ps -o ppid= -p "$1" 2>/dev/null)" || return 1
@@ -208,6 +224,15 @@ start_tracked() {           # start_tracked <name> <port|""> <cmd...>
   sleep 1
   starttime_of "$pid" > "$RUN/$name.starttime" || {
     echo "could not read the start time of $name (pid $pid)" >&2; return 1; }
+  # Record the tree immediately, not later. stop_tracked refuses to signal anything
+  # whose tree it cannot interpret, so a service that is tracked but has no tree
+  # file yet would be left running by any cleanup between here and the first
+  # explicit record_tree — precisely the abort paths (a port that never binds, a
+  # readiness timeout) where cleanup matters most. This snapshot may hold the master
+  # alone, since a gunicorn arbiter has not forked yet; refresh_tree picks up the
+  # children at stop time, and the callers re-record once the arms are ready.
+  record_tree "$name" > /dev/null || {
+    echo "could not record the process tree for $name" >&2; return 1; }
   echo "$name started (pid $pid${port:+, port $port})"
 }
 
