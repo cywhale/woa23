@@ -373,10 +373,12 @@ for pair in "candidate:$CAND_PORT reference:$REF_PORT" \
 done
 echo "both arms ready"
 
-# Record each service's whole process tree, now that the children exist. A gunicorn
-# arbiter has not forked its worker in the first second after exec, so a snapshot
-# taken inside start_tracked would record the arbiter alone — which is exactly the
-# accounting error this run is being asked to avoid repeating.
+# Re-record each tree now that the children exist. start_tracked already wrote one
+# when it began tracking — it has to, because the trap is armed from that moment and
+# stop refuses to signal a service whose tree it cannot interpret — but a gunicorn
+# arbiter has not forked its worker in the first second after exec, so that first
+# snapshot holds the arbiter alone. This is where the full set is established, and
+# where it is checked against what the authorisation covers.
 
 # ================================================================= provenance ===
 echo "== provenance =="

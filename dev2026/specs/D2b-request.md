@@ -258,6 +258,23 @@ unreadable boot id, `stop_tracked` refuses before signalling anything: nothing i
 killed, nothing is deleted, the run fails and the state is left for a person. The
 same check runs again after the wait, in case the boot id changed mid-stop.
 
+**Holding the port is not a precondition for stopping a service.** Identity is
+`pid` + start time + the tree's boot id; the socket adds nothing to it. Requiring
+the socket meant that a service aborted before it ever bound — a readiness timeout,
+a provenance check that failed, a scheduler that never came up — was left running
+with "REFUSING TO KILL", on exactly the paths where cleanup matters most. The port
+is now reported, not required, and it is still part of the *success* criterion: a
+stop is clean only when every process in the tree has exited **and** the port is
+confirmed free.
+
+**A live PID whose identity cannot be read is not treated as exited.** If the
+process exists but its start time is unreadable — a restricted `/proc`, a tree line
+that is malformed — the answer is "cannot determine", not "gone". Treating it as
+gone is what would let cleanup delete the state files and report success over a
+running process. All three causes (changed boot id, malformed line, unreadable
+identity) return the same status and produce a message that names all three rather
+than guessing which one applies.
+
 Survivors are named and left alone. They are identity-verified as ours, so
 signalling them would be defensible, but the standing rule here is to refuse to act
 on anything ambiguous and leave it for a person — so the run fails loudly with the
@@ -299,13 +316,13 @@ uv run python -m bench.test_environment    # 22
 uv run python -m bench.test_contract       # 40
 uv run python -m bench.test_paired_stats   # 29
 ./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
-./scripts/test_procs.sh                    # 45, with real forked processes
+./scripts/test_procs.sh                    # 59, with real forked processes
 ```
 
 `test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
 invokes `ps`; on a machine without procfs it falls back to `ps`, and in a sandbox
 that denies `ps` it **exits 77 (skipped) with an explanation** rather than dying
-before the first assertion and reading as a failure. Its first thirteen assertions
+before the first assertion and reading as a failure. Its first 13 assertions
 exercise the Linux parsing path against a synthetic procfs and run everywhere,
 including the sandbox. They cover the case that defeats naive field splitting:
 `comm` is the executable's basename, is parenthesised but **not escaped**, and may
@@ -314,7 +331,7 @@ contain `) `. Stripping to the *first* `) ` instead of the last made
 and since the start time is the token that distinguishes a recycled PID from the
 original, two such processes both parsed as `0` and compared equal, so the
 recycled-PID guard would have passed on a process that was not ours. The remaining
-32 assertions need live processes.
+46 assertions need live processes.
 
 The author's own runs used the `ps` path; the `/proc` path is covered by the
 synthetic fixture but has not been exercised against a real Linux `/proc`. Running

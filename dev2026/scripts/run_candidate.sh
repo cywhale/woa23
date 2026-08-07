@@ -132,11 +132,16 @@ done
 #      because a PID is reused across a reboot and its start time is measured from
 #      boot, so the same pid:starttime pair can name someone else's process;
 #   2. the tracked PID still has the start time we recorded (not recycled);
-#   3. it still holds the port;
-#   4. after the signal, every process in the tree has exited AND the port is
+#   3. after the signal, every process in the tree has exited AND the port is
 #      confirmed free — an arbiter closing its socket says nothing about the worker
 #      it forked;
-#   5. "cannot be interpreted" (status 2) is never read as "nothing survived".
+#   4. "cannot be interpreted" (status 2) is never read as "nothing survived" —
+#      whether that is a changed boot id, a malformed line, or a live PID whose
+#      identity cannot be read.
+#
+# Holding the port is deliberately NOT a precondition for the signal. A service
+# aborted before it ever bound is still ours and still has to be stopped; requiring
+# the socket left it running on exactly the abort paths where cleanup matters.
 #
 # On any of those it refuses, leaves the state files, and returns non-zero. This
 # used to be a parallel copy here, which meant the fixes landed in one place and the

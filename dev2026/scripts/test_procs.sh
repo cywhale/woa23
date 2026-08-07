@@ -40,7 +40,8 @@ check() {                   # check <name> <expected> <actual>
 # Port state is not what is under test here; stub it so the tree logic is isolated.
 PORT_IS_FREE=yes
 port_released() { [ "$PORT_IS_FREE" = "yes" ]; }
-pid_holds_port() { return 0; }
+PORT_HELD_BY_PID=yes
+pid_holds_port() { [ "$PORT_HELD_BY_PID" = "yes" ]; }
 
 # shellcheck source=lib_procs.sh
 . "$HERE/lib_procs.sh"
@@ -143,6 +144,64 @@ set +e; out="$(stop_tracked early "" 2>&1)"; st=$?; set -e
 check "an immediate stop succeeds rather than refusing" "0" "$st"
 check "and the process is actually gone" "gone" \
       "$(kill -0 "$early_pid" 2>/dev/null && echo alive || echo gone)"
+
+echo
+echo "a service that never bound is still stopped"
+# The abort paths where cleanup matters most: a readiness timeout, a provenance
+# check that failed, a scheduler that never came up. The PID is live and holds
+# nothing. Requiring port ownership before signalling left it running.
+PORT_HELD_BY_PID=no
+start_tracked unbound 8099 sleep 45 >/dev/null
+unbound_pid="$(cat "$RUN/unbound.pid")"; STRAYS="$STRAYS $unbound_pid"
+set +e; out="$(stop_tracked unbound 8099 2>&1)"; st=$?; set -e
+check "stop_tracked signals it rather than refusing" "0" "$st"
+check "the process is actually gone" "gone" \
+      "$(kill -0 "$unbound_pid" 2>/dev/null && echo alive || echo gone)"
+check "it does not claim to be refusing" "no" "$(has_text "$out" "REFUSING TO KILL")"
+check "it says why it proceeded" "yes" "$(has_text "$out" "does not currently hold port")"
+check "state is removed on success" "no" \
+      "$([ -f "$RUN/unbound.pid" ] && echo yes || echo no)"
+PORT_HELD_BY_PID=yes
+
+echo
+echo "a live PID whose identity cannot be read is not 'exited'"
+# A restricted /proc: the process directory exists, its stat does not. Reading that
+# as "gone" is what would let cleanup delete the state files over a running process.
+mkdir -p "$FAKE/5555"        # a pid directory with no stat file
+set +e; PROC_ROOT="$FAKE" starttime_of 5555 >/dev/null 2>&1; st=$?; set -e
+check "starttime_of reports failure, not a value" "1" "$st"
+check "pid_exists still sees the process" "0" \
+      "$(PROC_ROOT="$FAKE" pid_exists 5555; echo $?)"
+{ printf 'boot:%s\n' "$(boot_id)"; printf '5555:12345\n'; } > "$RUN/unreadable.tree"
+set +e; PROC_ROOT="$FAKE" tree_survivors unreadable >/dev/null 2>&1; st=$?; set -e
+check "tree_survivors returns 2, not an empty all-clear" "2" "$st"
+# The same, through stop_tracked. The tracked process is a real one that will exit;
+# the unreadable 5555 is an extra entry in its tree, so the only thing keeping the
+# stop from succeeding is the entry whose identity cannot be read.
+sleep 45 & unread=$!; STRAYS="$STRAYS $unread"
+sleep 1
+echo "$unread" > "$RUN/unreadable.pid"
+starttime_of "$unread" > "$RUN/unreadable.starttime"
+{ printf 'boot:%s\n' "$(boot_id)"
+  printf '%s:%s\n' "$unread" "$(starttime_of "$unread")"
+  printf '5555:12345\n'; } > "$RUN/unreadable.tree"
+set +e; out="$(PROC_ROOT="$FAKE" stop_tracked unreadable "" 2>&1)"; st=$?; set -e
+check "stop_tracked fails rather than reporting a clean stop" "1" "$st"
+check "it says the outcome is unknown, not that the boot id changed" "yes" \
+      "$(has_text "$out" "cannot determine whether every tracked process exited")"
+check "and the state files are kept" "yes" \
+      "$([ -f "$RUN/unreadable.pid" ] && echo yes || echo no)"
+kill "$unread" 2>/dev/null || true
+rm "$RUN/unreadable.pid" "$RUN/unreadable.starttime" "$RUN/unreadable.tree"
+
+echo
+echo "a malformed tree line is uninterpretable, not empty"
+for bad in "notapid:123" "4321" "4321:"; do
+  { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$bad"; } > "$RUN/bad.tree"
+  set +e; tree_survivors bad >/dev/null 2>&1; st=$?; set -e
+  check "line '$bad' yields status 2" "2" "$st"
+done
+rm "$RUN/bad.tree"
 
 echo
 echo "a stranded child fails the stop, even with the port free"

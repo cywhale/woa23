@@ -56,6 +56,18 @@ ppid_of() {
   printf '%s\n' "$raw" | tr -d ' '
 }
 
+# Does this PID name a live process? On Linux /proc answers regardless of who owns
+# it; `kill -0` would report EPERM for another user's process and is only the
+# fallback for machines without procfs.
+pid_exists() {
+  local root="${PROC_ROOT:-/proc}"
+  if [ -d "$root/1" ]; then
+    [ -d "$root/$1" ]
+    return
+  fi
+  kill -0 "$1" 2>/dev/null
+}
+
 # The one PID in the set whose parent is outside it. Used to tell a server's master
 # from the workers that inherited its listening socket.
 master_of() {
@@ -201,13 +213,30 @@ tree_boot_matches() {       # tree_boot_matches <name>
 # Status 2 if the tree is from another boot; the caller must not read the empty
 # output as "all clear".
 tree_survivors() {          # tree_survivors <name>
-  local name="$1" p want now out=""
+  local name="$1" line p want now out=""
   tree_boot_matches "$name" || return 2
-  while IFS=: read -r p want; do
-    [ -n "$p" ] || continue
-    [ "$p" = "boot" ] && continue
-    now="$(starttime_of "$p" || true)"
-    [ -n "$now" ] && [ "$now" = "$want" ] && out="$out $p"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in boot:*) continue ;; esac
+
+    # A line that cannot be parsed makes the whole tree uninterpretable. Skipping it
+    # would silently shrink the set of processes cleanup is held to.
+    case "$line" in *:*) ;; *) return 2 ;; esac
+    p="${line%%:*}"; want="${line#*:}"
+    case "$p" in ''|*[!0-9]*) return 2 ;; esac
+    [ -n "$want" ] || return 2
+
+    if pid_exists "$p"; then
+      now="$(starttime_of "$p" || true)"
+      if [ -z "$now" ]; then
+        # The PID is live but its identity cannot be read — a restricted /proc, a
+        # process that changed hands. "Exited" is the one thing it is definitely
+        # not, and treating it as exited is what would let cleanup delete the state
+        # files and report success over a running process.
+        return 2
+      fi
+      [ "$now" = "$want" ] && out="$out $p"
+    fi
   done < "$RUN/$name.tree"
   printf '%s' "${out# }"
 }
@@ -277,9 +306,19 @@ stop_tracked() {            # stop_tracked <name> <port|"">
       echo "  was recycled. Left in place for inspection." >&2
       return 1
     fi
+    # Holding the port is NOT part of this process's identity, and requiring it
+    # before signalling was a refusal to clean up on the paths where cleanup
+    # matters most. A service aborted before it ever bound — a readiness timeout, a
+    # provenance check that failed, a scheduler that never came up — has a live PID
+    # that holds nothing, and the old form left it running with "REFUSING TO KILL".
+    #
+    # `pid` + `starttime` + the tree's boot id already identify this process
+    # uniquely and are what authorise the signal. The socket is reported, not
+    # required.
     if [ -n "$port" ] && ! pid_holds_port "$pid" "$port"; then
-      echo "$name: REFUSING TO KILL — PID $pid no longer holds port ${port}." >&2
-      return 1
+      echo "$name: PID $pid does not currently hold port ${port} — not yet bound," >&2
+      echo "  or already released. Stopping it anyway; it is provably the process" >&2
+      echo "  this run started." >&2
     fi
     refresh_tree "$name" "$pid"
     kill "$pid" 2>/dev/null || true
@@ -298,8 +337,14 @@ stop_tracked() {            # stop_tracked <name> <port|"">
 
   st=0; surv="$(tree_survivors "$name")" || st=$?
   if [ "$st" -ne 0 ]; then
-    echo "$name: the host boot id changed while stopping; the recorded tree can no" >&2
-    echo "  longer be interpreted. State left for inspection." >&2
+    # Status 2 covers three things and the message must not name only one: the boot
+    # id changed mid-stop, a recorded line is malformed, or a PID is live but its
+    # identity cannot be read. All three mean the same thing here — whether every
+    # process exited is unknown, and unknown is not clean.
+    echo "$name: cannot determine whether every tracked process exited — the" >&2
+    echo "  recorded tree became uninterpretable (boot id changed, a line is" >&2
+    echo "  malformed, or a live PID's identity is unreadable). State left for" >&2
+    echo "  inspection." >&2
     return 1
   fi
   if [ -n "$surv" ]; then
