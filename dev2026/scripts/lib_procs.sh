@@ -438,7 +438,7 @@ start_tracked() {           # start_tracked <name> <port|""> <cmd...>
 # anything ambiguous and leave it for a human — so survivors are named, the state
 # files are kept, and the run fails.
 stop_tracked() {            # stop_tracked <name> <port|"">
-  local name="$1" port="${2:-}" pid recorded now surv i st incomplete=0
+  local name="$1" port="${2:-}" pid recorded now surv i st incomplete=0 f
   [ -f "$RUN/$name.pid" ] || return 0
   pid="$(cat "$RUN/$name.pid")"
 
@@ -541,9 +541,22 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     echo "  confirmed, so a clean stop cannot be claimed for it." >&2
     return 1
   fi
-  rm "$RUN/$name.pid"
-  [ -f "$RUN/$name.starttime" ] && rm "$RUN/$name.starttime"
-  [ -f "$RUN/$name.tree" ] && rm "$RUN/$name.tree"
+  # Every removal is checked. errexit is off inside this function — it is always
+  # called with its status tested — so an unchecked `rm` that failed would fall
+  # straight through to `return 0`, reporting a clean stop with the state files
+  # still on disk. The next preflight would then block on state this run claimed
+  # to have cleared.
+  local left=""
+  for f in "$RUN/$name.pid" "$RUN/$name.starttime" "$RUN/$name.tree"; do
+    [ -e "$f" ] || continue
+    rm -- "$f" 2>/dev/null || left="$left $f"
+  done
+  if [ -n "$left" ]; then
+    echo "$name: every tracked process exited and the port is free, but the state" >&2
+    echo "  file(s) could not be removed:$left" >&2
+    echo "  Not reporting a clean stop while they are still on disk." >&2
+    return 1
+  fi
   echo "$name stopped; whole tree exited, port ${port:-n/a} ${port:+confirmed free}"
   return 0
 }

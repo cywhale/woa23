@@ -120,7 +120,9 @@ PYEOF
 shopt -s nullglob
 # `.uncertain` too: it is written precisely when a previous run could not record
 # what it had started, which is the state that most needs a person to look.
-leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.uncertain)
+# `.tree` as well: a stop that cannot remove its state leaves one behind, and a
+# tree naming PIDs from a previous run is exactly what must not be stepped over.
+leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.tree "$RUN"/*.uncertain)
 if [ ${#leftovers[@]} -gt 0 ]; then
   echo "leftover run state from a previous invocation:" >&2
   printf '  %s\n' "${leftovers[@]}" >&2

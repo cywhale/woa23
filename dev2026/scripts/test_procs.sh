@@ -387,6 +387,38 @@ kill "$sentp" 2>/dev/null || true
 rm "$RUN/sent.pid" "$RUN/sent.starttime" "$RUN/sent.tree" "$RUN/sent.uncertain"
 
 echo
+echo "a stop that cannot clear its state does not report a clean stop"
+# errexit is off inside stop_tracked — it is always called with its status tested —
+# so an unchecked `rm` that failed fell through to `return 0`, reporting success
+# with the state files still on disk. The next preflight would then block on state
+# this run claimed to have cleared.
+UNRM="$RUN/unrm"
+mkdir -p "$UNRM"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unrmp=$!; STRAYS="$STRAYS $unrmp"
+sleep 1
+RUN_REAL="$RUN"; RUN="$UNRM"
+echo "$unrmp" > "$RUN/u.pid"; starttime_of "$unrmp" > "$RUN/u.starttime"
+record_tree u >/dev/null
+kill "$unrmp" 2>/dev/null || true
+sleep 1
+chmod 0555 "$UNRM"          # files may be read, but not unlinked
+if rm -- "$UNRM/u.starttime" 2>/dev/null; then
+  echo "  (skipped: this user can unlink inside a 0555 directory)"
+  chmod 0755 "$UNRM"
+else
+  set +e; out="$(stop_tracked u "" 2>&1)"; st=$?; set -e
+  check "the tracked process really did exit" "gone" \
+        "$(kill -0 "$unrmp" 2>/dev/null && echo alive || echo gone)"
+  check "stop_tracked does NOT report a clean stop" "1" "$st"
+  check "it names the files it could not remove" "yes" \
+        "$(has_text "$out" "could not be removed")"
+  check "the pidfile is still there, as the message says" "yes" \
+        "$([ -f "$RUN/u.pid" ] && echo yes || echo no)"
+  chmod 0755 "$UNRM"
+fi
+RUN="$RUN_REAL"
+
+echo
 echo "an incomplete tree still stops the process it does know about"
 # The point of marking rather than refusing: what is provably ours is still stopped,
 # so the host is left cleaner, while the run still fails because completeness is

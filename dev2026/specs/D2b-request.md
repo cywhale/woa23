@@ -228,10 +228,17 @@ were produced by the pre-fix harness, and are not carried into this run in any f
 Each of the four services is tracked by **its whole process tree**, not by the PID
 the script launched. Once both arms are ready — after gunicorn has forked its
 worker, which it has not done in the first second after exec — every service's tree
-is snapshotted as `pid:starttime` pairs and the count is printed. The trap runs on
+is snapshotted as `pid:starttime` pairs and the count is verified. The trap runs on
 every exit path and, for each service, **refuses to signal anything whose start time
-no longer matches or which no longer holds its port**, leaving the state files for
-inspection instead.
+no longer matches what was recorded, or whose tree is not from this boot or cannot
+be interpreted**, leaving the state files for inspection instead.
+
+Holding the port is **not** among those conditions, and an earlier version of this
+document said it was. Requiring the socket meant a service aborted before it ever
+bound — a readiness timeout, a failed provenance check, a scheduler that never came
+up — was left running with "REFUSING TO KILL", on exactly the paths where cleanup
+matters most. Identity is `pid` + start time + boot id; the socket adds nothing to
+it, so it is reported rather than required.
 
 **The port is not the criterion for a clean stop.** A gunicorn arbiter that exits
 releases the listening socket while the worker it forked can still be running: the
@@ -290,9 +297,13 @@ still works:
 `tree_boot_matches` consults the state before reading the tree, so a tree in doubt
 is uninterpretable whatever it happens to contain — including a tree that looks
 complete only because the line saying otherwise could not be written. `stop_tracked`
-additionally refuses to remove state for such a tree. Both runners treat a leftover
-`.uncertain` as blocking preflight state, since it is written exactly when a
-previous run could not record what it had started. If all three layers fail, the
+additionally refuses to remove state for such a tree, and **checks every state-file
+removal**: if the files cannot be deleted the stop is not reported as clean, because
+the next preflight would otherwise block on state this run claimed to have cleared.
+Both runners treat a leftover `*.pid`, `*.starttime`, `*.tree` or `*.uncertain` as
+blocking preflight state — `.uncertain` is written exactly when a previous run could
+not record what it had started, and a stray `.tree` names PIDs from a run that did
+not finish clearing up. If all three layers fail, the
 message says so in as many words and names the file to inspect.
 
 **A tree that omits a live process is worse than one that is corrupt**, because it
@@ -323,6 +334,35 @@ gone is what would let cleanup delete the state files and report success over a
 running process. All three causes (changed boot id, malformed line, unreadable
 identity) return the same status and produce a message that names all three rather
 than guessing which one applies.
+
+### Refusing to signal can leave processes running. That is the deliberate choice.
+
+When a tree cannot be interpreted — a different boot id, a malformed line, or the
+`.uncertain` state above — cleanup **refuses to signal anything at all** and leaves
+this run's processes alive on VM24 for a person to deal with. That is not an
+oversight and it is not free: the failure mode of this design is *stranded
+processes*, not *wrongly killed ones*, and the PI should grant it knowing that.
+
+The reasoning is asymmetric. A tree that cannot be interpreted may name PIDs that
+have since been reused, so signalling on its basis could kill **something else on a
+shared production host** — `tide_app`, `mhw_app`, the shared Dask cluster, or the
+production API itself. That is unrecoverable and would be caused by this run. A
+stranded idle gunicorn worker is visible, named in the failure message, costs some
+memory, and is cleared by one deliberate `kill` from someone who has looked. Given a
+rare unrecoverable harm and a rare recoverable one, this design takes the
+recoverable one.
+
+Two consequences follow, both intended:
+
+- **A refusal always fails the run**, so it can never be read as a clean exit. The
+  message names the surviving PIDs and the state files.
+- **The next run will not start** until a person clears that state. There is no
+  automatic recovery path.
+
+Where signalling *is* provably safe — the tracked PID's start time and the tree's
+boot id both match — cleanup does signal, even when the tree is known to be
+incomplete, so the host is left as clean as the evidence allows while the run still
+fails.
 
 Survivors are named and left alone. They are identity-verified as ours, so
 signalling them would be defensible, but the standing rule here is to refuse to act
@@ -365,7 +405,7 @@ uv run python -m bench.test_environment    # 22
 uv run python -m bench.test_contract       # 40
 uv run python -m bench.test_paired_stats   # 29
 ./scripts/test_ports.sh                    # 18, against a captured `ss` fixture
-./scripts/test_procs.sh                    # 120, with real forked processes
+./scripts/test_procs.sh                    # 124, with real forked processes
 ```
 
 `test_procs.sh` needs to enumerate processes. On Linux it reads `/proc` and never
@@ -380,7 +420,7 @@ contain `) `. Stripping to the *first* `) ` instead of the last made
 and since the start time is the token that distinguishes a recycled PID from the
 original, two such processes both parsed as `0` and compared equal, so the
 recycled-PID guard would have passed on a process that was not ours. The remaining
-100 assertions need live processes.
+104 assertions need live processes.
 
 The author's own runs used the `ps` path; the `/proc` path is covered by the
 synthetic fixture but has not been exercised against a real Linux `/proc`. Running
