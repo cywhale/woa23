@@ -26,6 +26,10 @@ data
 **/tmp.*
 **/tmp*.*
 **/~$*.docx
+# Local Claude Code safety hook + permission settings. Machine-specific
+# (absolute paths, per-host policy) and not part of the product or the
+# benchmarks, so the whole directory stays out of version control.
+.claude/
 **/.cache
 **/cache
 **/ocpu-rcache

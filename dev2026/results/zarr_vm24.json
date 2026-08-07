@@ -1,0 +1,1633 @@
+{
+  "kind": "zarr",
+  "store": "/home/odbadmin/python/woa23/data",
+  "captured_at": "2026-08-05T15:08:04+0800",
+  "host": "odb24",
+  "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+  "versions": {
+    "xarray": "2025.3.1",
+    "dask": "2025.3.0",
+    "polars": "1.27.1",
+    "numpy": "2.2.4"
+  },
+  "cache_stores": false,
+  "repeat": 3,
+  "results": [
+    {
+      "mode": "numpy",
+      "id": "point_profile",
+      "intent": "single grid cell, full depth column -- the cheapest possible query; any time above a few ms here is pure overhead (open_zarr, dask, framework)",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 2126.99,
+          "sel": 2.89,
+          "to_dataframe": 13.73,
+          "to_polars": 106.57,
+          "concat": 0.95,
+          "pivot": 2.38,
+          "to_dicts": 0.13,
+          "total_ms": 2253.65
+        },
+        {
+          "open": 3.88,
+          "sel": 1.62,
+          "to_dataframe": 12.78,
+          "to_polars": 0.94,
+          "concat": 0.16,
+          "pivot": 0.95,
+          "to_dicts": 0.12,
+          "total_ms": 20.45
+        },
+        {
+          "open": 3.53,
+          "sel": 1.49,
+          "to_dataframe": 11.96,
+          "to_polars": 0.79,
+          "concat": 0.23,
+          "pivot": 0.61,
+          "to_dicts": 0.1,
+          "total_ms": 18.7
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 102,
+          "elements_read": 3304800,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 13219200
+        }
+      },
+      "summary": {
+        "cold_ms": 2253.65,
+        "warm_median_ms": 19.57,
+        "rows": 102,
+        "stage_median_ms": {
+          "open": 3.88,
+          "sel": 1.62,
+          "to_dataframe": 12.78,
+          "to_polars": 0.94,
+          "concat": 0.23,
+          "pivot": 0.95,
+          "to_dicts": 0.12
+        },
+        "worst_amplification": 32400.0
+      }
+    },
+    {
+      "mode": "numpy",
+      "id": "point_profile_multiparam",
+      "intent": "single cell, 3 parameters x 4 time periods -- fans out across several Zarr groups (TS / Oxy) and so several open_zarr calls",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/TS"
+      ],
+      "runs": [
+        {
+          "open": 22.82,
+          "sel": 8.89,
+          "to_dataframe": 201.03,
+          "to_polars": 10.43,
+          "concat": 1.15,
+          "pivot": 1.49,
+          "to_dicts": 0.51,
+          "total_ms": 246.32
+        },
+        {
+          "open": 22.43,
+          "sel": 8.62,
+          "to_dataframe": 196.69,
+          "to_polars": 10.02,
+          "concat": 0.88,
+          "pivot": 1.41,
+          "to_dicts": 0.52,
+          "total_ms": 240.58
+        },
+        {
+          "open": 22.06,
+          "sel": 9.0,
+          "to_dataframe": 199.66,
+          "to_polars": 10.73,
+          "concat": 1.19,
+          "pivot": 1.31,
+          "to_dicts": 0.65,
+          "total_ms": 244.59
+        }
+      ],
+      "amplification": {
+        "Oxy:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 57,
+              "chunk": 8,
+              "chunks_touched": 8,
+              "elements_read": 57
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 57,
+          "elements_read": 1846800,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 7387200
+        },
+        "Oxy:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 57,
+              "chunk": 8,
+              "chunks_touched": 8,
+              "elements_read": 57
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 57,
+          "elements_read": 1846800,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 7387200
+        },
+        "TS:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 204,
+          "elements_read": 6609600,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 26438400
+        },
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 204,
+          "elements_read": 6609600,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 26438400
+        }
+      },
+      "summary": {
+        "cold_ms": 246.32,
+        "warm_median_ms": 242.59,
+        "rows": 318,
+        "stage_median_ms": {
+          "open": 22.43,
+          "sel": 8.89,
+          "to_dataframe": 199.66,
+          "to_polars": 10.43,
+          "concat": 1.15,
+          "pivot": 1.41,
+          "to_dicts": 0.52
+        },
+        "worst_amplification": 32400.0
+      }
+    },
+    {
+      "mode": "numpy",
+      "id": "readme_example",
+      "intent": "the documented example URL: 15x5 degree box, shallow, 3 params, 4 periods",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/TS"
+      ],
+      "runs": [
+        {
+          "open": 24.63,
+          "sel": 8.7,
+          "to_dataframe": 81.45,
+          "to_polars": 64.15,
+          "concat": 1.8,
+          "pivot": 6.54,
+          "to_dicts": 8.41,
+          "total_ms": 195.67
+        },
+        {
+          "open": 23.98,
+          "sel": 8.6,
+          "to_dataframe": 78.6,
+          "to_polars": 57.24,
+          "concat": 1.07,
+          "pivot": 6.75,
+          "to_dicts": 6.38,
+          "total_ms": 182.62
+        },
+        {
+          "open": 23.87,
+          "sel": 8.79,
+          "to_dataframe": 80.66,
+          "to_polars": 59.27,
+          "concat": 1.31,
+          "pivot": 7.38,
+          "to_dicts": 6.24,
+          "total_ms": 187.53
+        }
+      ],
+      "amplification": {
+        "Oxy:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 1248,
+          "elements_read": 518400,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 2073600
+        },
+        "Oxy:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 1248,
+          "elements_read": 518400,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 2073600
+        },
+        "TS:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 2496,
+          "elements_read": 1036800,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 4147200
+        },
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 2496,
+          "elements_read": 1036800,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 4147200
+        }
+      },
+      "summary": {
+        "cold_ms": 195.67,
+        "warm_median_ms": 185.07,
+        "rows": 4992,
+        "stage_median_ms": {
+          "open": 23.98,
+          "sel": 8.7,
+          "to_dataframe": 80.66,
+          "to_polars": 59.27,
+          "concat": 1.31,
+          "pivot": 6.75,
+          "to_dicts": 6.38
+        },
+        "worst_amplification": 415.4
+      }
+    },
+    {
+      "mode": "numpy",
+      "id": "small_bbox_full_depth",
+      "intent": "same small box but every depth level -- isolates the depth-chunk cost",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 3.54,
+          "sel": 1.48,
+          "to_dataframe": 14.13,
+          "to_polars": 6.35,
+          "concat": 0.75,
+          "pivot": 2.53,
+          "to_dicts": 8.01,
+          "total_ms": 36.78
+        },
+        {
+          "open": 3.55,
+          "sel": 1.5,
+          "to_dataframe": 14.13,
+          "to_polars": 6.66,
+          "concat": 0.66,
+          "pivot": 2.35,
+          "to_dicts": 7.63,
+          "total_ms": 36.49
+        },
+        {
+          "open": 3.59,
+          "sel": 1.46,
+          "to_dataframe": 14.17,
+          "to_polars": 7.44,
+          "concat": 0.66,
+          "pivot": 2.33,
+          "to_dicts": 8.77,
+          "total_ms": 38.42
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 9792,
+          "elements_read": 3304800,
+          "factor": 337.5,
+          "uncompressed_bytes_read": 13219200
+        }
+      },
+      "summary": {
+        "cold_ms": 36.78,
+        "warm_median_ms": 37.45,
+        "rows": 9792,
+        "stage_median_ms": {
+          "open": 3.55,
+          "sel": 1.48,
+          "to_dataframe": 14.13,
+          "to_polars": 6.66,
+          "concat": 0.66,
+          "pivot": 2.35,
+          "to_dicts": 8.01
+        },
+        "worst_amplification": 337.5
+      }
+    },
+    {
+      "mode": "numpy",
+      "id": "regional_bbox",
+      "intent": "30x20 degree region, annual T+S, shallow -- a realistic map/analysis request",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 3.78,
+          "sel": 1.48,
+          "to_dataframe": 17.29,
+          "to_polars": 10.71,
+          "concat": 2.18,
+          "pivot": 7.19,
+          "to_dicts": 19.02,
+          "total_ms": 61.66
+        },
+        {
+          "open": 3.98,
+          "sel": 1.78,
+          "to_dataframe": 18.56,
+          "to_polars": 9.98,
+          "concat": 1.64,
+          "pivot": 5.53,
+          "to_dicts": 16.07,
+          "total_ms": 57.54
+        },
+        {
+          "open": 3.89,
+          "sel": 1.56,
+          "to_dataframe": 17.42,
+          "to_polars": 10.66,
+          "concat": 1.48,
+          "pivot": 4.99,
+          "to_dicts": 16.01,
+          "total_ms": 56.01
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 25,
+              "chunk": 8,
+              "chunks_touched": 4,
+              "elements_read": 32
+            },
+            "lat": {
+              "selected": 21,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 31,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 32550,
+          "elements_read": 2073600,
+          "factor": 63.7,
+          "uncompressed_bytes_read": 8294400
+        }
+      },
+      "summary": {
+        "cold_ms": 61.66,
+        "warm_median_ms": 56.77,
+        "rows": 16275,
+        "stage_median_ms": {
+          "open": 3.89,
+          "sel": 1.56,
+          "to_dataframe": 17.42,
+          "to_polars": 10.66,
+          "concat": 1.64,
+          "pivot": 5.53,
+          "to_dicts": 16.07
+        },
+        "worst_amplification": 63.7
+      }
+    },
+    {
+      "mode": "numpy",
+      "id": "point_profile_025",
+      "intent": "0.25-degree grid, single cell full depth -- the finer store, worst read-amplification case for point queries",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/025_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 3.74,
+          "sel": 1.54,
+          "to_dataframe": 21.95,
+          "to_polars": 0.86,
+          "concat": 0.19,
+          "pivot": 0.5,
+          "to_dicts": 0.12,
+          "total_ms": 28.89
+        },
+        {
+          "open": 3.36,
+          "sel": 1.45,
+          "to_dataframe": 21.94,
+          "to_polars": 0.81,
+          "concat": 0.19,
+          "pivot": 0.51,
+          "to_dicts": 0.27,
+          "total_ms": 28.52
+        },
+        {
+          "open": 3.57,
+          "sel": 1.45,
+          "to_dataframe": 22.09,
+          "to_polars": 0.84,
+          "concat": 0.23,
+          "pivot": 0.72,
+          "to_dicts": 0.11,
+          "total_ms": 29.01
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 204,
+          "elements_read": 6609600,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 26438400
+        }
+      },
+      "summary": {
+        "cold_ms": 28.89,
+        "warm_median_ms": 28.77,
+        "rows": 102,
+        "stage_median_ms": {
+          "open": 3.57,
+          "sel": 1.45,
+          "to_dataframe": 21.95,
+          "to_polars": 0.84,
+          "concat": 0.19,
+          "pivot": 0.51,
+          "to_dicts": 0.12
+        },
+        "worst_amplification": 32400.0
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "point_profile",
+      "intent": "single grid cell, full depth column -- the cheapest possible query; any time above a few ms here is pure overhead (open_zarr, dask, framework)",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 96.61,
+          "sel": 21.36,
+          "to_dataframe": 21.85,
+          "to_polars": 0.89,
+          "concat": 0.2,
+          "pivot": 0.48,
+          "to_dicts": 0.1,
+          "total_ms": 141.49
+        },
+        {
+          "open": 6.64,
+          "sel": 19.86,
+          "to_dataframe": 19.08,
+          "to_polars": 0.84,
+          "concat": 0.16,
+          "pivot": 0.72,
+          "to_dicts": 0.1,
+          "total_ms": 47.4
+        },
+        {
+          "open": 6.64,
+          "sel": 19.53,
+          "to_dataframe": 18.21,
+          "to_polars": 0.89,
+          "concat": 0.18,
+          "pivot": 0.51,
+          "to_dicts": 0.1,
+          "total_ms": 46.07
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 102,
+          "elements_read": 3304800,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 13219200
+        }
+      },
+      "summary": {
+        "cold_ms": 141.49,
+        "warm_median_ms": 46.73,
+        "rows": 102,
+        "stage_median_ms": {
+          "open": 6.64,
+          "sel": 19.86,
+          "to_dataframe": 19.08,
+          "to_polars": 0.89,
+          "concat": 0.18,
+          "pivot": 0.51,
+          "to_dicts": 0.1
+        },
+        "worst_amplification": 32400.0
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "point_profile_multiparam",
+      "intent": "single cell, 3 parameters x 4 time periods -- fans out across several Zarr groups (TS / Oxy) and so several open_zarr calls",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/TS"
+      ],
+      "runs": [
+        {
+          "open": 43.01,
+          "sel": 573.77,
+          "to_dataframe": 297.58,
+          "to_polars": 10.75,
+          "concat": 0.87,
+          "pivot": 1.02,
+          "to_dicts": 0.42,
+          "total_ms": 927.41
+        },
+        {
+          "open": 41.43,
+          "sel": 418.42,
+          "to_dataframe": 448.32,
+          "to_polars": 10.95,
+          "concat": 1.09,
+          "pivot": 1.18,
+          "to_dicts": 0.42,
+          "total_ms": 921.81
+        },
+        {
+          "open": 41.56,
+          "sel": 553.8,
+          "to_dataframe": 314.52,
+          "to_polars": 10.62,
+          "concat": 0.91,
+          "pivot": 1.1,
+          "to_dicts": 0.42,
+          "total_ms": 922.93
+        }
+      ],
+      "amplification": {
+        "Oxy:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 57,
+              "chunk": 8,
+              "chunks_touched": 8,
+              "elements_read": 57
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 57,
+          "elements_read": 1846800,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 7387200
+        },
+        "Oxy:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 57,
+              "chunk": 8,
+              "chunks_touched": 8,
+              "elements_read": 57
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 57,
+          "elements_read": 1846800,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 7387200
+        },
+        "TS:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 204,
+          "elements_read": 6609600,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 26438400
+        },
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 204,
+          "elements_read": 6609600,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 26438400
+        }
+      },
+      "summary": {
+        "cold_ms": 927.41,
+        "warm_median_ms": 922.37,
+        "rows": 318,
+        "stage_median_ms": {
+          "open": 41.56,
+          "sel": 553.8,
+          "to_dataframe": 314.52,
+          "to_polars": 10.75,
+          "concat": 0.91,
+          "pivot": 1.1,
+          "to_dicts": 0.42
+        },
+        "worst_amplification": 32400.0
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "readme_example",
+      "intent": "the documented example URL: 15x5 degree box, shallow, 3 params, 4 periods",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/monthly/TS",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/Oxy",
+        "/home/odbadmin/python/woa23/data/1_degree/seasonal/TS"
+      ],
+      "runs": [
+        {
+          "open": 45.75,
+          "sel": 462.82,
+          "to_dataframe": 124.1,
+          "to_polars": 64.58,
+          "concat": 1.59,
+          "pivot": 4.86,
+          "to_dicts": 6.33,
+          "total_ms": 710.03
+        },
+        {
+          "open": 44.5,
+          "sel": 447.27,
+          "to_dataframe": 119.82,
+          "to_polars": 62.13,
+          "concat": 1.46,
+          "pivot": 4.87,
+          "to_dicts": 6.44,
+          "total_ms": 686.5
+        },
+        {
+          "open": 43.93,
+          "sel": 440.27,
+          "to_dataframe": 116.24,
+          "to_polars": 61.3,
+          "concat": 1.28,
+          "pivot": 5.51,
+          "to_dicts": 6.66,
+          "total_ms": 675.18
+        }
+      ],
+      "amplification": {
+        "Oxy:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 1248,
+          "elements_read": 518400,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 2073600
+        },
+        "Oxy:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 1248,
+          "elements_read": 518400,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 2073600
+        },
+        "TS:an": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 2496,
+          "elements_read": 1036800,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 4147200
+        },
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 13,
+              "chunk": 8,
+              "chunks_touched": 2,
+              "elements_read": 16
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 2496,
+          "elements_read": 1036800,
+          "factor": 415.4,
+          "uncompressed_bytes_read": 4147200
+        }
+      },
+      "summary": {
+        "cold_ms": 710.03,
+        "warm_median_ms": 680.84,
+        "rows": 4992,
+        "stage_median_ms": {
+          "open": 44.5,
+          "sel": 447.27,
+          "to_dataframe": 119.82,
+          "to_polars": 62.13,
+          "concat": 1.46,
+          "pivot": 4.87,
+          "to_dicts": 6.44
+        },
+        "worst_amplification": 415.4
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "small_bbox_full_depth",
+      "intent": "same small box but every depth level -- isolates the depth-chunk cost",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 6.57,
+          "sel": 20.34,
+          "to_dataframe": 21.52,
+          "to_polars": 6.42,
+          "concat": 0.76,
+          "pivot": 2.42,
+          "to_dicts": 8.55,
+          "total_ms": 66.59
+        },
+        {
+          "open": 9.34,
+          "sel": 21.62,
+          "to_dataframe": 21.97,
+          "to_polars": 6.43,
+          "concat": 0.59,
+          "pivot": 2.27,
+          "to_dicts": 7.99,
+          "total_ms": 70.2
+        },
+        {
+          "open": 6.65,
+          "sel": 20.49,
+          "to_dataframe": 21.03,
+          "to_polars": 6.97,
+          "concat": 0.67,
+          "pivot": 2.18,
+          "to_dicts": 8.15,
+          "total_ms": 66.14
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 6,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 16,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 9792,
+          "elements_read": 3304800,
+          "factor": 337.5,
+          "uncompressed_bytes_read": 13219200
+        }
+      },
+      "summary": {
+        "cold_ms": 66.59,
+        "warm_median_ms": 68.17,
+        "rows": 9792,
+        "stage_median_ms": {
+          "open": 6.65,
+          "sel": 20.49,
+          "to_dataframe": 21.52,
+          "to_polars": 6.43,
+          "concat": 0.67,
+          "pivot": 2.27,
+          "to_dicts": 8.15
+        },
+        "worst_amplification": 337.5
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "regional_bbox",
+      "intent": "30x20 degree region, annual T+S, shallow -- a realistic map/analysis request",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 6.71,
+          "sel": 23.02,
+          "to_dataframe": 21.27,
+          "to_polars": 10.4,
+          "concat": 1.52,
+          "pivot": 5.34,
+          "to_dicts": 15.74,
+          "total_ms": 84.01
+        },
+        {
+          "open": 6.91,
+          "sel": 22.75,
+          "to_dataframe": 21.1,
+          "to_polars": 9.99,
+          "concat": 1.42,
+          "pivot": 5.11,
+          "to_dicts": 15.5,
+          "total_ms": 82.78
+        },
+        {
+          "open": 6.8,
+          "sel": 22.85,
+          "to_dataframe": 20.65,
+          "to_polars": 9.89,
+          "concat": 1.42,
+          "pivot": 4.91,
+          "to_dicts": 15.68,
+          "total_ms": 82.19
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 25,
+              "chunk": 8,
+              "chunks_touched": 4,
+              "elements_read": 32
+            },
+            "lat": {
+              "selected": 21,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 31,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 32550,
+          "elements_read": 2073600,
+          "factor": 63.7,
+          "uncompressed_bytes_read": 8294400
+        }
+      },
+      "summary": {
+        "cold_ms": 84.01,
+        "warm_median_ms": 82.48,
+        "rows": 16275,
+        "stage_median_ms": {
+          "open": 6.8,
+          "sel": 22.85,
+          "to_dataframe": 21.1,
+          "to_polars": 9.99,
+          "concat": 1.42,
+          "pivot": 5.11,
+          "to_dicts": 15.68
+        },
+        "worst_amplification": 63.7
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "point_profile_025",
+      "intent": "0.25-degree grid, single cell full depth -- the finer store, worst read-amplification case for point queries",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/025_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 6.88,
+          "sel": 31.01,
+          "to_dataframe": 34.82,
+          "to_polars": 0.89,
+          "concat": 0.17,
+          "pivot": 0.65,
+          "to_dicts": 0.13,
+          "total_ms": 74.56
+        },
+        {
+          "open": 6.85,
+          "sel": 107.6,
+          "to_dataframe": 34.38,
+          "to_polars": 0.92,
+          "concat": 0.22,
+          "pivot": 1.02,
+          "to_dicts": 0.12,
+          "total_ms": 151.12
+        },
+        {
+          "open": 6.8,
+          "sel": 31.3,
+          "to_dataframe": 34.22,
+          "to_polars": 0.9,
+          "concat": 0.22,
+          "pivot": 0.93,
+          "to_dicts": 0.12,
+          "total_ms": 74.49
+        }
+      ],
+      "amplification": {
+        "TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 102,
+              "chunk": 8,
+              "chunks_touched": 13,
+              "elements_read": 102
+            },
+            "lat": {
+              "selected": 1,
+              "chunk": 90,
+              "chunks_touched": 1,
+              "elements_read": 90
+            },
+            "lon": {
+              "selected": 1,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 204,
+          "elements_read": 6609600,
+          "factor": 32400.0,
+          "uncompressed_bytes_read": 26438400
+        }
+      },
+      "summary": {
+        "cold_ms": 74.56,
+        "warm_median_ms": 112.81,
+        "rows": 102,
+        "stage_median_ms": {
+          "open": 6.85,
+          "sel": 31.3,
+          "to_dataframe": 34.38,
+          "to_polars": 0.9,
+          "concat": 0.22,
+          "pivot": 0.93,
+          "to_dicts": 0.12
+        },
+        "worst_amplification": 32400.0
+      }
+    }
+  ]
+}

@@ -1,0 +1,3929 @@
+{
+  "kind": "zarr_survey",
+  "store": "/home/odbadmin/python/woa23/data",
+  "captured_at": "2026-08-05T15:07:15+0800",
+  "xarray": "2025.3.1",
+  "total_disk_bytes": 34271535177,
+  "groups": [
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/annual/TS",
+      "consolidated": true,
+      "disk_bytes": 168995572,
+      "file_count": 504,
+      "open_ms": 2826.15,
+      "open_unconsolidated_ms": 197.21,
+      "dims": {
+        "time_periods": 1,
+        "parameters": 2,
+        "depth": 102,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 5500.0,
+          "n": 102,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "temperature",
+          "salinity"
+        ],
+        "time_periods": [
+          "0"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sdo": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 52,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/annual/Oxy",
+      "consolidated": true,
+      "disk_bytes": 253396478,
+      "file_count": 738,
+      "open_ms": 6.47,
+      "open_unconsolidated_ms": 249.81,
+      "dims": {
+        "time_periods": 1,
+        "parameters": 3,
+        "depth": 102,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 5500.0,
+          "n": 102,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "oxygen",
+          "o2sat",
+          "AOU"
+        ],
+        "time_periods": [
+          "0"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sdo": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/annual/Nutrients",
+      "consolidated": true,
+      "disk_bytes": 186068675,
+      "file_count": 658,
+      "open_ms": 55.71,
+      "open_unconsolidated_ms": 152.16,
+      "dims": {
+        "time_periods": 1,
+        "parameters": 3,
+        "depth": 102,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 5500.0,
+          "n": 102,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "nitrate",
+          "phosphate",
+          "silicate"
+        ],
+        "time_periods": [
+          "0"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            3,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 78,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/monthly/TS",
+      "consolidated": true,
+      "disk_bytes": 1450303356,
+      "file_count": 3878,
+      "open_ms": 7.32,
+      "open_unconsolidated_ms": 154.46,
+      "dims": {
+        "time_periods": 12,
+        "parameters": 2,
+        "depth": 57,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 1500.0,
+          "n": 57,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "temperature",
+          "salinity"
+        ],
+        "time_periods": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sdo": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 384,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/monthly/Oxy",
+      "consolidated": true,
+      "disk_bytes": 1452475045,
+      "file_count": 5220,
+      "open_ms": 6.84,
+      "open_unconsolidated_ms": 149.79,
+      "dims": {
+        "time_periods": 12,
+        "parameters": 3,
+        "depth": 57,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 1500.0,
+          "n": 57,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "oxygen",
+          "o2sat",
+          "AOU"
+        ],
+        "time_periods": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 576,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/monthly/Nutrients",
+      "consolidated": true,
+      "disk_bytes": 857808178,
+      "file_count": 3924,
+      "open_ms": 13.27,
+      "open_unconsolidated_ms": 169.4,
+      "dims": {
+        "time_periods": 12,
+        "parameters": 3,
+        "depth": 43,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 800.0,
+          "n": 43,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "nitrate",
+          "phosphate",
+          "silicate"
+        ],
+        "time_periods": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 432,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/seasonal/TS",
+      "consolidated": true,
+      "disk_bytes": 704234872,
+      "file_count": 2118,
+      "open_ms": 7.01,
+      "open_unconsolidated_ms": 133.86,
+      "dims": {
+        "time_periods": 4,
+        "parameters": 2,
+        "depth": 102,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 5500.0,
+          "n": 102,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "temperature",
+          "salinity"
+        ],
+        "time_periods": [
+          "13",
+          "14",
+          "15",
+          "16"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sdo": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 208,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/seasonal/Oxy",
+      "consolidated": true,
+      "disk_bytes": 584632697,
+      "file_count": 1764,
+      "open_ms": 6.65,
+      "open_unconsolidated_ms": 138.44,
+      "dims": {
+        "time_periods": 4,
+        "parameters": 3,
+        "depth": 57,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 1500.0,
+          "n": 57,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "oxygen",
+          "o2sat",
+          "AOU"
+        ],
+        "time_periods": [
+          "13",
+          "14",
+          "15",
+          "16"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            57,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 192,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/1_degree/seasonal/Nutrients",
+      "consolidated": true,
+      "disk_bytes": 359713016,
+      "file_count": 1332,
+      "open_ms": 27.73,
+      "open_unconsolidated_ms": 171.35,
+      "dims": {
+        "time_periods": 4,
+        "parameters": 3,
+        "depth": 43,
+        "lat": 180,
+        "lon": 360
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 800.0,
+          "n": 43,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.5,
+          "max": 89.5,
+          "n": 180,
+          "step": 1.0
+        },
+        "lon": {
+          "min": -179.5,
+          "max": 179.5,
+          "n": 360,
+          "step": 1.0
+        },
+        "parameters": [
+          "nitrate",
+          "phosphate",
+          "silicate"
+        ],
+        "time_periods": [
+          "13",
+          "14",
+          "15",
+          "16"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            3,
+            43,
+            180,
+            360
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/025_degree/annual/TS",
+      "consolidated": true,
+      "disk_bytes": 2235480701,
+      "file_count": 7524,
+      "open_ms": 6.86,
+      "open_unconsolidated_ms": 201.98,
+      "dims": {
+        "time_periods": 1,
+        "parameters": 2,
+        "depth": 102,
+        "lat": 720,
+        "lon": 1440
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 5500.0,
+          "n": 102,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.875,
+          "max": 89.875,
+          "n": 720,
+          "step": 0.25
+        },
+        "lon": {
+          "min": -179.875,
+          "max": 179.875,
+          "n": 1440,
+          "step": 0.25
+        },
+        "parameters": [
+          "temperature",
+          "salinity"
+        ],
+        "time_periods": [
+          "0"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sdo": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            1,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 832,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/025_degree/monthly/TS",
+      "consolidated": true,
+      "disk_bytes": 17021706025,
+      "file_count": 61478,
+      "open_ms": 110.47,
+      "open_unconsolidated_ms": 244.5,
+      "dims": {
+        "time_periods": 12,
+        "parameters": 2,
+        "depth": 57,
+        "lat": 720,
+        "lon": 1440
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 1500.0,
+          "n": 57,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.875,
+          "max": 89.875,
+          "n": 720,
+          "step": 0.25
+        },
+        "lon": {
+          "min": -179.875,
+          "max": 179.875,
+          "n": 1440,
+          "step": 0.25
+        },
+        "parameters": [
+          "temperature",
+          "salinity"
+        ],
+        "time_periods": [
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10",
+          "11",
+          "12"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sdo": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            12,
+            2,
+            57,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 6144,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    },
+    {
+      "path": "/home/odbadmin/python/woa23/data/025_degree/seasonal/TS",
+      "consolidated": true,
+      "disk_bytes": 8996720562,
+      "file_count": 33333,
+      "open_ms": 73.46,
+      "open_unconsolidated_ms": 206.48,
+      "dims": {
+        "time_periods": 4,
+        "parameters": 2,
+        "depth": 102,
+        "lat": 720,
+        "lon": 1440
+      },
+      "coords": {
+        "depth": {
+          "min": 0.0,
+          "max": 5500.0,
+          "n": 102,
+          "step": 5.0
+        },
+        "lat": {
+          "min": -89.875,
+          "max": 89.875,
+          "n": 720,
+          "step": 0.25
+        },
+        "lon": {
+          "min": -179.875,
+          "max": 179.875,
+          "n": 1440,
+          "step": 0.25
+        },
+        "parameters": [
+          "temperature",
+          "salinity"
+        ],
+        "time_periods": [
+          "13",
+          "14",
+          "15",
+          "16"
+        ]
+      },
+      "variables": {
+        "an": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "dd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "gp": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "ma": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "mn": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "oa": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sd": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sdo": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "se": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        },
+        "sea": {
+          "dims": [
+            "time_periods",
+            "parameters",
+            "depth",
+            "lat",
+            "lon"
+          ],
+          "shape": [
+            4,
+            2,
+            102,
+            720,
+            1440
+          ],
+          "dtype": "float32",
+          "chunks": [
+            1,
+            1,
+            8,
+            90,
+            360
+          ],
+          "chunk_elems": 259200,
+          "chunk_uncompressed_bytes": 1036800,
+          "n_chunks": 3328,
+          "compressor": "Blosc(cname='lz4', clevel=5, shuffle=SHUFFLE, blocksize=0)",
+          "filters": [],
+          "fill_value": NaN
+        }
+      }
+    }
+  ]
+}

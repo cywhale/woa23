@@ -1,0 +1,261 @@
+========================================================================
+grd025_annual_ts/TS_annual_grid025/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd025_annual_ts.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;salinity&apos; THEN salinity&#xd;
+      ELSE temperature&#xd;
+    END AS value&#xd;
+  FROM grd025_annual_ts&#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param parameter      default=temperature regexp=^[A-Za-z_]+$
+========================================================================
+grd1_annual_nutrients/Nutrients_annual_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_annual_nutrients.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;silicate&apos; THEN silicate&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;phosphate&apos; THEN phosphate&#xd;
+      ELSE nitrate&#xd;
+    END AS value&#xd;
+  FROM grd1_annual_nutrients&#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param parameter      default=nitrate    regexp=^[A-Za-z_]+$
+========================================================================
+grd1_annual_oxy/Oxy_annual_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_annual_oxy.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;o2sat&apos; THEN o2sat&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;AOU&apos; THEN aou&#xd;
+      ELSE oxygen&#xd;
+    END AS value&#xd;
+  FROM grd1_annual_oxy&#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param parameter      default=oxygen     regexp=^[A-Za-z0-9_]+$
+========================================================================
+grd1_annual_ts/TS_annual_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_annual_ts.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;salinity&apos; THEN salinity&#xd;
+      ELSE temperature&#xd;
+    END AS value&#xd;
+  FROM grd1_annual_ts&#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param parameter      default=temperature regexp=^[A-Za-z_]+$
+========================================================================
+grd1_monthly_nutrients/Nutrients_monthly_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_monthly_nutrients.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;silicate&apos; THEN silicate&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;phosphate&apos; THEN phosphate&#xd;
+      ELSE nitrate&#xd;
+    END AS value&#xd;
+  FROM grd1_monthly_nutrients&#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+    AND time_period = CASE&#xd;
+      WHEN %time_period% IN (1,2,3,4,5,6,7,8,9,10,11,12) THEN %time_period%&#xd;
+      ELSE EXTRACT(MONTH FROM CURRENT_DATE)&#xd;
+    END&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param time_period    default=0          regexp=^[0-9]+$
+   param parameter      default=nitrate    regexp=^[A-Za-z_]+$
+========================================================================
+grd1_monthly_oxy/Oxy_monthly_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_monthly_oxy.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;o2sat&apos; THEN o2sat&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;AOU&apos; THEN aou&#xd;
+      ELSE oxygen&#xd;
+    END AS value&#xd;
+  FROM grd1_monthly_oxy &#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+    AND time_period = CASE&#xd;
+      WHEN %time_period% IN (1,2,3,4,5,6,7,8,9,10,11,12) THEN %time_period%&#xd;
+      ELSE EXTRACT(MONTH FROM CURRENT_DATE)&#xd;
+    END&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param time_period    default=0          regexp=^[0-9]+$
+   param parameter      default=oxygen     regexp=^[A-Za-z0-9_]+$
+========================================================================
+grd1_monthly_ts/TS_monthly_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_monthly_ts.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;salinity&apos; THEN salinity&#xd;
+      ELSE temperature&#xd;
+    END AS value&#xd;
+  FROM grd1_monthly_ts &#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+    AND time_period = CASE&#xd;
+      WHEN %time_period% IN (1,2,3,4,5,6,7,8,9,10,11,12) THEN %time_period%&#xd;
+      ELSE EXTRACT(MONTH FROM CURRENT_DATE)&#xd;
+    END&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param time_period    default=0          regexp=^[0-9]+$
+   param parameter      default=temperature regexp=^[A-Za-z_]+$
+========================================================================
+grd1_seasonal_nutrients/Nutrients_seasonal_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_seasonal_nutrients.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;silicate&apos; THEN silicate&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;phosphate&apos; THEN phosphate&#xd;
+      ELSE nitrate&#xd;
+    END AS value&#xd;
+  FROM grd1_seasonal_nutrients&#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+    AND time_period = CASE&#xd;
+      WHEN %time_period% IN (13, 14, 15, 16) THEN %time_period%&#xd;
+      ELSE CASE&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (12,1,2) THEN 13&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (3,4,5) THEN 14&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (6,7,8) THEN 15&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (9,10,11) THEN 16&#xd;
+      END&#xd;
+    END&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param parameter      default=nitrate    regexp=^[A-Za-z_]+$
+   param time_period    default=0          regexp=^[0-9]+$
+========================================================================
+grd1_seasonal_oxy/Oxy_seasonal_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_seasonal_oxy.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;o2sat&apos; THEN o2sat&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;AOU&apos; THEN aou&#xd;
+      ELSE oxygen&#xd;
+    END AS value&#xd;
+  FROM grd1_seasonal_oxy &#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+    AND time_period = CASE&#xd;
+      WHEN %time_period% IN (13, 14, 15, 16) THEN %time_period%&#xd;
+      ELSE CASE&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (12,1,2) THEN 13&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (3,4,5) THEN 14&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (6,7,8) THEN 15&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (9,10,11) THEN 16&#xd;
+      END&#xd;
+    END&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param parameter      default=oxygen     regexp=^[A-Za-z0-9_]+$
+   param time_period    default=0          regexp=^[0-9]+$
+========================================================================
+grd1_seasonal_ts/TS_seasonal_grid1/featuretype.xml
+WITH parameter_view AS (&#xd;
+  SELECT grd1_seasonal_ts.*,&#xd;
+    &apos;%parameter%&apos; AS parameter, &#xd;
+    CASE&#xd;
+      WHEN &apos;%parameter%&apos; = &apos;salinity&apos; THEN salinity&#xd;
+      ELSE temperature&#xd;
+    END AS value&#xd;
+  FROM grd1_seasonal_ts &#xd;
+  WHERE depth = COALESCE(%depth%, 0)&#xd;
+    AND time_period = CASE&#xd;
+      WHEN %time_period% IN (13, 14, 15, 16) THEN %time_period%&#xd;
+      ELSE CASE&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (12,1,2) THEN 13&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (3,4,5) THEN 14&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (6,7,8) THEN 15&#xd;
+        WHEN EXTRACT(MONTH FROM CURRENT_DATE) IN (9,10,11) THEN 16&#xd;
+      END&#xd;
+    END&#xd;
+)&#xd;
+SELECT&#xd;
+  parameter_view.*,&#xd;
+  MIN(value) OVER () AS minvalue,&#xd;
+  MAX(value) OVER () AS maxvalue&#xd;
+FROM parameter_view&#xd;
+WHERE value IS NOT NULL&#xd;
+  AND value != &apos;NaN&apos;
+   param depth          default=0          regexp=^[0-9]+$
+   param parameter      default=temperature regexp=^[A-Za-z_]+$
+   param time_period    default=0          regexp=^[0-9]+$

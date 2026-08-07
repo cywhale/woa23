@@ -1,0 +1,449 @@
+{
+  "kind": "http",
+  "base_url": "https://eco.odb.ntu.edu.tw",
+  "captured_at": "2026-08-05T16:17:37+0800",
+  "client_platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+  "git_commit": "cedb5e4",
+  "cache_bust": true,
+  "repeat": 3,
+  "results": [
+    {
+      "id": "point_profile",
+      "intent": "single grid cell, full depth column -- the cheapest possible query; any time above a few ms here is pure overhead (open_zarr, dask, framework)",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature",
+        "time_period": "0",
+        "append": "mn"
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 169.05,
+          "total_ms": 169.19,
+          "bytes": 9033,
+          "rows": 102
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 161.0,
+          "total_ms": 161.19,
+          "bytes": 9033,
+          "rows": 102
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 155.05,
+          "total_ms": 155.14,
+          "bytes": 9033,
+          "rows": 102
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 169.19,
+        "warm_median_ms": 158.16,
+        "min_ms": 155.14,
+        "max_ms": 169.19,
+        "ttfb_median_ms": 161.0,
+        "bytes": 9033,
+        "rows": 102,
+        "ms_per_1k_rows": 1580.29
+      }
+    },
+    {
+      "id": "point_profile_multiparam",
+      "intent": "single cell, 3 parameters x 4 time periods -- fans out across several Zarr groups (TS / Oxy) and so several open_zarr calls",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature,salinity,oxygen",
+        "time_period": "0,1,2,13",
+        "append": "mn,an"
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 2115.85,
+          "total_ms": 2116.23,
+          "bytes": 74114,
+          "rows": 318
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 2098.38,
+          "total_ms": 2098.67,
+          "bytes": 74114,
+          "rows": 318
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 1873.94,
+          "total_ms": 1874.24,
+          "bytes": 74114,
+          "rows": 318
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 2116.23,
+        "warm_median_ms": 1986.45,
+        "min_ms": 1874.24,
+        "max_ms": 2116.23,
+        "ttfb_median_ms": 2098.38,
+        "bytes": 74114,
+        "rows": 318,
+        "ms_per_1k_rows": 6599.59
+      }
+    },
+    {
+      "id": "readme_example",
+      "intent": "the documented example URL: 15x5 degree box, shallow, 3 params, 4 periods",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature,salinity,oxygen",
+        "time_period": "0,1,2,13",
+        "append": "mn,an",
+        "lon1": 150,
+        "lat1": 20,
+        "dep1": 60
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 1254.9,
+          "total_ms": 1280.01,
+          "bytes": 1190669,
+          "rows": 4992
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 1310.4,
+          "total_ms": 1334.15,
+          "bytes": 1190669,
+          "rows": 4992
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 1551.21,
+          "total_ms": 1573.77,
+          "bytes": 1190669,
+          "rows": 4992
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 1280.01,
+        "warm_median_ms": 1453.96,
+        "min_ms": 1280.01,
+        "max_ms": 1573.77,
+        "ttfb_median_ms": 1310.4,
+        "bytes": 1190669,
+        "rows": 4992,
+        "ms_per_1k_rows": 267.26
+      }
+    },
+    {
+      "id": "small_bbox_full_depth",
+      "intent": "same small box but every depth level -- isolates the depth-chunk cost",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 150,
+        "lat1": 20
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 141.04,
+          "total_ms": 149.26,
+          "bytes": 852106,
+          "rows": 9792
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 233.91,
+          "total_ms": 242.25,
+          "bytes": 852106,
+          "rows": 9792
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 154.26,
+          "total_ms": 162.3,
+          "bytes": 852106,
+          "rows": 9792
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 149.26,
+        "warm_median_ms": 202.28,
+        "min_ms": 149.26,
+        "max_ms": 242.25,
+        "ttfb_median_ms": 154.26,
+        "bytes": 852106,
+        "rows": 9792,
+        "ms_per_1k_rows": 16.57
+      }
+    },
+    {
+      "id": "regional_bbox",
+      "intent": "30x20 degree region, annual T+S, shallow -- a realistic map/analysis request",
+      "params": {
+        "lon0": 110,
+        "lat0": 10,
+        "grid": "1",
+        "parameter": "temperature,salinity",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 140,
+        "lat1": 30,
+        "dep1": 200
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 194.57,
+          "total_ms": 219.26,
+          "bytes": 1813949,
+          "rows": 16275
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 157.89,
+          "total_ms": 191.52,
+          "bytes": 1813949,
+          "rows": 16275
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 257.07,
+          "total_ms": 299.0,
+          "bytes": 1813949,
+          "rows": 16275
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 219.26,
+        "warm_median_ms": 245.26,
+        "min_ms": 191.52,
+        "max_ms": 299.0,
+        "ttfb_median_ms": 194.57,
+        "bytes": 1813949,
+        "rows": 16275,
+        "ms_per_1k_rows": 13.47
+      }
+    },
+    {
+      "id": "surface_global",
+      "intent": "whole world at the surface -- the read pattern the current chunking (lat=90, lon=360) is actually optimised for",
+      "params": {
+        "lon0": -180,
+        "lat0": -90,
+        "grid": "1",
+        "parameter": "temperature",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 180,
+        "lat1": 90,
+        "dep1": 0
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 396.54,
+          "total_ms": 454.45,
+          "bytes": 5355789,
+          "rows": 64800
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 234.31,
+          "total_ms": 298.61,
+          "bytes": 5355789,
+          "rows": 64800
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 396.74,
+          "total_ms": 453.52,
+          "bytes": 5355789,
+          "rows": 64800
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 454.45,
+        "warm_median_ms": 376.06,
+        "min_ms": 298.61,
+        "max_ms": 454.45,
+        "ttfb_median_ms": 396.54,
+        "bytes": 5355789,
+        "rows": 64800,
+        "ms_per_1k_rows": 7.0
+      }
+    },
+    {
+      "id": "point_profile_025",
+      "intent": "0.25-degree grid, single cell full depth -- the finer store, worst read-amplification case for point queries",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "0.25",
+        "parameter": "temperature,salinity",
+        "time_period": "0",
+        "append": "mn"
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 148.85,
+          "total_ms": 149.04,
+          "bytes": 11963,
+          "rows": 102
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 149.82,
+          "total_ms": 150.28,
+          "bytes": 11963,
+          "rows": 102
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 142.65,
+          "total_ms": 142.82,
+          "bytes": 11963,
+          "rows": 102
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 149.04,
+        "warm_median_ms": 146.55,
+        "min_ms": 142.82,
+        "max_ms": 150.28,
+        "ttfb_median_ms": 148.85,
+        "bytes": 11963,
+        "rows": 102,
+        "ms_per_1k_rows": 1461.18
+      }
+    },
+    {
+      "id": "regional_bbox_025",
+      "intent": "0.25-degree grid, 10x10 degree box, upper ocean",
+      "params": {
+        "lon0": 118,
+        "lat0": 18,
+        "grid": "0.25",
+        "parameter": "temperature,salinity",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 128,
+        "lat1": 28,
+        "dep1": 200
+      },
+      "runs": [
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 290.88,
+          "total_ms": 378.16,
+          "bytes": 4900146,
+          "rows": 42025
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 306.42,
+          "total_ms": 389.23,
+          "bytes": 4900146,
+          "rows": 42025
+        },
+        {
+          "status": 200,
+          "cache": "MISS",
+          "ttfb_ms": 400.24,
+          "total_ms": 478.78,
+          "bytes": 4900146,
+          "rows": 42025
+        }
+      ],
+      "summary": {
+        "ok": 3,
+        "failed": 0,
+        "cache_states": [
+          "MISS"
+        ],
+        "cold_ms": 378.16,
+        "warm_median_ms": 434.0,
+        "min_ms": 378.16,
+        "max_ms": 478.78,
+        "ttfb_median_ms": 306.42,
+        "bytes": 4900146,
+        "rows": 42025,
+        "ms_per_1k_rows": 9.26
+      }
+    }
+  ]
+}
