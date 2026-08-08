@@ -521,3 +521,87 @@ verdict with its bootstrap intervals, both arms' provenance, the environment dig
 the recorded `request_order_counts`, and the cleanup result including production's
 listener set, master PID, start time and boot ID before and after — or, if cleanup
 did not complete, that the run is a failure regardless of its gates.
+
+## 12. The 2026-08-08 run — FAIL, and what it established
+
+**Result:** contract gate `FAIL` (5.2A byte-exact, 62 MATCH / 2 DIFFER on `C16` and
+`C16-csv`). The latency gate did not run, which is the specified behaviour. **No
+controlled performance number exists for S1**, and this run must not be cited as one.
+
+**What it did establish**, and this was the point of D2b: the environment stopped
+being a variable. Both arms ran Python 3.11.4 from one venv, 58 distributions, the
+same `distributions_sha256`, `PYTHONHASHSEED=0`, the same boot. The 23 differing
+transitive packages that made the D2a numbers directional are gone. Production
+received 0 requests, its listener set, master PID, start time and boot id were
+unchanged, and cleanup removed every state file.
+
+### Primary cause: strongly supported, not proven
+
+The two arms interpolate **different strings** when building `zarr_group_paths`:
+
+| arm | source | string built |
+|---|---|---|
+| reference | `woa23_app.py:63`, `zarr_store_path = "data/"` | `data//1_degree/annual/TS` |
+| candidate | `api/config.py:31`, `os.environ["WOA23_ZARR_STORE"]` | `/home/odbadmin/python/woa23/data/1_degree/annual/TS` |
+
+Note the reference's **double slash**: line 63 already ends in `/` and the f-string
+adds another.
+
+`zarr_group_paths` is a `set`, so its iteration order depends on the hash of those
+strings. With `PYTHONHASHSEED=0` the order is deterministic *per string*, but the
+two arms hold different strings and therefore iterate in **opposite order**,
+appending to `result_list` in opposite order.
+
+`bench/repro_c16.py` reproduces this offline — no host, no store, no request — under
+pinned Python 3.11, `PYTHONHASHSEED=0` and polars 1.27.1. It prints both arms' actual
+group order, and then runs synthetic rows through the real concat/pivot path to show
+the downstream effect.
+
+**A falsifiable prediction, and it holds.** Order can only matter where a query
+spans more than one Zarr group. Computing that across all 64 cases gives exactly two:
+`C16` and `C16-csv` — the two that failed. The other 62 touch a single group, where
+order cannot differ, and all 62 matched byte for byte.
+
+**What is not proven.** Nothing here has been compared against C16's actual response
+bytes; the artefact records lengths and verdicts, not bodies. The reproducer's
+synthetic run shows the divergence surfacing as **row order** — column order came out
+identical on both arms — but which of row order, key order or something else produced
+the real 37,083-byte difference is not established. An earlier draft of this analysis
+asserted that pivot *column* order changed; the reproducer contradicted that, and the
+claim has been withdrawn. Confirming the actual mechanism needs the raw bodies, which
+needs a separate diagnostic authorisation.
+
+`C16`'s recorded intent was "reversed input order — expected to expose the hash-seed
+ordering". That was wrong twice over: the seed was pinned on both arms, and the input
+reversal is incidental. It is now **"multi-group path-representation ordering"**.
+
+### The fix is in the runner, not the candidate
+
+The candidate is **not** modified. It still takes its store from
+`WOA23_ZARR_STORE`, and that configurability is a deliberate part of §4.4.
+
+What changes is that the benchmark stops introducing a difference of its own. Each
+arm now gets its own staging directory under `~/woa23-s1-controlled/` holding its
+source and a read-only `data` symlink, and each is started with that directory as
+cwd. The candidate is given `WOA23_ZARR_STORE=data/` — byte-for-byte the literal
+`woa23_app.py:63` sets — so both arms interpolate the same string while the candidate
+still reads it from the environment.
+
+Guards, because a matching literal that stops matching is worse than never having
+matched:
+
+- The runner **greps `woa23_app.py` for `zarr_store_path = "data/"`** and aborts if
+  that line has changed, rather than trusting a constant copied into the script.
+- The candidate's `api/` copy is SHA-256 checked against the repository's, as the
+  reference's copy already was against production's.
+- Provenance records `store_path_literal` — the raw string, not a normalised path,
+  since normalising would erase the trailing slash that is the whole difference — and
+  `verify_group_path_agreement()` fails the run before either gate if the two arms
+  disagree.
+
+### This needs a new authorisation
+
+The 2026-08-08 grant was for one run and is spent. The latency budget it went unused
+on does **not** carry over: the run failed at the contract gate, and an unspent
+allowance is not a credit. A further run needs a fresh grant, and it starts again at
+the 5.2A contract gate — latency only if that passes.

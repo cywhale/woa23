@@ -72,7 +72,7 @@ CASES: list[Case] = [
           "parameter": "temperature"}),
     Case("C15a", "only lon1 given", {**P, "lon1": 150}),
     Case("C15b", "only lat1 given", {**P, "lat1": 20}),
-    Case("C16", "reversed input order — expected to expose the hash-seed ordering",
+    Case("C16", "multi-group path-representation ordering",
          {**P, "parameter": "salinity,temperature", "time_period": "13,0",
           "append": "mn,an"}),
     Case("C17", "duplicate values exercise the set dedup",

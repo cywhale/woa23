@@ -259,14 +259,26 @@ def resolve_store(label: str, cwd: Path, env: dict) -> dict:
     in use.
     """
     if label == "reference":
-        return {"store_path": str(cwd / "data"), "store_source": "hardcoded_relative"}
+        # `store_path_literal` is the string the process interpolates into
+        # f"{zarr_store_path}/{grid_path}/{subgroup}" — NOT the resolved directory.
+        # It is what decides the iteration order of the `zarr_group_paths` set, and
+        # the two arms differing here is what produced the C16 byte difference in
+        # the 2026-08-08 run: the reference builds "data//1_degree/..." while the
+        # candidate built an absolute path. The literal is pinned for the reference
+        # by the runner's SHA-256 check on woa23_app.py, where line 63 sets it.
+        return {"store_path": str(cwd / "data"), "store_source": "hardcoded_relative",
+                "store_path_literal": "data/"}
     explicit = env.get("WOA23_ZARR_STORE")
     if not explicit:
         raise SystemExit(
             "candidate has no WOA23_ZARR_STORE; it cannot have started successfully "
             "(spec 001 section 4.2 makes it mandatory with no fallback). Refusing to "
             "guess a store path.")
-    return {"store_path": str(Path(explicit)), "store_source": "env"}
+    # The literal is the *unmodified* environment value, not a normalised Path:
+    # normalising would erase exactly the difference that matters here, since
+    # "data/" and "data" hash differently and therefore order differently.
+    return {"store_path": str(Path(explicit)), "store_source": "env",
+            "store_path_literal": explicit}
 
 
 def zmetadata_fingerprints(store: str | None) -> dict | None:

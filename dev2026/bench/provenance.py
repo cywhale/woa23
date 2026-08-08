@@ -43,7 +43,7 @@ REQUIRED_META_FIELDS: tuple[tuple[str, type | tuple[type, ...]], ...] = (
     ("expect_argv_contains", list), ("worker_pids", list), ("env", dict),
     ("source_sha256", dict), ("env_python", str), ("env_python_source", str),
     ("env_python_version", str),
-    ("store_path", str), ("store_source", str),
+    ("store_path", str), ("store_source", str), ("store_path_literal", str),
     ("zmetadata_fingerprints", dict), ("dependencies", dict),
     # Emitted by the sidecar and therefore required: a field the collector always
     # writes but the validator never checks is a field nobody notices going missing.
@@ -674,6 +674,44 @@ def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None
                 problems.append(f"  {name}: candidate {am.get(name)} vs "
                                 f"reference {bm.get(name)}")
     return problems
+
+
+def verify_group_path_agreement(cand_meta: dict | None, ref_meta: dict | None
+                                ) -> list[str]:
+    """Do both arms interpolate the *same string* when building `zarr_group_paths`?
+
+    `zarr_group_paths` is a `set` of path strings, so its iteration order depends on
+    the hash of those strings. With `PYTHONHASHSEED` pinned the order is
+    deterministic per string, but two arms building different strings for the same
+    logical group can still iterate them in different orders — which reorders
+    `result_list`, and so the rows of the response.
+
+    That is what the 2026-08-08 5.2A run hit. Both arms were correct and returned the
+    same content; the reference interpolated `"data/"` (giving `data//1_degree/...`)
+    while the candidate interpolated an absolute path, and the two cases whose query
+    spans more than one Zarr group — C16 and C16-csv — came back with the same bytes
+    in a different order. 62 of 64 matched because every other case touches exactly
+    one group, where order cannot differ.
+
+    This does not check that the strings are *correct*, only that they are the same.
+    Whether they point at the same data is `validate_store_agreement`'s job.
+    """
+    if not isinstance(cand_meta, dict) or not isinstance(ref_meta, dict):
+        return ["cannot compare group paths: metadata missing"]
+    a = cand_meta.get("store_path_literal")
+    b = ref_meta.get("store_path_literal")
+    problems = []
+    for label, v in (("candidate", a), ("reference", b)):
+        if not isinstance(v, str) or not v:
+            problems.append(f"{label}: no usable 'store_path_literal'")
+    if problems:
+        return problems
+    if a != b:
+        return [f"the arms build zarr_group_paths from different strings: "
+                f"candidate {a!r} vs reference {b!r}. Set iteration order depends on "
+                f"the string, so result_list is concatenated in a different order and "
+                f"a multi-group query returns the same rows in a different order."]
+    return []
 
 
 # The environment record a controlled run writes before starting anything, and the

@@ -20,8 +20,8 @@ from bench.collect_backend_meta import (
     parse_ss_listeners, resolve_store)
 from bench.provenance import (
     REQUIRED_META_FIELDS, load_meta, validate_meta, validate_store_agreement,
-    verify_environment_match, verify_environment_record, verify_prior_contract,
-    verify_prior_rung)
+    verify_environment_match, verify_environment_record,
+    verify_group_path_agreement, verify_prior_contract, verify_prior_rung)
 
 failures: list[str] = []
 
@@ -101,6 +101,10 @@ def good_meta(label: str = "candidate", cwd: Path | None = None) -> dict:
         "env_python_version": "3.11.4",
         "store_path": "/home/odbadmin/python/woa23/data",
         "store_source": "hardcoded_relative" if label == "reference" else "env",
+        # Both arms must interpolate the same string into zarr_group_paths; the
+        # fixture reflects the corrected runner, which gives the candidate the
+        # reference's literal via WOA23_ZARR_STORE.
+        "store_path_literal": "data/",
         "zmetadata_fingerprints": {
             "1_degree/annual/TS/.zmetadata": {
                 "mtime_ns": 1754400000123456789, "size": 4096, "sha256": "c" * 64},
@@ -209,11 +213,27 @@ def test_resolve_store_is_label_driven() -> None:
     """The reference ignores the environment; reading it would record a lie."""
     r = resolve_store("reference", Path("/srv/app"), {"WOA23_ZARR_STORE": "/wrong"})
     check("reference ignores a stray WOA23_ZARR_STORE",
-          r == {"store_path": "/srv/app/data", "store_source": "hardcoded_relative"},
-          str(r))
+          r == {"store_path": "/srv/app/data", "store_source": "hardcoded_relative",
+                "store_path_literal": "data/"}, str(r))
+    check("the reference's literal is woa23_app.py:63, not the resolved directory",
+          r["store_path_literal"] == "data/" and r["store_path"] != "data/")
+
     c = resolve_store("candidate", Path("/x"), {"WOA23_ZARR_STORE": "/data"})
     check("candidate uses its explicit store",
-          c == {"store_path": "/data", "store_source": "env"}, str(c))
+          c == {"store_path": "/data", "store_source": "env",
+                "store_path_literal": "/data"}, str(c))
+
+    # The literal must be the raw environment value. Normalising it through Path()
+    # would erase a trailing slash — and "data/" and "data" are different strings
+    # that hash differently, which is precisely the difference that reorders
+    # zarr_group_paths and produced the C16 failure.
+    c2 = resolve_store("candidate", Path("/x"), {"WOA23_ZARR_STORE": "data/"})
+    check("a trailing slash survives into the literal",
+          c2["store_path_literal"] == "data/", str(c2))
+    check("while store_path is still normalised",
+          c2["store_path"] == "data", str(c2))
+    check("so the two arms can be given a matching literal",
+          c2["store_path_literal"] == r["store_path_literal"])
     try:
         resolve_store("candidate", Path("/x"), {})
         check("candidate without the variable is refused", False, "no SystemExit")
@@ -1000,7 +1020,12 @@ def test_schema_matches_sidecar_output() -> None:
         m = build_meta(manifest="candidate", port=8051, pid=1, listeners=[1],
                        port_verified=True, cwd=cwd, exe=None, argv=["x"],
                        argv_str="x", env={}, lockfile=None,
-                       store={"store_path": str(cwd), "store_source": "env"},
+                       # The real resolver, not a hand-written stub: a stub that
+                       # happens to carry the right keys decouples this test from
+                       # the sidecar it is supposed to be checking, and a field
+                       # added to resolve_store would go unnoticed here.
+                       store=resolve_store("candidate", cwd,
+                                           {"WOA23_ZARR_STORE": "data/"}),
                        expect_argv=["api.app:app"])
         required = {f for f, _ in REQUIRED_META_FIELDS}
         check("the sidecar emits nothing the validator ignores",
@@ -1141,6 +1166,40 @@ def test_manifest_expansion() -> None:
         check("an unknown manifest label aborts", True)
 
 
+def test_verify_group_path_agreement() -> None:
+    """Same store is not the same *string*, and the string is what orders the set.
+
+    The 2026-08-08 5.2A run failed on exactly this: both arms read the same store,
+    but the reference interpolated "data/" and the candidate an absolute path, so
+    `zarr_group_paths` iterated in a different order on each arm and the two cases
+    spanning more than one Zarr group returned the same rows rearranged.
+    """
+    ref = {"store_path_literal": "data/"}
+    check("identical literals agree", verify_group_path_agreement(dict(ref), ref) == [])
+
+    out = verify_group_path_agreement({"store_path_literal": "/abs/woa23/data"}, ref)
+    check("different literals are caught", len(out) == 1, str(out))
+    check("both strings are named, since the difference is the whole point",
+          has(out, "'/abs/woa23/data'") and has(out, "'data/'"), str(out))
+    check("the consequence is stated, not just the mismatch",
+          has(out, "different order"), str(out))
+
+    # The near-miss that matters: same directory, one trailing slash apart. These
+    # hash differently and so order differently.
+    check("a trailing slash is a different string",
+          verify_group_path_agreement({"store_path_literal": "data"}, ref) != [])
+
+    for bad in (None, "", 5, []):
+        check(f"a {type(bad).__name__} literal is rejected, not compared",
+              verify_group_path_agreement({"store_path_literal": bad}, ref) != [])
+    check("missing metadata is reported",
+          has(verify_group_path_agreement(None, ref), "metadata missing"))
+    check("the field is required of every record",
+          has(validate_meta({k: v for k, v in good_meta().items()
+                             if k != "store_path_literal"}, "candidate"),
+              "store_path_literal"))
+
+
 def main() -> int:
     for fn in (test_good_meta_passes, test_source_set_must_match_manifest,
                test_ss_parsing_accumulates_rows, test_ss_port_matching_is_exact,
@@ -1150,6 +1209,7 @@ def main() -> int:
                test_against_validates_both_records,
                test_verify_prior_rung, test_verify_prior_contract,
                test_verify_environment_match, test_verify_environment_record,
+               test_verify_group_path_agreement,
                test_gate_precedence,
                test_schema_matches_sidecar_output,
                test_source_digests_are_recomputed,

@@ -32,6 +32,7 @@ PROD_PY=$HOME/.pyenv/versions/py311/bin/python3.11
 STORE=$PROD_DIR/data
 WORK=$HOME/woa23-s1-controlled
 REF_DIR=$WORK/reference
+CAND_DIR=$WORK/candidate
 CAND_PORT=8051
 REF_PORT=8052
 SCHED_PORT=18787           # see D2b-request.md §4: 8787 is NOT free — it is
@@ -248,13 +249,31 @@ if [ -e "$WORK" ]; then
   echo "this script will not clear a directory it did not create." >&2
   exit 1
 fi
-mkdir -p "$REF_DIR"
+mkdir -p "$REF_DIR" "$CAND_DIR"
 cp "$PROD_DIR/woa23_app.py" "$REF_DIR/"
 cp -r "$PROD_DIR/src" "$REF_DIR/src"
-# woa23_app.py:63 hard-codes the relative `data/`. A symlink gives it the real store
-# without copying 31.9 GiB and without a writable path to it.
+cp -r "$HERE/api" "$CAND_DIR/api"
+
+# Both arms get a `data` symlink and are started with their own staging directory as
+# cwd, so both resolve the store through the identical *relative* path.
+#
+# This is what the 2026-08-08 run got wrong. `zarr_group_paths` is a set of path
+# strings, so its iteration order depends on the hash of those strings; the
+# reference interpolates the hard-coded "data/" from woa23_app.py:63 while the
+# candidate interpolated whatever WOA23_ZARR_STORE said, which was an absolute path.
+# Different strings, different set order, different `result_list` order — and the two
+# cases spanning more than one Zarr group came back with the same rows in a different
+# order. The candidate is NOT modified: it still reads the store from
+# WOA23_ZARR_STORE and keeps that configurability. It is simply given the same
+# string the reference uses, so the benchmark stops introducing a difference of its
+# own.
+#
+# The symlink gives both the real store without copying 31.9 GiB and without a
+# writable path to it.
 ln -s "$STORE" "$REF_DIR/data"
-chmod -R a-w "$REF_DIR/woa23_app.py" "$REF_DIR/src"
+ln -s "$STORE" "$CAND_DIR/data"
+STORE_LITERAL='data/'                 # byte-for-byte what woa23_app.py:63 sets
+chmod -R a-w "$REF_DIR/woa23_app.py" "$REF_DIR/src" "$CAND_DIR/api"
 
 echo "== verifying the reference copy is byte-identical to production's =="
 for f in woa23_app.py src/__init__.py src/config.py src/dask_client_manager.py \
@@ -264,6 +283,23 @@ for f in woa23_app.py src/__init__.py src/config.py src/dask_client_manager.py \
   [ "$a" = "$b" ] || { echo "  $f DIFFERS from production ($a vs $b)" >&2; exit 1; }
   echo "  $f  $a"
 done
+
+echo "== verifying the candidate copy is byte-identical to the repository's =="
+for f in api/__init__.py api/app.py api/config.py api/query.py; do
+  a="$(sha256sum "$HERE/$f" | cut -d' ' -f1)"
+  b="$(sha256sum "$CAND_DIR/$f" | cut -d' ' -f1)"
+  [ "$a" = "$b" ] || { echo "  $f DIFFERS from the repository ($a vs $b)" >&2; exit 1; }
+  echo "  $f  $a"
+done
+
+# woa23_app.py:63 is the source of the reference's literal. If that line ever
+# changes, the string below is silently wrong, so it is checked rather than trusted.
+if ! grep -qF 'zarr_store_path = "data/"' "$REF_DIR/woa23_app.py"; then
+  echo "woa23_app.py no longer sets zarr_store_path = \"data/\"; the candidate" >&2
+  echo "  cannot be given a matching literal without re-reading it" >&2
+  exit 1
+fi
+echo "  reference store literal confirmed at woa23_app.py:63: '$STORE_LITERAL'"
 
 # ===================================================== isolated Dask cluster ===
 # `src/dask_client_manager.py` reads DASK_SCHEDULER_ADDRESS and falls back to
@@ -291,8 +327,12 @@ start_tracked reference "$REF_PORT" \
     "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker \
     -b "127.0.0.1:${REF_PORT}" --timeout 120
 
+# Same cwd-relative literal as the reference, still taken from the environment so
+# the candidate's configurability is intact. PYTHONPATH keeps the venv's packages
+# importable from a cwd that is not the repository.
 start_tracked candidate "$CAND_PORT" \
-  env -C "$HERE" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" WOA23_ZARR_STORE="$STORE" \
+  env -C "$CAND_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
+    WOA23_ZARR_STORE="$STORE_LITERAL" \
     "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
     -b "127.0.0.1:${CAND_PORT}" --timeout 120
 
@@ -402,7 +442,7 @@ uv run python - <<'PYEOF' || exit 1
 import json, sys
 sys.path.insert(0, ".")
 from bench.provenance import (validate_meta, verify_environment_match,
-                              verify_environment_record)
+                              verify_environment_record, verify_group_path_agreement)
 cand = json.load(open("results/d2b_meta_candidate.json"))
 ref = json.load(open("results/d2b_meta_reference.json"))
 env = json.load(open("results/d2b_environment.json"))
@@ -412,7 +452,11 @@ problems = (validate_meta(cand, "candidate") + validate_meta(ref, "reference")
             # and is what they agree on the environment this run actually built?
             # Two arms sharing a stale .venv agree perfectly and prove nothing.
             + verify_environment_record(env, cand, "candidate")
-            + verify_environment_record(env, ref, "reference"))
+            + verify_environment_record(env, ref, "reference")
+            # and do they build zarr_group_paths from the same string? Different
+            # strings hash differently, so the set iterates in a different order and
+            # a multi-group query returns the same rows rearranged.
+            + verify_group_path_agreement(cand, ref))
 if problems:
     print("arms are not comparable:", file=sys.stderr)
     for p in problems:
@@ -421,6 +465,7 @@ if problems:
 print(f"both arms: python {cand['env_python_version']}, "
       f"{len(cand['dependencies']['distributions'])} distributions, "
       f"digest {cand['dependencies']['distributions_sha256'][:16]}")
+print(f"both arms build group paths from {cand['store_path_literal']!r}")
 PYEOF
 
 # =============================================================== contract first ===
