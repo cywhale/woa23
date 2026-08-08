@@ -106,9 +106,9 @@ its machine.
 
 | | |
 |---|---|
-| **work directory** | `~/woa23-s1-controlled-r2/` — new per attempt, outside `~/python/woa23`, which is never written. The 2026-08-08 attempt's directory is left in place as evidence and is not reused |
+| **work directory** | `~/woa23-s1-controlled-r3/` — new per attempt, outside `~/python/woa23`, which is never written. The 2026-08-08 attempt's directory is left in place as evidence and is not reused |
 | **reference source** | an unmodified copy of `woa23_app.py` + `src/`, made read-only, with **every file's SHA-256 checked against production's original before anything starts** |
-| **reference store** | `~/woa23-s1-controlled-r2/reference/data` → symlink to `~/python/woa23/data`. `woa23_app.py:63` hard-codes the relative `data/`, so this gives it the real store without copying 31.9 GiB and without a writable path to it |
+| **reference store** | `~/woa23-s1-controlled-r3/reference/data` → symlink to `~/python/woa23/data`. `woa23_app.py:63` hard-codes the relative `data/`, so this gives it the real store without copying 31.9 GiB and without a writable path to it |
 | **candidate store** | `WOA23_ZARR_STORE=data/` — the same literal `woa23_app.py:63` sets, resolved against the candidate's own staging cwd through a read-only symlink. Still taken from the environment, so the candidate's configurability is unchanged; it is the *string* that is aligned, not the mechanism |
 | **environment** | **one venv, shared by both arms** — `dev2026/.venv`, Python 3.11.4, built from this branch's `uv.lock` |
 | **ports** | candidate `127.0.0.1:8051`, reference `127.0.0.1:8052`, isolated Dask scheduler `127.0.0.1:18787` |
@@ -183,7 +183,7 @@ host's CPU and evicted production's page cache for nothing. In order:
 6. Production **is** listening on 8050. Its **listener PID set, master PID and the
    master's `/proc` start time** are recorded, along with the host's **boot ID**, so
    the post-run check can compare identity rather than mere occupancy.
-7. `~/woa23-s1-controlled-r2` does not already exist. The script refuses rather than
+7. `~/woa23-s1-controlled-r3` does not already exist. The script refuses rather than
    clearing it.
 8. Every reference source file's SHA-256 equals production's original.
 9. Both arms' provenance passes full schema validation, then **two separate
@@ -581,7 +581,7 @@ The candidate is **not** modified. It still takes its store from
 `WOA23_ZARR_STORE`, and that configurability is a deliberate part of §4.4.
 
 What changes is that the benchmark stops introducing a difference of its own. Each
-arm now gets its own staging directory under `~/woa23-s1-controlled-r2/` holding its
+arm now gets its own staging directory under `~/woa23-s1-controlled-r3/` holding its
 source and a read-only `data` symlink, and each is started with that directory as
 cwd. The candidate is given `WOA23_ZARR_STORE=data/` — byte-for-byte the literal
 `woa23_app.py:63` sets — so both arms interpolate the same string while the candidate

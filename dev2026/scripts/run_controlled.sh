@@ -31,9 +31,9 @@ PROD_DIR=$HOME/python/woa23
 PROD_PY=$HOME/.pyenv/versions/py311/bin/python3.11
 STORE=$PROD_DIR/data
 # A new directory per attempt. The script refuses to reuse one, and the
-# 2026-08-08 attempt left ~/woa23-s1-controlled behind holding the reference
-# copy that run was scored against — evidence, not scratch space.
-WORK=$HOME/woa23-s1-controlled-r2
+# 2026-08-08 attempts left ~/woa23-s1-controlled and -r2 behind, each holding the
+# reference copy its run was scored against — evidence, not scratch space.
+WORK=$HOME/woa23-s1-controlled-r3
 REF_DIR=$WORK/reference
 CAND_DIR=$WORK/candidate
 CAND_PORT=8051
