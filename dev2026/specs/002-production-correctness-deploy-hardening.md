@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 5 | 2026-08-09 | **Terminology corrected.** Rev 4 called 240 `dist-info` directories "240 distributions"; they are not the same thing and the spec now counts them separately — 240 directories, **236 runtime distributions** with usable `METADATA`, 4 stub directories, 234 distinct names. Two digests named for what they cover: **package-tree** (240 dist-info entries) and **runtime distribution** (236). §4.1.3 states which evidence the clone does *not* carry — binary, stdlib, kernel — and that each stays separate. §4.2: `sys.path` empty entries are expanded against the process's cwd before checking, the allowed stdlib paths are enumerated rather than described, and every named module's `__file__` is verified, not a sample. §4.1.5 renamed a **filename audit**, which is all it is. |
 | 4 | 2026-08-08 | The 240/236 "discrepancy" resolved, and it was **mine**: my digest script filtered on `metadata["Name"]`, silently dropping four distributions whose `METADATA` does not exist. Production has 240 dist-info directories and 240 distributions, no orphans. Two real findings surfaced instead — four abandoned install stubs and two double-installed packages — recorded in §4.1.2. The recorded digest is corrected. §4.2 added: provenance for C1 must prove, from inside each arm, that nothing resolves to production's `site-packages` or `src`, with `PYTHONDONTWRITEBYTECODE=1`. §4.1.7 added: the clone's file scope, exclusions and manifest acceptance. |
 | 3 | 2026-08-08 | Renamed the artefact **production package-tree clone** — "forensic clone" over-claimed. §4.1 now enumerates acceptance per component (site-packages, dist-info, `.pth`, native libraries, symlinks, bytecode, secrets) and states plainly that **full runtime byte-equivalence is not claimed**: the stdlib is outside the tree and the interpreter is not cloned. Survey of the real tree recorded, including a **`.pth` editable install pointing at production's own `src`**, which the clone must neutralise. C2's three starts reframed as observing *this run's* seed diversity, with `INSUFFICIENT` as an outcome rather than a reason to add starts. §6 given a concrete order-stability acceptance and its relationship to C2's verdict. PI decisions on C2 repetitions and the interpreter recorded. |
 | 2 | 2026-08-08 | **Settled per PI direction.** C1's environment is a read-only clone of production's package tree, not a rebuild — §4.1 and the open question it replaces. C2's worker count is read from the host, not assumed: production runs `-w 2`, and the first draft's `-w 4` was a guess. C2's unpinned seed is verified across repeated independent starts rather than one. Added §5, separating production-like gunicorn validation from formal PM2/nginx deployment validation — production is supervised by **PM2**, not systemd, which the first draft assumed. Added §6, the boundary between byte-exact, semantic and order-stability. |
@@ -23,9 +24,10 @@ S1 showed that removing Dask from the read path is byte-for-byte correct and fas
 **under one venv of 58 distributions with `PYTHONHASHSEED=0` on both arms**. That was
 the point of D2b: make the packages stop being a variable.
 
-Production is not that environment. It has **240 distributions** (digest `a796572708598804` over all 240;
-`60236d7210c8c364` was an earlier figure over 236 named entries — §4.1.2a), and the versions differ from S1's venv in ways
-that touch the read path directly:
+Production is not that environment. Its package tree holds **240 `dist-info`
+directories**, of which **236 are runtime distributions** carrying usable metadata
+(§4.1.2a), and the versions differ from S1's venv in ways that touch the read path
+directly:
 
 | package | S1's isolated venv | production |
 |---|---|---|
@@ -38,7 +40,7 @@ that touch the read path directly:
 `fsspec` mediates zarr/xarray store access, `anyio` is starlette's async path, and
 `pyarrow`/`pandas` sit in the interchange the query pipeline uses. S1's data says
 nothing about them: **its whole validity rests on both arms having been identical
-apart from the Dask change**, and re-introducing 240 packages re-introduces the
+apart from the Dask change**, and re-introducing that tree re-introduces the
 variable S1 removed.
 
 S2 asks one question: **does the candidate still return exactly what the reference
@@ -116,7 +118,7 @@ py311          symlink -> /home/odbadmin/.pyenv/versions/3.11.4/envs/py311
 | component | observed | how the clone is accepted |
 |---|---|---|
 | **site-packages tree** | 33,567 files / 3,762 dirs / 1.7 GB | per-file SHA-256 against the source, and file and directory counts equal |
-| **`*.dist-info`** | **240** directories, **240** distributions, 235 distinct names — see §4.1.2a | all 240 copied verbatim, stubs and duplicates included. The clone reproduces production's untidiness rather than tidying it |
+| **`*.dist-info`** | **240 directories**; **236 runtime distributions**; **4 stubs**; **234 distinct names** — §4.1.2a | all 240 directories copied verbatim, stubs and duplicates included. The clone reproduces production's untidiness rather than tidying it |
 | **`*.pth`** | 4: `easy-install.pth` (empty), `distutils-precedence.pth`, `basemap_data_hires-…-nspkg.pth`, **`__editable__.src-1.0.pth`** | see §4.1.4 — the editable one **must be neutralised** |
 | **native libraries** | 431 `*.so` | copied byte for byte, **never rebuilt**; digests compared like any other file |
 | **symlinks** | **0** in the tree today | the clone asserts zero symlinks. If any appear, the run stops: a symlink would leave the clone reading files it does not own |
@@ -124,57 +126,74 @@ py311          symlink -> /home/odbadmin/.pyenv/versions/3.11.4/envs/py311
 | **build provenance** | 255 `RECORD`, 3 `direct_url.json` | copied; recorded, not interpreted |
 | **secrets** | see §4.1.5 | scanned by filename, contents never read |
 
-##### 4.1.2a The 240 dist-info directories, itemised
+##### 4.1.2a Four counts, and they are four different things
 
-Rev 1–3 recorded "236 distributions" and called the gap with 240 directories a
-discrepancy to be reconciled. **The gap was an artefact of my own script**, which
-filtered on `metadata["Name"]` being truthy and so dropped four entries silently.
-`importlib.metadata` reports **240 distributions from 240 directories, with no
-orphans**. The reconciliation found nothing wrong with production's bookkeeping in
-that respect — but it did surface two things that are worth recording.
+Rev 4 wrote "240 distributions". A `dist-info` directory and a runtime distribution
+are not the same object, and conflating them is how the earlier confusion started.
+Counted separately, read-only from VM24 on 2026-08-09:
 
-**Four abandoned install stubs.** Each contains **only an empty `REQUESTED` file** —
-no `METADATA`, no `RECORD` — which is what pip leaves behind when an install is
-started and then superseded or interrupted. Decisively, the package each stub names
-is present at a *different* version, with its own complete dist-info:
+| count | value | what it means |
+|---|---|---|
+| `*.dist-info` **directories** | **240** | what is on disk. The package-tree manifest covers all of them |
+| `Distribution` objects yielded | 240 | `importlib.metadata` returns one per directory, including directories with no metadata |
+| **runtime distributions** | **236** | objects whose `METADATA` exists and carries a `Name`. This is the number that means "an installed package Python can tell you about" |
+| distinct names among those 236 | **234** | two names appear twice — below |
 
-| stub directory | version the stub claims | version actually importable |
+The 4-directory difference between 240 and 236 is not a bookkeeping error. It is four
+**abandoned install stubs**, each containing only an empty `REQUESTED` file — no
+`METADATA`, no `RECORD` — which is what pip leaves when an install is superseded or
+interrupted. Each names a version different from the one actually importable:
+
+| stub directory | version the stub names | version actually importable |
 |---|---|---|
 | `pyproj-3.7.0.dist-info` | 3.7.0 | **3.6.1** |
 | `lxml-5.3.0.dist-info` | 5.3.0 | **6.0.2** |
 | `packaging-24.1.dist-info` | 24.1 | **25.0** |
 | `timescale-0.0.5.dist-info` | 0.0.5 | **0.1.0** |
 
-They contribute no code and change no import. They are copied because the clone is a
-copy; they are recorded because a reader counting directories will otherwise find the
-same puzzle.
-
-**Two packages installed twice.** Both resolve to the newer, and neither is on the
-read path, but a tree with two versions of a package is a fact about production worth
-stating:
+The 236-to-234 difference is **two packages installed twice**, each resolving to the
+newer. Neither is on the read path:
 
 | package | dist-info present | resolves to |
 |---|---|---|
-| `h5py` | 3.12.1 and 3.9.0 | **3.12.1** |
-| `netCDF4` | 1.7.3 and 1.7.1.post2 | **1.7.3** |
+| `h5py` | `h5py-3.12.1.dist-info`, `h5py-3.9.0.dist-info` | **3.12.1** |
+| `netCDF4` | `netcdf4-1.7.3.dist-info`, `netCDF4-1.7.1.post2.dist-info` | **1.7.3** |
 
-**Digest correction.** The value `60236d7210c8c364` quoted in rev 1–3 is over the
-**236 named** entries and therefore over an incomplete list. The digest of all **240**
-is `a796572708598804`. Both are recorded here so the earlier figure is traceable
-rather than merely replaced; the clone is verified against the 240-entry digest,
-computed with unnamed entries identified by their directory.
+**Neither the stubs nor the duplicates are cleaned or corrected.** The clone
+reproduces them, because a clone that improves on its source is not a clone. They are
+**production hygiene findings**, raised here and owned by whoever owns that
+environment — S2 does not act on them.
 
-##### 4.1.3 What the clone does **not** establish
+##### 4.1.2b Two digests, named for what they cover
 
-It is a copy of the package tree. It is **not** a byte-equivalent runtime, and no
-result from it may be described as one:
+Rev 1–4 quoted one digest and used it for two purposes. They are separate values over
+separate sets:
 
-- **the standard library is not in the tree.** It lives under
-  `…/versions/3.11.4/lib/python3.11` and is reached through the venv's `pyvenv.cfg`.
-  The clone carries production's *packages*, not production's *Python*.
-- **the interpreter binary is not copied** — see the PI decision in §4.1.6.
-- **the process is not production's.** Different uptime, different memory state,
-  different page cache, no accumulated state from serving traffic.
+| name | over | value |
+|---|---|---|
+| **package-tree digest** | all **240** `dist-info` entries, unnamed ones identified by directory | `a79657270859880477055f9445401e04b3f4941343e332b85f0c87486914d1fa` |
+| **runtime distribution digest** | the **236** runtime distributions, `name==version` | `60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a` |
+
+Both are recomputed from inside the clone and both must match. A third value — the
+**package-tree manifest digest**, over the file-level manifest of §4.1.7 — does not
+exist yet and is produced when the clone is made; it is the strongest of the three,
+because the other two describe metadata while it describes every byte.
+
+##### 4.1.3 A package-tree clone, not a runtime clone
+
+The clone reproduces production's **installed package tree**. It is not a
+byte-identical copy of production's runtime, and no result from it may be described
+as one. Three things stay outside it and remain **separate evidence**, each recorded
+in its own right rather than inferred from the clone:
+
+| outside the clone | where it actually lives | how it is evidenced |
+|---|---|---|
+| **the Python binary** | `/home/odbadmin/.pyenv/versions/py311/bin/python3.11` | its absolute path, SHA-256 and `--version`, recorded at run time (§4.2). Under the PI's authorisation it is *executed* in the staging tree; it is never copied and never modified |
+| **the standard library** | `/home/odbadmin/.pyenv/versions/3.11.4/lib/python3.11` — reached through the venv's `pyvenv.cfg`, not through site-packages | the exact allowed paths are enumerated in §4.2 and every `sys.path` entry is checked against them |
+| **the kernel and host runtime** | the machine | `uname`, boot id and host recorded alongside every run, as S1 already does |
+
+So a C1 pass says: *these packages, this interpreter, this stdlib, on this host*. It
+does not say *production's running process*, and §9 holds that line.
 
 ##### 4.1.4 The editable install is a real hazard, not a formality
 
@@ -202,24 +221,28 @@ and the stdlib**. This is a deliberate deviation from "identical to production" 
 recorded as one — production really does load `src` that way, and the clone
 deliberately does not.
 
-##### 4.1.5 Secrets exclusion
+##### 4.1.5 Filename audit — what it is, and what it cannot be
 
-Scanned by **filename only**; no file contents are read at any point, by the scan or
-by this spec's author.
+This is a **filename audit**. It reads directory entries and matches names. It does
+**not** read file contents, and it therefore **cannot** show that the tree is free of
+secrets. Nothing in this spec claims otherwise, and a pass here is not evidence of
+absence.
 
-Patterns: `*.pem *.key *.crt *.p12 .env* *credential* *secret* *token* id_rsa*
-id_ed25519* .netrc .pgpass`.
+Patterns matched: `*.pem *.key *.crt *.p12 .env* *credential* *secret* *token*
+id_rsa* id_ed25519* .netrc .pgpass`.
 
-**68 filenames matched, and every one examined is a false positive by name** —
-library source such as `packaging/_tokenizer.py`, `keyring/credentials.py`,
-`dns/tokenizer.py`, and `pip/_vendor/certifi/cacert.pem`, which is a public CA bundle.
-No credential material was found.
+Result on the source tree, 2026-08-09: **68 names matched, and every one reviewed is
+a match on a library source filename** — `packaging/_tokenizer.py`,
+`keyring/credentials.py`, `dns/tokenizer.py`, `parso/python/token.py` and the like —
+plus `pip/_vendor/certifi/cacert.pem`, a public CA bundle. No file was opened to
+determine this; the judgement is from the paths, which is exactly the limit of the
+method.
 
-Acceptance: the scan is re-run against the **clone** after copying; any match that is
-not on the reviewed false-positive list stops the run for a human to look at. A name
-scan cannot prove the absence of secrets and is not claimed to — it is a cheap check
-against the obvious, and the stronger control is that the tree copied is a package
-directory, not a configuration or data directory.
+**Acceptance:** the audit is re-run against the clone; any name not on the reviewed
+list stops the run for a person to look at. The stronger control is not this audit at
+all — it is that the tree being copied is a package directory rather than a
+configuration or data directory, and that the clone is verified file-by-file against
+that one source.
 
 ##### 4.1.6 PI decision — the interpreter
 
@@ -290,40 +313,78 @@ its results.
 
 ### 4.2 Runtime provenance — proving what was actually loaded
 
-The clone's manifest proves what is *on disk*. It says nothing about what the running
-process *imported*, and those differ the moment a `.pth`, a `PYTHONPATH`, a stray
-`sys.path` entry or an inherited environment variable gets involved. C1 is only worth
-running if that gap is closed, and closing it is cheap.
+The manifest proves what is *on disk*. It says nothing about what the running process
+*imported*, and those diverge the moment a `.pth`, a `PYTHONPATH`, a user site
+directory or an inherited variable is involved. C1 is only worth running if that gap
+is closed.
 
-Collected **from inside each arm**, after startup and before the first contract case,
-and recorded in that arm's provenance:
+Collected **from inside each arm**, after startup and before the first contract case:
 
 | recorded | must satisfy |
 |---|---|
-| `sys.executable` | the interpreter the run intends — production's binary if §4.1.6 is granted, otherwise the separately installed 3.11.4, and **which one is recorded, not assumed** |
-| `sys.prefix`, `sys.base_prefix` | consistent with that interpreter; a mismatch means an unexpected venv is active |
-| `sys.path`, in order | **every entry** lies within the clone, the arm's own staging directory, or the stdlib. **No entry under `/home/odbadmin/.pyenv/versions/py311/lib/python3.11/site-packages` and none under `/home/odbadmin/python/woa23`** |
-| `module.__file__` for a named set | resolves inside the clone (third-party) or the arm's staging directory (application) — never production |
-| `PYTHONDONTWRITEBYTECODE` | `1`. The run writes no bytecode: the clone stays byte-identical to its manifest, and no `.pyc` can be written anywhere else either |
-| `PYTHONPATH` | recorded verbatim; if set to anything outside the clone and staging, the run stops |
-| `PYTHONHASHSEED` | `0` for C1 — already required, recorded here alongside the rest |
+| Python binary: absolute path, SHA-256, `--version` | recorded, not assumed |
+| `sys.executable`, `sys.prefix`, `sys.base_prefix` | mutually consistent; a surprise here means an unexpected environment is active |
+| `sys.path`, **in order, after empty-entry expansion** | every entry within the allowed set below |
+| `module.__file__` for **every** module in §4.2.2 | resolves inside the clone, or the arm's staging directory for the application module |
+| `PYTHONDONTWRITEBYTECODE` | `1` — the run writes no bytecode, so the clone stays identical to its manifest |
+| `PYTHONNOUSERSITE` | `1` — `~/.local/lib/python3.11/site-packages` is never added |
+| `PYTHONPATH` | recorded verbatim; anything outside the clone and staging stops the run |
+| `PYTHONHASHSEED` | `0` for C1 |
 
-**The named set for `module.__file__`** is the read path and the serving stack, not a
-sample: `xarray`, `zarr`, `numpy`, `pandas`, `polars`, `pyarrow`, `fsspec`, `fastapi`,
-`starlette`, `uvicorn`, `gunicorn`, plus `dask` and `distributed` on the reference
-arm, plus the application module each arm serves — `src.*` for the reference,
-`api.*` for the candidate.
+##### 4.2.1 `sys.path`: empty entries, and the allowed set
 
-`src` is the one that matters most. §4.1.4 excludes the editable `.pth` precisely so
-that `src` cannot resolve to `/home/odbadmin/python/woa23/src`; **this check is what
-proves the exclusion worked** rather than assuming it did. An arm whose `src.config`
-resolves under `/home/odbadmin/python/woa23` has invalidated the run, and the run
-stops there rather than producing a comparison of production against itself.
+**An empty string in `sys.path` means the current working directory.** Checking it as
+a literal would pass it silently while the process actually imports from wherever it
+happens to be running. Every empty entry is therefore **expanded against that
+process's own cwd** — read from `/proc/<pid>/cwd`, not assumed from the launcher —
+and the expansion is checked like any other entry. The expansion is recorded next to
+the raw value so the substitution is auditable.
 
-`PYTHONDONTWRITEBYTECODE=1` is a safety control as much as a hygiene one: with the
-clone read-only, an attempted write would fail noisily, but the variable removes the
-attempt. It has no effect on which bytecode is *used* — the copied `.pyc` remain valid
-because their mtimes were preserved (§4.1.2).
+Production's interpreter shows no empty entry today. That is a property of how it is
+launched, not a guarantee, and the check does not depend on it.
+
+**Allowed, exhaustively.** Anything else fails the run:
+
+| # | path | why |
+|---|---|---|
+| 1 | the package clone root | the packages under test |
+| 2 | the arm's own staging directory | its application code, `api/` or `src/` |
+| 3 | `/home/odbadmin/.pyenv/versions/3.11.4/lib/python311.zip` | stdlib |
+| 4 | `/home/odbadmin/.pyenv/versions/3.11.4/lib/python3.11` | stdlib |
+| 5 | `/home/odbadmin/.pyenv/versions/3.11.4/lib/python3.11/lib-dynload` | stdlib extension modules |
+
+**Explicitly not allowed**, and each is a stop:
+
+- `/home/odbadmin/.pyenv/versions/py311/lib/python3.11/site-packages` — production's
+  own packages. The clone exists so this path is never on `sys.path`;
+- `/home/odbadmin/.pyenv/versions/py311/lib/python3.11` — the venv's lib directory,
+  whose `site-packages` is the above. It is `sysconfig`'s `platstdlib` and is *not* a
+  stdlib path for this purpose;
+- anything under `/home/odbadmin/python/woa23` — production source;
+- any user site directory;
+- the empty string left unexpanded.
+
+##### 4.2.2 Modules verified — every one, not a sample
+
+`module.__file__` is checked for each of these after import. There is no sampling:
+a module not on the list is one nobody looked at.
+
+**Both arms:** `xarray`, `zarr`, `numpy`, `pandas`, `polars`, `pyarrow`, `fsspec`,
+`fastapi`, `starlette`, `uvicorn`, `gunicorn`.
+
+**Reference arm additionally:** `dask`, `distributed`, and the application package
+`src` together with `src.config`, `src.woa23_utils`, `src.dask_client_manager`.
+
+**Candidate arm additionally:** `api`, `api.config`, `api.query`, `api.app`.
+
+`src` is the one that matters most. §4.1.4 excludes the editable `.pth` so that `src`
+*cannot* resolve to `/home/odbadmin/python/woa23/src`; **this check is what proves the
+exclusion worked** rather than assuming it did. An arm whose `src.config` resolves
+under production has invalidated the run, and the run stops rather than producing a
+comparison of production with itself.
+
+If any module resolves outside the allowed set, the run stops and reports which
+module and which path. **It is not corrected by changing anything in production.**
 
 ### C2 — multiple workers, unpinned seed, semantic
 
