@@ -33,7 +33,7 @@ STORE=$PROD_DIR/data
 # A new directory per attempt. The script refuses to reuse one, and the
 # 2026-08-08 attempts left ~/woa23-s1-controlled and -r2 behind, each holding the
 # reference copy its run was scored against — evidence, not scratch space.
-WORK=$HOME/woa23-s1-controlled-r5
+WORK=$HOME/woa23-s1-controlled-r6
 REF_DIR=$WORK/reference
 CAND_DIR=$WORK/candidate
 CAND_PORT=8051
