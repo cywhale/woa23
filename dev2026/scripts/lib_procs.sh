@@ -117,8 +117,25 @@ pid_exists() {
 # process, which is why it is not the general-purpose check — but every PID in a
 # tracked tree is one of ours.
 pid_alive() {
-  pid_exists "$1" || return 1
-  kill -0 "$1" 2>/dev/null
+  # 0 = alive, 1 = gone, 2 = cannot tell.
+  #
+  # `kill -0` fails for two unrelated reasons and collapsing them is how a live
+  # process gets reported as exited. ESRCH means gone. EPERM means the PID exists
+  # but is not ours to signal — which for a tracked tree means the number has been
+  # recycled into someone else's process, so our process is almost certainly gone
+  # but we cannot demonstrate it. That is `unknown`, and unknown must never take the
+  # benign path.
+  #
+  # Anything else — a kill that fails for a reason not recognised here — is also
+  # unknown. Guessing on an unrecognised error is exactly the shape of the bug this
+  # replaced.
+  kill -0 "$1" 2>/dev/null && return 0
+  local err
+  err="$(LC_ALL=C kill -0 "$1" 2>&1)" || true
+  case "$err" in
+    *"No such process"*) return 1 ;;
+    *)                   return 2 ;;
+  esac
 }
 
 # The one PID in the set whose parent is outside it. Used to tell a server's master
@@ -278,15 +295,20 @@ _mark_incomplete() {        # _mark_incomplete <name> <reason>
 # live but cannot be recorded; status 0 with nothing written when it has simply
 # exited since the snapshot, which is a benign race, not a gap.
 _record_one() {             # _record_one <name> <pid>
-  local name="$1" p="$2" st
+  local name="$1" p="$2" st pa
   if ! st="$(starttime_of "$p" 2>/dev/null)" || [ -z "$st" ]; then
-    if pid_alive "$p"; then
-      echo "$name: PID $p is live but its start time cannot be read; the tree" >&2
-      echo "  cannot be completed" >&2
-      _mark_incomplete "$name" "unreadable-identity-$p" || true
-      return 1
-    fi
-    return 0                # exited during the walk
+    pa=0; pid_alive "$p" || pa=$?
+    case "$pa" in
+      0) echo "$name: PID $p is live but its start time cannot be read; the tree" >&2
+         echo "  cannot be completed" >&2
+         _mark_incomplete "$name" "unreadable-identity-$p" || true
+         return 1 ;;
+      1) return 0 ;;            # exited during the walk: benign
+      *) echo "$name: PID $p: start time unreadable and its liveness cannot be" >&2
+         echo "  established; the tree cannot be completed" >&2
+         _mark_incomplete "$name" "liveness-unknown-$p" || true
+         return 1 ;;
+    esac
   fi
   if ! _valid_starttime "$st"; then
     echo "$name: PID $p reported a malformed start time '$st'" >&2
@@ -425,7 +447,7 @@ _diag() {                   # _diag <service> <stage> <branch> <detail>
 # Status 2 means "cannot determine". Every path to it names the service, the cleanup
 # stage it happened in, the branch that failed, and the values involved.
 tree_survivors() {          # tree_survivors <name> [stage]
-  local name="$1" stage="${2:-unspecified}" line p want now out="" bst=0
+  local name="$1" stage="${2:-unspecified}" line p want now out="" bst=0 pa
   local tree="$RUN/$1.tree"
 
   tree_boot_matches "$name" || bst=$?
@@ -470,12 +492,18 @@ tree_survivors() {          # tree_survivors <name> [stage]
         # The process exited between pid_exists and the read — the normal case
         # during a stop — or it is still there and its identity genuinely cannot be
         # read. Only a re-check tells them apart.
-        if pid_alive "$p"; then
-          _diag "$name" "$stage" "identity-unreadable" \
-            "pid $p present, recorded '$want', read back '$now', /proc/$p/stat readable: $([ -r "${PROC_ROOT:-/proc}/$p/stat" ] && echo yes || echo no)"
-          return 2
-        fi
-        continue                # exited while we were looking at it
+        # Three states, and only "gone" may take the benign path. Collapsing
+        # "cannot tell" into it is how a live process gets reported as exited.
+        pa=0; pid_alive "$p" || pa=$?
+        case "$pa" in
+          0) _diag "$name" "$stage" "identity-unreadable" \
+               "pid $p alive, recorded '$want', read back '$now', /proc/$p/stat readable: $([ -r "${PROC_ROOT:-/proc}/$p/stat" ] && echo yes || echo no)"
+             return 2 ;;
+          1) continue ;;        # gone: it exited while we were looking at it
+          *) _diag "$name" "$stage" "liveness-unknown" \
+               "pid $p: start time unreadable, and kill -0 gave neither success nor ESRCH, so whether it is still running cannot be established"
+             return 2 ;;
+        esac
       fi
       [ "$now" = "$want" ] && out="$out $p"
     fi
