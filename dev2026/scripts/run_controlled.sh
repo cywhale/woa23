@@ -30,32 +30,147 @@ EXPECT_PY=3.11.4
 PROD_DIR=$HOME/python/woa23
 PROD_PY=$HOME/.pyenv/versions/py311/bin/python3.11
 STORE=$PROD_DIR/data
-# A new directory per attempt. The script refuses to reuse one, and the
-# 2026-08-08 attempts left ~/woa23-s1-controlled and -r2 behind, each holding the
-# reference copy its run was scored against — evidence, not scratch space.
+# Defaults. Every one of these can be overridden on the command line, because a
+# staging run has to be able to sit beside the evidence of previous runs rather than
+# on top of it — but the defaults stay pointed at the last authorised D2b
+# configuration so an argument-free invocation does not silently mean something new.
 WORK=$HOME/woa23-s1-controlled-r6
-REF_DIR=$WORK/reference
-CAND_DIR=$WORK/candidate
 CAND_PORT=8051
 REF_PORT=8052
-SCHED_PORT=18787           # see D2b-request.md §4: 8787 is NOT free — it is
-                           # production's own scheduler dashboard, same PID as 8786
+SCHED_PORT=18787           # 8787 is NOT free: it is production's own scheduler
+                           # dashboard, same PID as 8786. See D2b-request.md §4.
 PROD_PORT=8050
+# Ports this script must never bind, whatever it is told. 8050 is production's API,
+# 8786 its shared Dask scheduler, 8787 that scheduler's dashboard. Preflight would
+# refuse a held port anyway, but a typo that aims at production deserves a refusal
+# that names the reason rather than one that says "already in use".
+FORBIDDEN_PORTS="8050 8786 8787"
+
+# Modes. Exactly one may be selected.
+#
+#   default          contract gate, then latency gate, then the sample-size pilot
+#   --contract-only  contract gate, then stop. No latency, no pilot, no rung
+#                    escalation — so it produces no timing of any kind and nothing
+#                    may be quoted from it as performance.
+#   --cleanup-only   neither gate. Brings the processes up, records and verifies
+#                    their trees, collects provenance, stops. For reproducing a
+#                    cleanup failure.
+CLEANUP_ONLY=no
+CONTRACT_ONLY=no
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: run_controlled.sh [--contract-only | --cleanup-only]
+                         [--workdir PATH]
+                         [--candidate-port N] [--reference-port N]
+                         [--scheduler-port N]
+
+  --contract-only   run the 5.2A contract gate and stop. Skips the latency gate,
+                    the noise pilot and any rung escalation.
+  --cleanup-only    start the services, verify their trees, stop. No gates.
+  --workdir PATH    staging root. Must not already exist.
+  --*-port N        loopback port. 8050, 8786 and 8787 are refused.
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --contract-only) CONTRACT_ONLY=yes; shift ;;
+    --cleanup-only)  CLEANUP_ONLY=yes; shift ;;
+    --workdir)         [ $# -ge 2 ] || { echo "--workdir needs a value" >&2; exit 2; }
+                       WORK="$2"; shift 2 ;;
+    --candidate-port)  [ $# -ge 2 ] || { echo "--candidate-port needs a value" >&2; exit 2; }
+                       CAND_PORT="$2"; shift 2 ;;
+    --reference-port)  [ $# -ge 2 ] || { echo "--reference-port needs a value" >&2; exit 2; }
+                       REF_PORT="$2"; shift 2 ;;
+    --scheduler-port)  [ $# -ge 2 ] || { echo "--scheduler-port needs a value" >&2; exit 2; }
+                       SCHED_PORT="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
+  esac
+done
+
+if [ "$CONTRACT_ONLY" = "yes" ] && [ "$CLEANUP_ONLY" = "yes" ]; then
+  echo "--contract-only and --cleanup-only are mutually exclusive: one runs the" >&2
+  echo "  contract gate and the other runs no gate at all." >&2
+  exit 2
+fi
+
+# Validate the ports before anything else looks at the host. A port that is not a
+# port, or is production's, is a configuration error and not something to discover
+# halfway through preflight.
+for spec in "candidate:$CAND_PORT" "reference:$REF_PORT" "scheduler:$SCHED_PORT"; do
+  name="${spec%%:*}"; val="${spec#*:}"
+  case "$val" in
+    ''|*[!0-9]*) echo "$name port '$val' is not a number" >&2; exit 2 ;;
+  esac
+  if [ "$val" -lt 1024 ] || [ "$val" -gt 65535 ]; then
+    echo "$name port $val is outside 1024-65535" >&2; exit 2
+  fi
+  for bad in $FORBIDDEN_PORTS; do
+    [ "$val" = "$bad" ] || continue
+    echo "$name port $val belongs to production and will never be bound by this" >&2
+    echo "  script: 8050 is its API, 8786 its shared Dask scheduler, 8787 that" >&2
+    echo "  scheduler's dashboard." >&2
+    exit 2
+  done
+done
+if [ "$CAND_PORT" = "$REF_PORT" ] || [ "$CAND_PORT" = "$SCHED_PORT" ] \
+   || [ "$REF_PORT" = "$SCHED_PORT" ]; then
+  echo "the three ports must differ (candidate $CAND_PORT, reference $REF_PORT," >&2
+  echo "  scheduler $SCHED_PORT)" >&2
+  exit 2
+fi
+
+# The staging root must not be production, nor inside it.
+#
+# Normalised lexically, in shell, rather than with `realpath -m`: that flag is GNU
+# coreutils only. VM24 has it; the machine the offline tests run on does not, and a
+# check that cannot be exercised where it is written is not much of a check. The path
+# normally does not exist yet, so nothing here may touch the filesystem.
+_abspath() {                # lexical absolute path; the target need not exist
+  local p="$1" out="" part oldIFS="$IFS"
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  IFS=/
+  for part in $p; do
+    case "$part" in
+      ''|.) ;;
+      ..)   out="${out%/*}" ;;
+      *)    out="$out/$part" ;;
+    esac
+  done
+  IFS="$oldIFS"
+  printf '%s' "${out:-/}"
+}
+WORK_ABS="$(_abspath "$WORK")"
+PROD_ABS="$(_abspath "$PROD_DIR")"
+case "$WORK_ABS" in
+  "$PROD_ABS"|"$PROD_ABS"/*)
+    echo "workdir $WORK_ABS is inside production ($PROD_ABS). This script never" >&2
+    echo "  writes there." >&2
+    exit 2 ;;
+esac
+WORK="$WORK_ABS"
+REF_DIR=$WORK/reference
+CAND_DIR=$WORK/candidate
+
+# The repository this script lives in — the source of the candidate's api/, the venv,
+# and the run-state directory. Distinct from $WORK, which is the staging root.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN=$HERE/run
 VENV=$HERE/.venv
 
-# --cleanup-only: bring the six processes up, record and verify their trees, collect
-# provenance, then stop. No contract gate, no latency gate, no pilot — so it produces
-# no measurement of any kind and none may be quoted from it. It exists to make a
-# cleanup failure reproducible and self-describing, nothing more.
-CLEANUP_ONLY=no
-for arg in "$@"; do
-  case "$arg" in
-    --cleanup-only) CLEANUP_ONLY=yes ;;
-    *) echo "unknown argument: $arg (only --cleanup-only is accepted)" >&2; exit 2 ;;
-  esac
-done
+# Printed before the authorisation and host gates, not after: a refused invocation
+# should still record what it was asked to do, and reading the resolved values back
+# is how a wrong flag gets noticed.
+echo "== configuration for this invocation =="
+echo "   mode      : $([ "$CLEANUP_ONLY" = yes ] && echo cleanup-only \
+                       || { [ "$CONTRACT_ONLY" = yes ] && echo contract-only || echo "full (contract + latency + pilot)"; })"
+echo "   workdir   : $WORK"
+echo "   candidate : 127.0.0.1:$CAND_PORT"
+echo "   reference : 127.0.0.1:$REF_PORT"
+echo "   scheduler : 127.0.0.1:$SCHED_PORT"
+echo "   repository: $HERE"
 
 if [ "${WOA23_D2B_GRANTED:-}" != "yes" ]; then
   echo "D2b authorisation not stated. This starts FOUR services on a production" >&2
@@ -74,6 +189,7 @@ env -C / true 2>/dev/null || { echo "env -C is required (coreutils >= 8.28)" >&2
 
 cd "$HERE"
 mkdir -p "$RUN" results
+
 
 # Port-state helpers. Shared with run_candidate.sh and covered offline by
 # scripts/test_ports.sh, which exercises them against a captured `ss` fixture under
@@ -517,6 +633,16 @@ uv run python -m bench.contract_diff \
   --reference-meta results/d2b_meta_reference.json \
   --out results/d2b_contract.json \
   || { echo "contract gate did not pass — stopping before the latency gate" >&2; exit 1; }
+
+if [ "$CONTRACT_ONLY" = "yes" ]; then
+  echo
+  echo "== --contract-only: stopping here =="
+  echo "   The contract gate above passed. No latency gate, no noise pilot, and no"
+  echo "   rung escalation was run, so this invocation produced no timing of any"
+  echo "   kind and nothing may be quoted from it as performance. The trap now"
+  echo "   stops all four services."
+  exit 0
+fi
 
 echo "== latency gate, rung 21, variant 5.2A =="
 uv run python -m bench.paired_bench \
