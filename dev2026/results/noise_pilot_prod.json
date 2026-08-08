@@ -1,0 +1,708 @@
+{
+  "kind": "noise_pilot",
+  "base_url": "https://eco.odb.ntu.edu.tw",
+  "captured_at": "2026-08-05T17:21:35+0800",
+  "host": "ODBAI-M1.local",
+  "python": "3.13.11 (main, Jan 14 2026, 23:14:53) [Clang 21.1.4 ]",
+  "null_hypothesis": "Both bootstrap arms are drawn from the SAME backend, so the null hypothesis is a ratio of 1.0. Drift, GC, cache and co-tenant load are inside these samples, not controlled away \u2014 this is a preliminary estimate of the noise floor, not a measured constant.",
+  "warmup_discarded": 1,
+  "selected_k": 21,
+  "seed": 20260805,
+  "bootstrap_rounds": 5000,
+  "results": [
+    {
+      "id": "point_profile",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature",
+        "time_period": "0",
+        "append": "mn"
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 112.98,
+      "min_ms": 106.62,
+      "max_ms": 265.77,
+      "spread_pct": 140.9,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.5802,
+          "ci95_high": 1.7283,
+          "tolerance_pct": 72.8,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.8925,
+          "ci95_high": 1.1046,
+          "tolerance_pct": 10.8,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.9408,
+          "ci95_high": 1.0676,
+          "tolerance_pct": 6.8,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.9623,
+          "ci95_high": 1.0392,
+          "tolerance_pct": 3.9,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        113.96500002592802,
+        123.61270911060274,
+        107.18970815651119,
+        117.57804197259247,
+        107.10804187692702,
+        114.51291595585644,
+        109.19429105706513,
+        108.45825006254017,
+        194.537540897727,
+        113.79137495532632,
+        111.95020889863372,
+        106.61850008182228,
+        120.61120895668864,
+        113.47562493756413,
+        112.69166599959135,
+        112.56195791065693,
+        106.90954187884927,
+        245.79049996100366,
+        112.97604208812118,
+        113.00916690379381,
+        121.52775004506111,
+        109.34729198925197,
+        265.773749910295,
+        112.87354212254286,
+        115.38495891727507,
+        106.73708422109485
+      ]
+    },
+    {
+      "id": "point_profile_multiparam",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature,salinity,oxygen",
+        "time_period": "0,1,2,13",
+        "append": "mn,an"
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 1923.74,
+      "min_ms": 1681.19,
+      "max_ms": 4575.55,
+      "spread_pct": 150.5,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.8851,
+          "ci95_high": 1.1312,
+          "tolerance_pct": 13.1,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.9213,
+          "ci95_high": 1.0891,
+          "tolerance_pct": 8.9,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.9458,
+          "ci95_high": 1.0569,
+          "tolerance_pct": 5.7,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.9631,
+          "ci95_high": 1.0366,
+          "tolerance_pct": 3.7,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        1880.720959044993,
+        1949.418667005375,
+        1990.7858341466635,
+        1920.5174171365798,
+        1697.1206669695675,
+        1956.8195000756532,
+        1868.5954168904573,
+        1753.93229117617,
+        1915.9933750052005,
+        1983.9880410581827,
+        1892.3307079821825,
+        1917.396041098982,
+        1803.7471249699593,
+        2115.829790942371,
+        1824.2929161060601,
+        2086.679791798815,
+        2015.08633303456,
+        1865.6404588837177,
+        2029.720958089456,
+        1975.7007919251919,
+        1681.1940409243107,
+        4575.552999973297,
+        1923.7444999162108,
+        2003.6997909191996,
+        1860.7885839883238,
+        1933.9421251788735
+      ]
+    },
+    {
+      "id": "readme_example",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature,salinity,oxygen",
+        "time_period": "0,1,2,13",
+        "append": "mn,an",
+        "lon1": 150,
+        "lat1": 20,
+        "dep1": 60
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 1217.35,
+      "min_ms": 1060.88,
+      "max_ms": 1359.01,
+      "spread_pct": 24.5,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.8956,
+          "ci95_high": 1.1169,
+          "tolerance_pct": 11.7,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.9208,
+          "ci95_high": 1.1024,
+          "tolerance_pct": 10.2,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.9671,
+          "ci95_high": 1.0358,
+          "tolerance_pct": 3.6,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.9777,
+          "ci95_high": 1.0231,
+          "tolerance_pct": 2.3,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        1223.61591598019,
+        1191.9369590468705,
+        1238.8707918580621,
+        1180.6147499009967,
+        1094.0382918342948,
+        1224.8095418326557,
+        1166.7004169430584,
+        1213.3265831507742,
+        1217.349166981876,
+        1090.7357500400394,
+        1359.0120829176158,
+        1276.1917498428375,
+        1239.8367079440504,
+        1184.6017090138048,
+        1100.0548750162125,
+        1221.9787079375237,
+        1210.7764999382198,
+        1060.882667079568,
+        1219.4198749493808,
+        1326.5379581134766,
+        1230.7542080525309,
+        1280.8512498158962,
+        1256.8135841283947,
+        1215.4357079416513,
+        1212.7387500368059,
+        1219.0888749901205
+      ]
+    },
+    {
+      "id": "small_bbox_full_depth",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "1",
+        "parameter": "temperature",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 150,
+        "lat1": 20
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 155.52,
+      "min_ms": 145.48,
+      "max_ms": 362.57,
+      "spread_pct": 139.6,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.8175,
+          "ci95_high": 1.2256,
+          "tolerance_pct": 22.6,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.8718,
+          "ci95_high": 1.1307,
+          "tolerance_pct": 13.1,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.9402,
+          "ci95_high": 1.0648,
+          "tolerance_pct": 6.5,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.9546,
+          "ci95_high": 1.0476,
+          "tolerance_pct": 4.8,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        191.16299995221198,
+        149.06937489286065,
+        151.24120796099305,
+        148.3139581978321,
+        166.22358304448426,
+        150.95691592432559,
+        289.65112497098744,
+        161.04091587476432,
+        152.37262519076467,
+        156.476957956329,
+        153.9719169959426,
+        162.9646671935916,
+        147.1739998087287,
+        146.4659171178937,
+        149.4090841151774,
+        147.011750144884,
+        185.0099579896778,
+        362.5670000910759,
+        155.52479191683233,
+        154.45633279159665,
+        160.29812511987984,
+        155.87316686287522,
+        177.16304189525545,
+        158.43870909884572,
+        145.47912497073412,
+        160.5617911554873
+      ]
+    },
+    {
+      "id": "regional_bbox",
+      "params": {
+        "lon0": 110,
+        "lat0": 10,
+        "grid": "1",
+        "parameter": "temperature,salinity",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 140,
+        "lat1": 30,
+        "dep1": 200
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 168.19,
+      "min_ms": 158.77,
+      "max_ms": 300.19,
+      "spread_pct": 84.1,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.7749,
+          "ci95_high": 1.2752,
+          "tolerance_pct": 27.5,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.8588,
+          "ci95_high": 1.1721,
+          "tolerance_pct": 17.2,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.886,
+          "ci95_high": 1.129,
+          "tolerance_pct": 12.9,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.8956,
+          "ci95_high": 1.1166,
+          "tolerance_pct": 11.7,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        199.8519590124488,
+        277.09312504157424,
+        164.24608300440013,
+        186.63250003010035,
+        159.09700002521276,
+        186.32800015620887,
+        165.33445892855525,
+        163.2997498381883,
+        185.38383301347494,
+        168.45404100604355,
+        163.191249826923,
+        168.19074982777238,
+        185.3474578820169,
+        211.95783303119242,
+        173.0260830372572,
+        300.1896250061691,
+        194.6200830861926,
+        192.51633412204683,
+        165.99458293057978,
+        166.217332938686,
+        169.47200009599328,
+        162.72854106500745,
+        158.77262502908707,
+        161.2432908732444,
+        162.98462497070432,
+        164.1729159746319
+      ]
+    },
+    {
+      "id": "surface_global",
+      "params": {
+        "lon0": -180,
+        "lat0": -90,
+        "grid": "1",
+        "parameter": "temperature",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 180,
+        "lat1": 90,
+        "dep1": 0
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 276.97,
+      "min_ms": 273.32,
+      "max_ms": 300.17,
+      "spread_pct": 9.7,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.9569,
+          "ci95_high": 1.0451,
+          "tolerance_pct": 4.5,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.9716,
+          "ci95_high": 1.0279,
+          "tolerance_pct": 2.8,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.9806,
+          "ci95_high": 1.0198,
+          "tolerance_pct": 2.0,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.9838,
+          "ci95_high": 1.0165,
+          "tolerance_pct": 1.6,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        293.89633308164775,
+        279.09204084426165,
+        281.7784999497235,
+        285.04904196597636,
+        282.26933302357793,
+        276.63187496364117,
+        276.1980830691755,
+        273.4981249086559,
+        276.2215419206768,
+        289.4496670924127,
+        274.49849992990494,
+        275.22499999031425,
+        275.29070898890495,
+        280.9243749361485,
+        277.6962909847498,
+        276.96516597643495,
+        283.90733408741653,
+        300.1746661029756,
+        273.3192499727011,
+        277.926207985729,
+        291.59208317287266,
+        276.37066692113876,
+        281.36916691437364,
+        275.4706251434982,
+        275.54499986581504,
+        276.6264579258859
+      ]
+    },
+    {
+      "id": "point_profile_025",
+      "params": {
+        "lon0": 135,
+        "lat0": 15,
+        "grid": "0.25",
+        "parameter": "temperature,salinity",
+        "time_period": "0",
+        "append": "mn"
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 153.03,
+      "min_ms": 141.72,
+      "max_ms": 493.39,
+      "spread_pct": 229.8,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.5266,
+          "ci95_high": 1.881,
+          "tolerance_pct": 88.1,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.5647,
+          "ci95_high": 1.7974,
+          "tolerance_pct": 79.7,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.6052,
+          "ci95_high": 1.2577,
+          "tolerance_pct": 39.5,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.9283,
+          "ci95_high": 1.1,
+          "tolerance_pct": 10.0,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        182.91837512515485,
+        273.24183308519423,
+        284.56599987111986,
+        143.73154193162918,
+        153.03033404052258,
+        141.72416692599654,
+        256.4858749974519,
+        143.88279197737575,
+        156.32241708226502,
+        148.2566250488162,
+        313.65683302283287,
+        183.34487499669194,
+        148.16816709935665,
+        157.27850003167987,
+        144.035458099097,
+        493.38887515477836,
+        145.7747919484973,
+        143.22362514212728,
+        155.22379195317626,
+        152.02199993655086,
+        145.2641251962632,
+        163.08199986815453,
+        156.49195783771574,
+        262.37941696308553,
+        147.14166685007513,
+        145.69266699254513
+      ]
+    },
+    {
+      "id": "regional_bbox_025",
+      "params": {
+        "lon0": 118,
+        "lat0": 18,
+        "grid": "0.25",
+        "parameter": "temperature,salinity",
+        "time_period": "0",
+        "append": "mn",
+        "lon1": 128,
+        "lat1": 28,
+        "dep1": 200
+      },
+      "statuses_seen": [
+        200
+      ],
+      "warm_n": 25,
+      "median_ms": 357.6,
+      "min_ms": 332.2,
+      "max_ms": 602.78,
+      "spread_pct": 75.7,
+      "levels": [
+        {
+          "k": 3,
+          "ci95_low": 0.7094,
+          "ci95_high": 1.4216,
+          "tolerance_pct": 42.2,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 5,
+          "ci95_low": 0.7475,
+          "ci95_high": 1.3448,
+          "tolerance_pct": 34.5,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 11,
+          "ci95_low": 0.9087,
+          "ci95_high": 1.1005,
+          "tolerance_pct": 10.0,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": false
+        },
+        {
+          "k": 21,
+          "ci95_low": 0.9322,
+          "ci95_high": 1.0728,
+          "tolerance_pct": 7.3,
+          "pool_n": 25,
+          "underpowered": false,
+          "selected": true
+        }
+      ],
+      "samples_ms": [
+        335.37295809946954,
+        367.3621250782162,
+        491.47804104723036,
+        353.6140830256045,
+        336.01074991747737,
+        370.53212500177324,
+        332.6963749714196,
+        530.9238340705633,
+        380.96858304925263,
+        602.7801251038909,
+        333.78966711461544,
+        345.7251249346882,
+        343.8555831089616,
+        388.55733280070126,
+        353.3879998140037,
+        343.5999588109553,
+        498.44487500377,
+        380.45641616918147,
+        351.0358340572566,
+        472.084583947435,
+        357.5988330412656,
+        371.4257499668747,
+        332.19945803284645,
+        388.6474589817226,
+        355.12308310717344,
+        356.843207962811
+      ]
+    }
+  ]
+}

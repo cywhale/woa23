@@ -1,0 +1,246 @@
+{
+  "kind": "backend_meta",
+  "label": "candidate",
+  "manifest_patterns": [
+    "api/**/*.py"
+  ],
+  "collected_at": "2026-08-07T08:55:22+0800",
+  "host": "odb24",
+  "kernel": "6.8.0-124-generic",
+  "port": 8051,
+  "master_pid": 3361875,
+  "listener_pids": [
+    3361875,
+    3361877
+  ],
+  "port_verified": true,
+  "proc_starttime": 489660037,
+  "boot_id": "7c674929-5bcd-42d4-9d9a-47d96d4dbd4d",
+  "worker_pids": [
+    3361877
+  ],
+  "cwd": "/home/odbadmin/woa23-dev2026/dev2026",
+  "executable": "/home/odbadmin/.pyenv/versions/3.11.4/bin/python3.11",
+  "launch_argv": [
+    "/home/odbadmin/woa23-dev2026/dev2026/.venv/bin/python",
+    ".venv/bin/gunicorn",
+    "api.app:app",
+    "-w",
+    "1",
+    "-k",
+    "uvicorn.workers.UvicornWorker",
+    "-b",
+    "127.0.0.1:8051",
+    "--timeout",
+    "120"
+  ],
+  "launch_command": "/home/odbadmin/woa23-dev2026/dev2026/.venv/bin/python .venv/bin/gunicorn api.app:app -w 1 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8051 --timeout 120",
+  "expect_argv_contains": [
+    "api.app:app"
+  ],
+  "env": {
+    "PYTHONHASHSEED": "0",
+    "WOA23_ZARR_STORE": "/home/odbadmin/python/woa23/data"
+  },
+  "env_whitelist": [
+    "PYTHONHASHSEED",
+    "WOA23_ZARR_STORE",
+    "DASK_SCHEDULER_ADDRESS",
+    "PYTHONPATH",
+    "OMP_NUM_THREADS",
+    "POLARS_SKIP_CPU_CHECK"
+  ],
+  "store_path": "/home/odbadmin/python/woa23/data",
+  "store_source": "env",
+  "zmetadata_fingerprints": {
+    "025_degree/annual/TS/.zmetadata": {
+      "mtime_ns": 1718536236139225358,
+      "size": 11004,
+      "sha256": "d573e4c2eafc0823bf89cda382736c13b09ed3d8db184bf2decbe6093c6e238b"
+    },
+    "025_degree/monthly/TS/.zmetadata": {
+      "mtime_ns": 1718546576322369113,
+      "size": 11871,
+      "sha256": "3f73090f0f13292912d9b0801a98c0ef8ee00220014c9f2898ec950b7e7aafb4"
+    },
+    "025_degree/seasonal/TS/.zmetadata": {
+      "mtime_ns": 1718542926072713209,
+      "size": 11871,
+      "sha256": "b4896da482f143bcd28e2f6728360e29f155e7dca5510109d7f42f0d1daa2a8a"
+    },
+    "1_degree/annual/Nutrients/.zmetadata": {
+      "mtime_ns": 1718557592716674965,
+      "size": 10124,
+      "sha256": "b62b4a215e135eea9bcaf1f99ff2ecc40a7f00d6fd9ce1c7e30254ce7a4efbb0"
+    },
+    "1_degree/annual/Oxy/.zmetadata": {
+      "mtime_ns": 1718557477615236928,
+      "size": 10992,
+      "sha256": "aa46e4af8e746f7435e4d92cc716b7223c5fe31c862f9805561d779627cf92dd"
+    },
+    "1_degree/annual/TS/.zmetadata": {
+      "mtime_ns": 1718557847731075635,
+      "size": 10993,
+      "sha256": "517f2946b7ac195aaaa6b6c39bab1e0b6799fff3c048435a69ce80207a959a5a"
+    },
+    "1_degree/monthly/Nutrients/.zmetadata": {
+      "mtime_ns": 1718559157045872520,
+      "size": 10990,
+      "sha256": "0be8facae2b00a6661cfcf3759f1d230fc4488fed8edbbb856bae739043ceae8"
+    },
+    "1_degree/monthly/Oxy/.zmetadata": {
+      "mtime_ns": 1718559228672499178,
+      "size": 10990,
+      "sha256": "d55349598dba290cde40e68465e1701de5b1ad3d7879e432b89f781bb21c4504"
+    },
+    "1_degree/monthly/TS/.zmetadata": {
+      "mtime_ns": 1718559082167299362,
+      "size": 11859,
+      "sha256": "185f73cc6b792fdebec7e00ad510a952ab0c14df9c15538636357853083ae6f9"
+    },
+    "1_degree/seasonal/Nutrients/.zmetadata": {
+      "mtime_ns": 1718558893414845914,
+      "size": 10979,
+      "sha256": "f5e888e36dffb19f75f0da4c96d124cd38851e84c9f742946a831b93acffde21"
+    },
+    "1_degree/seasonal/Oxy/.zmetadata": {
+      "mtime_ns": 1718559042208056622,
+      "size": 10979,
+      "sha256": "09abad3be3f31a4d2df57360797748ce6bd236e88ee8a1b524544a702dd33d0c"
+    },
+    "1_degree/seasonal/TS/.zmetadata": {
+      "mtime_ns": 1718558944417895713,
+      "size": 11859,
+      "sha256": "80a2d059e6666ed16c57f9c0509d198056e1f73c5d936bb1d41fcd2789892b1b"
+    },
+    "test/.zmetadata": {
+      "mtime_ns": 1744957907452604169,
+      "size": 4927,
+      "sha256": "03d15f2c5f3758c7189e9510f8062bd736cff82944c3c4a24c978489187e5b98"
+    }
+  },
+  "source_sha256": {
+    "api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "api/app.py": "5cdb68333c71a020ddfc2dd69f61ee93d89c43f2a07183bba9ff2799ad1c1eca",
+    "api/config.py": "93917a1bcd5c8d66736a0a9ccd9f33a7d76a0fd6cac39060835cb0d42182e994",
+    "api/query.py": "93b64fc08b8beb3fd0b83c6e67a66b040cb7ebf887c41b5e89b283ed1961c021"
+  },
+  "dependencies": {
+    "lockfile": "uv.lock",
+    "lockfile_sha256": "0d2980a5928d4d0964d6cb3b78bffae14aa11a70d3b51ca00f4cf39073dccc69",
+    "pip_freeze_sha256": "eb6e98b0ab615779b156c7c228feceddc0f92f80a9245e34d41bff1cf8b8b702",
+    "pip_freeze": [
+      "annotated-types==0.7.0",
+      "anyio==4.6.2.post1",
+      "asciitree==0.3.3",
+      "asttokens==3.0.1",
+      "bokeh==3.6.0",
+      "certifi==2024.8.30",
+      "cftime==1.6.4",
+      "charset-normalizer==3.4.0",
+      "click==8.1.7",
+      "cloudpickle==3.1.0",
+      "comm==0.2.3",
+      "contourpy==1.3.0",
+      "cycler==0.12.1",
+      "dask==2024.10.0",
+      "dask-expr==1.1.16",
+      "debugpy==1.8.20",
+      "decorator==5.2.1",
+      "distributed==2024.10.0",
+      "dnspython==2.7.0",
+      "email_validator==2.2.0",
+      "executing==2.2.1",
+      "fastapi==0.115.2",
+      "fastapi-cli==0.0.5",
+      "fasteners==0.19",
+      "fonttools==4.54.1",
+      "fsspec==2024.10.0",
+      "gunicorn==23.0.0",
+      "h11==0.14.0",
+      "h5py==3.12.1",
+      "httpcore==1.0.6",
+      "httptools==0.6.4",
+      "httpx==0.27.2",
+      "idna==3.10",
+      "importlib_metadata==8.5.0",
+      "ipykernel==7.1.0",
+      "ipython==9.10.0",
+      "ipython_pygments_lexers==1.1.1",
+      "jedi==0.19.2",
+      "Jinja2==3.1.4",
+      "jupyter_client==8.8.0",
+      "jupyter_core==5.9.1",
+      "kiwisolver==1.4.7",
+      "locket==1.0.0",
+      "lxml==5.3.0",
+      "lz4==4.3.3",
+      "markdown-it-py==3.0.0",
+      "MarkupSafe==3.0.2",
+      "matplotlib==3.8.4",
+      "matplotlib-inline==0.2.1",
+      "mdurl==0.1.2",
+      "msgpack==1.1.0",
+      "nest-asyncio==1.6.0",
+      "netCDF4==1.7.1",
+      "numcodecs==0.13.0",
+      "numpy==2.1.2",
+      "packaging==24.1",
+      "pandas==2.2.3",
+      "parso==0.8.5",
+      "partd==1.4.2",
+      "pexpect==4.9.0",
+      "pillow==11.0.0",
+      "platformdirs==4.5.1",
+      "polars==1.10.0",
+      "prompt_toolkit==3.0.52",
+      "psutil==6.1.0",
+      "ptyprocess==0.7.0",
+      "pure_eval==0.2.3",
+      "pyarrow==17.0.0",
+      "pydantic==2.9.2",
+      "pydantic_core==2.23.4",
+      "Pygments==2.18.0",
+      "pyparsing==3.2.0",
+      "pyproj==3.7.0",
+      "python-dateutil==2.9.0.post0",
+      "python-dotenv==1.0.1",
+      "python-multipart==0.0.12",
+      "pyTMD==2.1.7",
+      "pytz==2024.2",
+      "PyYAML==6.0.2",
+      "pyzmq==27.1.0",
+      "requests==2.32.3",
+      "rich==13.9.2",
+      "scipy==1.14.1",
+      "setuptools-scm==8.1.0",
+      "shellingham==1.5.4",
+      "six==1.16.0",
+      "sniffio==1.3.1",
+      "sortedcontainers==2.4.0",
+      "-e git+https://github.com/cywhale/tide.git@bc9e9d43627dd9e0def3355847d367c02255e2f7#egg=src",
+      "stack-data==0.6.3",
+      "starlette==0.40.0",
+      "tblib==3.0.0",
+      "timescale==0.0.5",
+      "toolz==1.0.0",
+      "tornado==6.4.1",
+      "traitlets==5.14.3",
+      "typer==0.12.5",
+      "typing_extensions==4.12.2",
+      "tzdata==2024.2",
+      "urllib3==2.2.3",
+      "uvicorn==0.32.0",
+      "uvloop==0.21.0",
+      "watchfiles==0.24.0",
+      "wcwidth==0.5.3",
+      "websockets==13.1",
+      "xarray==2024.9.0",
+      "xyzservices==2024.9.0",
+      "zarr==2.18.3",
+      "zict==3.0.0",
+      "zipp==3.20.2"
+    ]
+  },
+  "collector_python": "3.11.4 (main, Jul 25 2023, 10:21:50) [GCC 9.4.0]"
+}

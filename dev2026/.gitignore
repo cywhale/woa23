@@ -1,0 +1,12 @@
+# benchmark environment; results/ is kept in git as the measurement record
+.venv/
+__pycache__/
+
+# Runtime state written by scripts/run_candidate.sh on the host it runs on:
+# pidfiles, start-time stamps and server logs. Machine- and run-specific, and a
+# committed pidfile would be actively misleading — it names a PID on one host.
+run/
+
+# the root .gitignore excludes **/*.lock, but the uv lockfile is what makes a
+# benchmark run reproducible, so keep it
+!uv.lock

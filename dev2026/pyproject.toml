@@ -1,0 +1,43 @@
+[project]
+name = "woa23-bench2026"
+version = "0.1.0"
+description = "Performance evaluation harness for the ODB WOA23 API (Zarr) and PostGIS/GeoServer paths"
+# Pinned to production's minor version, not merely ">=3.11".
+#
+# With the open bound, `uv sync` on VM24 selected Python 3.14 and began building
+# numpy, pandas and pydantic-core from source — it only failed because no wheels
+# exist for 3.14 yet. Had they existed it would have succeeded quietly and
+# benchmarked the candidate on an interpreter production does not run, which would
+# have invalidated every number without anything looking wrong.
+requires-python = ">=3.11,<3.12"
+
+# Pinned to match production — ../requirements.txt plus the versions read off
+# VM24's interpreter in spec 001 section 4.3 — so measurements describe what the
+# live API actually runs. Upgrading any of these is S2c, with its own paired
+# benchmark; S1 pins to production so its A/B isolates the Dask change alone.
+dependencies = [
+    # Data path. Shared by the harness and the candidate API.
+    "numcodecs==0.15.1",
+    "numpy==2.2.4",
+    "pandas[pyarrow]==2.2.3",
+    "polars==1.27.1",
+    "xarray==2025.3.1",
+    "zarr==2.18.6",
+    # Web stack for the candidate API (dev2026/api).
+    "fastapi==0.115.12",
+    "starlette==0.46.2",
+    "uvicorn==0.34.1",
+    "gunicorn==23.0.0",
+    "orjson==3.11.4",
+    "pydantic==2.11.3",
+    # Benchmark harness only.
+    "httpx>=0.27",
+    # NOT a candidate dependency — removing Dask is the point of S1. Kept solely so
+    # bench/zarr_bench.py can still drive the `distributed` mode for the before
+    # side of the comparison.
+    "dask[complete]==2025.3.0",
+    "distributed==2025.3.0",
+]
+
+[tool.uv]
+package = false

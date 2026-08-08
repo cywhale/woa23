@@ -1,0 +1,599 @@
+{
+  "kind": "zarr",
+  "store": "/home/odbadmin/python/woa23/data",
+  "captured_at": "2026-08-05T15:59:16+0800",
+  "host": "odb24",
+  "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+  "versions": {
+    "xarray": "2025.3.1",
+    "dask": "2025.3.0",
+    "polars": "1.27.1",
+    "numpy": "2.2.4"
+  },
+  "cache_stores": false,
+  "repeat": 3,
+  "results": [
+    {
+      "mode": "numpy",
+      "id": "surface_global",
+      "intent": "whole world at the surface -- the read pattern the current chunking (lat=90, lon=360) is actually optimised for",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 2353.36,
+          "sel": 2.58,
+          "to_dataframe": 45.16,
+          "to_polars": 25.15,
+          "concat": 4.73,
+          "pivot": 20.02,
+          "to_dicts": 67.49,
+          "total_ms": 2518.49
+        },
+        {
+          "open": 4.28,
+          "sel": 1.63,
+          "to_dataframe": 19.4,
+          "to_polars": 15.6,
+          "concat": 2.99,
+          "pivot": 16.33,
+          "to_dicts": 66.6,
+          "total_ms": 126.83
+        },
+        {
+          "open": 4.11,
+          "sel": 1.57,
+          "to_dataframe": 19.25,
+          "to_polars": 15.6,
+          "concat": 2.85,
+          "pivot": 12.05,
+          "to_dicts": 63.25,
+          "total_ms": 118.68
+        }
+      ],
+      "amplification": {
+        "1_degree/annual/TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 1,
+              "chunk": 8,
+              "chunks_touched": 1,
+              "elements_read": 8
+            },
+            "lat": {
+              "selected": 180,
+              "chunk": 90,
+              "chunks_touched": 2,
+              "elements_read": 180
+            },
+            "lon": {
+              "selected": 360,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 64800,
+          "elements_read": 518400,
+          "factor": 8.0,
+          "uncompressed_bytes_read": 2073600
+        }
+      },
+      "summary": {
+        "chunks_read": 2,
+        "mib_decompressed": 2.0,
+        "cold_ms": 2518.49,
+        "warm_median_ms": 122.75,
+        "rows": 64800,
+        "stage_median_ms": {
+          "open": 4.28,
+          "sel": 1.63,
+          "to_dataframe": 19.4,
+          "to_polars": 15.6,
+          "concat": 2.99,
+          "pivot": 16.33,
+          "to_dicts": 66.6
+        },
+        "worst_amplification": 8.0
+      }
+    },
+    {
+      "mode": "numpy",
+      "id": "regional_bbox_025",
+      "intent": "0.25-degree grid, 10x10 degree box, upper ocean",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/025_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 4.12,
+          "sel": 1.6,
+          "to_dataframe": 257.37,
+          "to_polars": 20.27,
+          "concat": 6.46,
+          "pivot": 13.77,
+          "to_dicts": 47.1,
+          "total_ms": 350.69
+        },
+        {
+          "open": 8.05,
+          "sel": 2.52,
+          "to_dataframe": 35.92,
+          "to_polars": 20.81,
+          "concat": 3.43,
+          "pivot": 13.07,
+          "to_dicts": 45.73,
+          "total_ms": 129.53
+        },
+        {
+          "open": 3.96,
+          "sel": 1.59,
+          "to_dataframe": 33.93,
+          "to_polars": 18.38,
+          "concat": 3.3,
+          "pivot": 12.72,
+          "to_dicts": 43.94,
+          "total_ms": 117.83
+        }
+      ],
+      "amplification": {
+        "025_degree/annual/TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 25,
+              "chunk": 8,
+              "chunks_touched": 4,
+              "elements_read": 32
+            },
+            "lat": {
+              "selected": 41,
+              "chunk": 90,
+              "chunks_touched": 2,
+              "elements_read": 180
+            },
+            "lon": {
+              "selected": 41,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 84050,
+          "elements_read": 4147200,
+          "factor": 49.3,
+          "uncompressed_bytes_read": 16588800
+        }
+      },
+      "summary": {
+        "chunks_read": 16,
+        "mib_decompressed": 15.8,
+        "cold_ms": 350.69,
+        "warm_median_ms": 123.68,
+        "rows": 42025,
+        "stage_median_ms": {
+          "open": 4.12,
+          "sel": 1.6,
+          "to_dataframe": 35.92,
+          "to_polars": 20.27,
+          "concat": 3.43,
+          "pivot": 13.07,
+          "to_dicts": 45.73
+        },
+        "worst_amplification": 49.3
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "surface_global",
+      "intent": "whole world at the surface -- the read pattern the current chunking (lat=90, lon=360) is actually optimised for",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 101.28,
+          "sel": 14.02,
+          "to_dataframe": 24.48,
+          "to_polars": 15.52,
+          "concat": 2.62,
+          "pivot": 11.4,
+          "to_dicts": 57.88,
+          "total_ms": 227.21
+        },
+        {
+          "open": 7.21,
+          "sel": 13.18,
+          "to_dataframe": 21.44,
+          "to_polars": 15.72,
+          "concat": 2.61,
+          "pivot": 11.65,
+          "to_dicts": 56.98,
+          "total_ms": 128.78
+        },
+        {
+          "open": 7.15,
+          "sel": 13.11,
+          "to_dataframe": 21.55,
+          "to_polars": 15.35,
+          "concat": 3.02,
+          "pivot": 11.35,
+          "to_dicts": 57.03,
+          "total_ms": 128.55
+        }
+      ],
+      "amplification": {
+        "1_degree/annual/TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 1,
+              "chunk": 8,
+              "chunks_touched": 1,
+              "elements_read": 8
+            },
+            "lat": {
+              "selected": 180,
+              "chunk": 90,
+              "chunks_touched": 2,
+              "elements_read": 180
+            },
+            "lon": {
+              "selected": 360,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 64800,
+          "elements_read": 518400,
+          "factor": 8.0,
+          "uncompressed_bytes_read": 2073600
+        }
+      },
+      "summary": {
+        "chunks_read": 2,
+        "mib_decompressed": 2.0,
+        "cold_ms": 227.21,
+        "warm_median_ms": 128.67,
+        "rows": 64800,
+        "stage_median_ms": {
+          "open": 7.21,
+          "sel": 13.18,
+          "to_dataframe": 21.55,
+          "to_polars": 15.52,
+          "concat": 2.62,
+          "pivot": 11.4,
+          "to_dicts": 57.03
+        },
+        "worst_amplification": 8.0
+      }
+    },
+    {
+      "mode": "threads",
+      "id": "regional_bbox_025",
+      "intent": "0.25-degree grid, 10x10 degree box, upper ocean",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/025_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 7.25,
+          "sel": 33.29,
+          "to_dataframe": 44.73,
+          "to_polars": 18.63,
+          "concat": 3.34,
+          "pivot": 14.88,
+          "to_dicts": 44.07,
+          "total_ms": 166.19
+        },
+        {
+          "open": 7.06,
+          "sel": 33.52,
+          "to_dataframe": 149.0,
+          "to_polars": 18.75,
+          "concat": 3.37,
+          "pivot": 13.84,
+          "to_dicts": 45.84,
+          "total_ms": 271.39
+        },
+        {
+          "open": 7.12,
+          "sel": 33.56,
+          "to_dataframe": 42.6,
+          "to_polars": 18.21,
+          "concat": 3.42,
+          "pivot": 14.16,
+          "to_dicts": 46.35,
+          "total_ms": 165.42
+        }
+      ],
+      "amplification": {
+        "025_degree/annual/TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 25,
+              "chunk": 8,
+              "chunks_touched": 4,
+              "elements_read": 32
+            },
+            "lat": {
+              "selected": 41,
+              "chunk": 90,
+              "chunks_touched": 2,
+              "elements_read": 180
+            },
+            "lon": {
+              "selected": 41,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 84050,
+          "elements_read": 4147200,
+          "factor": 49.3,
+          "uncompressed_bytes_read": 16588800
+        }
+      },
+      "summary": {
+        "chunks_read": 16,
+        "mib_decompressed": 15.8,
+        "cold_ms": 166.19,
+        "warm_median_ms": 218.4,
+        "rows": 42025,
+        "stage_median_ms": {
+          "open": 7.12,
+          "sel": 33.52,
+          "to_dataframe": 44.73,
+          "to_polars": 18.63,
+          "concat": 3.37,
+          "pivot": 14.16,
+          "to_dicts": 45.84
+        },
+        "worst_amplification": 49.3
+      }
+    },
+    {
+      "mode": "distributed",
+      "id": "surface_global",
+      "intent": "whole world at the surface -- the read pattern the current chunking (lat=90, lon=360) is actually optimised for",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/1_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 7.73,
+          "sel": 13.31,
+          "to_dataframe": 81.48,
+          "to_polars": 15.42,
+          "concat": 2.65,
+          "pivot": 12.03,
+          "to_dicts": 54.92,
+          "total_ms": 187.54
+        },
+        {
+          "open": 7.11,
+          "sel": 13.2,
+          "to_dataframe": 63.7,
+          "to_polars": 15.37,
+          "concat": 2.69,
+          "pivot": 11.43,
+          "to_dicts": 53.88,
+          "total_ms": 167.37
+        },
+        {
+          "open": 7.22,
+          "sel": 13.04,
+          "to_dataframe": 57.12,
+          "to_polars": 15.11,
+          "concat": 2.55,
+          "pivot": 17.19,
+          "to_dicts": 52.29,
+          "total_ms": 164.53
+        }
+      ],
+      "amplification": {
+        "1_degree/annual/TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "depth": {
+              "selected": 1,
+              "chunk": 8,
+              "chunks_touched": 1,
+              "elements_read": 8
+            },
+            "lat": {
+              "selected": 180,
+              "chunk": 90,
+              "chunks_touched": 2,
+              "elements_read": 180
+            },
+            "lon": {
+              "selected": 360,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 64800,
+          "elements_read": 518400,
+          "factor": 8.0,
+          "uncompressed_bytes_read": 2073600
+        }
+      },
+      "summary": {
+        "chunks_read": 2,
+        "mib_decompressed": 2.0,
+        "cold_ms": 187.54,
+        "warm_median_ms": 165.95,
+        "rows": 64800,
+        "stage_median_ms": {
+          "open": 7.22,
+          "sel": 13.2,
+          "to_dataframe": 63.7,
+          "to_polars": 15.37,
+          "concat": 2.65,
+          "pivot": 12.03,
+          "to_dicts": 53.88
+        },
+        "worst_amplification": 8.0
+      }
+    },
+    {
+      "mode": "distributed",
+      "id": "regional_bbox_025",
+      "intent": "0.25-degree grid, 10x10 degree box, upper ocean",
+      "paths": [
+        "/home/odbadmin/python/woa23/data/025_degree/annual/TS"
+      ],
+      "runs": [
+        {
+          "open": 7.21,
+          "sel": 33.63,
+          "to_dataframe": 140.05,
+          "to_polars": 18.96,
+          "concat": 3.34,
+          "pivot": 13.14,
+          "to_dicts": 41.42,
+          "total_ms": 257.75
+        },
+        {
+          "open": 7.2,
+          "sel": 34.7,
+          "to_dataframe": 119.29,
+          "to_polars": 18.69,
+          "concat": 3.38,
+          "pivot": 13.21,
+          "to_dicts": 40.23,
+          "total_ms": 236.7
+        },
+        {
+          "open": 7.18,
+          "sel": 156.76,
+          "to_dataframe": 120.87,
+          "to_polars": 18.51,
+          "concat": 3.67,
+          "pivot": 14.19,
+          "to_dicts": 38.74,
+          "total_ms": 359.92
+        }
+      ],
+      "amplification": {
+        "025_degree/annual/TS:mn": {
+          "per_dim": {
+            "time_periods": {
+              "selected": 1,
+              "chunk": 1,
+              "chunks_touched": 1,
+              "elements_read": 1
+            },
+            "parameters": {
+              "selected": 2,
+              "chunk": 1,
+              "chunks_touched": 2,
+              "elements_read": 2
+            },
+            "depth": {
+              "selected": 25,
+              "chunk": 8,
+              "chunks_touched": 4,
+              "elements_read": 32
+            },
+            "lat": {
+              "selected": 41,
+              "chunk": 90,
+              "chunks_touched": 2,
+              "elements_read": 180
+            },
+            "lon": {
+              "selected": 41,
+              "chunk": 360,
+              "chunks_touched": 1,
+              "elements_read": 360
+            }
+          },
+          "elements_wanted": 84050,
+          "elements_read": 4147200,
+          "factor": 49.3,
+          "uncompressed_bytes_read": 16588800
+        }
+      },
+      "summary": {
+        "chunks_read": 16,
+        "mib_decompressed": 15.8,
+        "cold_ms": 257.75,
+        "warm_median_ms": 298.31,
+        "rows": 42025,
+        "stage_median_ms": {
+          "open": 7.2,
+          "sel": 34.7,
+          "to_dataframe": 120.87,
+          "to_polars": 18.69,
+          "concat": 3.38,
+          "pivot": 13.21,
+          "to_dicts": 40.23
+        },
+        "worst_amplification": 49.3
+      }
+    }
+  ]
+}
