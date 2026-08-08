@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 2 | 2026-08-08 | **Settled per PI direction.** C1's environment is a read-only forensic clone of production's Python environment, not a rebuild — §4.1 and the open question it replaces. C2's worker count is read from the host, not assumed: production runs `-w 2`, and the first draft's `-w 4` was a guess. C2's unpinned seed is verified across repeated independent starts rather than one. Added §5, separating production-like gunicorn validation from formal PM2/nginx deployment validation — production is supervised by **PM2**, not systemd, which the first draft assumed. Added §6, the boundary between byte-exact, semantic and order-stability. |
 
 ---
 
@@ -43,12 +44,13 @@ returns, when both are given production's packages?** It does not ask how fast.
 
 ## 2. Scope
 
-1. **C1 — production-environment contract.** Build an isolated venv from
-   **production's own distribution set**, give it to both arms, pin
-   `PYTHONHASHSEED=0`, and run the 64 contract cases as **5.2A byte-exact**.
-2. **C2 — multi-worker contract.** `gunicorn -w N` forks N workers, each its own
-   process with its own hash seed, and production does not pin the seed. Verify the
-   contract holds as **5.2B semantic** under that configuration.
+1. **C1 — production-environment contract.** A **read-only forensic clone** of
+   production's Python environment, shared by both arms, `PYTHONHASHSEED=0`, and the
+   64 contract cases as **5.2A byte-exact**. Cloned, not rebuilt — §4.
+2. **C2 — multi-worker contract.** `gunicorn` with **production's own worker count,
+   read from the host** (observed `-w 2`, re-read at run time), seed unpinned as
+   production leaves it, verified as **5.2B semantic** across **repeated independent
+   starts**. Order stability is recorded alongside it — §6.
 3. **D1 — startup failure modes.** `WOA23_ZARR_STORE` is mandatory with no fallback
    (spec 001 §4.2). Establish what a missing or wrong value actually does at start,
    and that it fails loudly rather than serving errors.
@@ -81,9 +83,34 @@ them is the event-loop spec's job.** S2 names what it finds and stops.
 
 ### C1 — production's packages, byte-exact
 
+#### The environment is a read-only forensic clone, not a rebuild
+
+Two ways to get production's packages were considered in rev 1 and the difference
+matters more than it looks: freezing to a requirements file and reinstalling produces
+*a resolution of the same names*, which is not the same artefact — a re-resolve can
+pick different wheels, different transitive pins, different build metadata, and every
+one of those is a variable S2 exists to hold still.
+
+So the environment is **cloned, not rebuilt**: production's `site-packages` is copied
+byte for byte into an isolated tree, made read-only, and used as-is.
+
 | | |
 |---|---|
-| environment | one isolated venv built from production's 236 distributions, **shared by both arms** |
+| direction | one-way, production → clone. Production is **read** and never written, never moved, never relinked |
+| method | copy, not symlink: a symlink would leave both arms executing production's own files, so a stray write during the run would land in production |
+| verification | per-file SHA-256 of the clone against the source, and the distribution-list digest (`60236d7210c8c364`) recomputed **from inside the clone** |
+| permissions | the clone is read-only for the duration of the run |
+| interpreter | production's own Python 3.11.4 is **not** copied; the clone is used with an interpreter of the same version, and that difference is recorded rather than glossed |
+| what it is | a forensic artefact — a snapshot of what production has, faithful to the byte |
+| what it is not | a build, a lockfile, or anything reproducible from a manifest. It cannot be recreated from this spec; it can only be re-cloned |
+
+If the clone's recomputed digest does not equal production's, the clone is wrong and
+the run does not proceed. That check is what makes this a clone rather than an
+approximation.
+
+| | |
+|---|---|
+| environment | the forensic clone above, **shared by both arms** |
 | interpreter | Python 3.11.4, matching production |
 | seed | `PYTHONHASHSEED=0` on both arms |
 | store literal | identical string on both arms (S1's finding: the string, not the directory, orders `zarr_group_paths`) |
@@ -95,7 +122,7 @@ that is exactly why D2a had to compare semantically. But S2 does not need to run
 *production* — it needs production's *packages*. Those can be installed into a venv we
 start ourselves, where the seed is ours to pin. That keeps the strong comparison and
 still answers the question. The cost is that this is production's package set, not
-production's running process; §7 states what that does and does not license.
+production's running process; §9 states what that does and does not license.
 
 The 64 cases are unchanged from S1: **33 JSON-path and 31 CSV, which partition the
 set**; within them, 15 expect a non-200 status and 2 are the OpenAPI document and the
@@ -104,11 +131,32 @@ recorded per case.
 
 ### C2 — multiple workers, unpinned seed, semantic
 
+**The worker count is read from the host, not chosen.** Rev 1 wrote `-w 4`; the
+running master's argv says `-w 2`, and its two children confirm it. That number is
+read again at the time of the run rather than carried from here, because it is a
+property of production and may change.
+
+Observed 2026-08-08, read-only from `/proc`:
+
+```
+pid 3960  gunicorn woa23_app:app -w 2 -k uvicorn.workers.UvicornWorker ...
+          children: 4334 4366          (two, matching -w 2)
+          PYTHONHASHSEED: not set in the master environment
+```
+
+**One start is not evidence that the seed is unpinned.** A single process has one
+seed, and any output it produces is self-consistent. Showing that the seed is *not*
+fixed — and that the contract survives it — takes **repeated independent starts**:
+the arms are started, the cases run, both are stopped, and the whole thing is
+repeated. The seed's variation is established by observing it differ across those
+starts, and the contract is asserted on every one of them.
+
 | | |
 |---|---|
-| configuration | `gunicorn -w N` on both arms, `PYTHONHASHSEED` **not** pinned |
+| configuration | `gunicorn -w <production's count>` on both arms, `PYTHONHASHSEED` **not** pinned |
+| repetitions | at least three independent start/stop cycles; the recorded seed must differ across them, or the premise is unverified and the result says nothing |
 | comparison | **5.2B semantic**: rows as a multiset keyed on `(lon, lat, depth, time_period)`, columns as a set, values exactly |
-| pass | 64/64, and every difference that *is* found is characterised, not waived |
+| pass | 64/64 on **every** cycle, and every difference that is found is characterised, not waived |
 
 **What 5.2B cannot see, stated plainly:** column order, key order and float
 formatting. That is the price of not pinning the seed, and it is why C1 exists
@@ -116,7 +164,52 @@ alongside C2 rather than being replaced by it. If C2 shows differences that C1 d
 not, the difference is caused by the worker configuration and is a finding in its own
 right.
 
-## 5. Deployment acceptance
+## 5. Two different things called "deployment"
+
+The first draft ran these together and named the wrong supervisor. They are separate,
+and only the first is in this spec.
+
+| | **production-like gunicorn validation** (this spec) | **formal deployment validation** (later spec) |
+|---|---|---|
+| what runs | `gunicorn` invoked directly, in a staging directory | the real supervision path |
+| supervisor | none — the runner starts and stops it | **PM2** (`pm2-odbadmin.service`) via `~/python/woa23/conf/start_app.sh` |
+| what it establishes | the application behaves correctly when given production's packages and worker count | the *deployment* behaves correctly — restart policy, log handling, environment inheritance, ordering, failure recovery |
+| nginx / TLS | not involved | involved |
+| touches production config | never | by definition |
+
+Rev 1 assumed systemd. The host says otherwise: production's gunicorn master is a
+child of `bash ~/python/woa23/conf/start_app.sh`, itself under
+`pm2-odbadmin.service`. **Anything about how PM2 starts, restarts or supervises the
+service is out of scope here** — including whether `WOA23_ZARR_STORE` would even
+reach the process through that path, which is exactly the kind of question the later
+spec exists for.
+
+D1 and D2 below are therefore about the *application's* behaviour, not the
+deployment's.
+
+## 6. Three properties, three different tests
+
+These are routinely conflated and the distinction is the reason S1 took as long as it
+did.
+
+| property | question | test | what it cannot see |
+|---|---|---|---|
+| **byte-exactness** (C1) | do the two arms emit identical bytes? | 5.2A, seed pinned, one environment | nothing — it is the strongest form, but it needs a pinned seed, so it cannot be applied to a process we may not restart |
+| **semantic equivalence** (C2) | do they emit the same *content*? | 5.2B, seed unpinned | column order, key order, float formatting |
+| **order stability** | does one arm emit the same order **twice**? | the same arm, repeated independent starts, compared to itself | nothing about the other arm — it is a property of one implementation, not of the pair |
+
+Order stability is neither of the other two and S1 never measured it. It matters
+because S1 established that the candidate's output order depends on the *string* used
+to reach the store, which means order is a function of configuration and not only of
+code. A consumer that relies on column order — a CSV reader indexing by position, a
+GeoServer SQL view — is exposed to that whether or not the two arms agree with each
+other.
+
+**C2's repeated cycles give order stability almost for free**: the same arm's
+responses across cycles can be compared to each other as well as to the other arm.
+Recording it costs nothing and answers a question no gate currently asks.
+
+## 7. Deployment acceptance
 
 Only the two that can be established in isolation. Everything requiring a live
 service moved to the observation spec.
@@ -151,7 +244,7 @@ Establish that the readiness signal is meaningful for the deployment form — th
 turns green only once the worker can serve, and that it does not turn green when the
 store is unreadable while the process is otherwise healthy.
 
-## 6. Isolation requirements
+## 8. Isolation requirements
 
 Inherited from S1 and non-negotiable:
 
@@ -168,7 +261,7 @@ Inherited from S1 and non-negotiable:
   unchanged. **A run whose cleanup cannot confirm itself is a failed run whatever its
   gates said.**
 
-## 7. What a C1 pass would and would not license
+## 9. What a C1 pass would and would not license
 
 **Would:** that the candidate and the unmodified reference produce byte-identical
 responses across the 64 cases when both run on production's package set with a pinned
@@ -184,22 +277,31 @@ seed.
 - that deployment is safe. That is the observation and rollback spec's question, and
   it needs a canary, not a contract gate.
 
-## 8. Open questions for the PI
+## 10. Open questions for the PI
 
-1. **How is the 236-distribution venv built?** Production's environment is a pyenv
-   install, not a lockfile. Options: freeze it to a requirements file and install
-   from that (reproducible, but a freeze is a snapshot and may not resolve), or copy
-   the interpreter's `site-packages` (exact, but not a build). Neither is obviously
-   right and the choice affects what C1 proves. **This needs deciding before any
-   implementation.**
-2. **What is `N` in C2?** Production's current worker count should be read rather than
-   assumed, and C2 should use that value.
-3. **Which deployment form is D1/D2 about** — systemd unit, an existing deploy script,
-   or the bare gunicorn invocation? The answer changes what "fails to start" means.
-4. **Does reading production's package list or unit file need separate authorisation?**
-   Reading has been treated as allowed throughout S1; C1 needs rather more of it.
+Rev 1's first three questions are settled and recorded in §4, §5 and the revision
+history. What remains:
 
-## 9. What is not yet decided, and is not assumed
+1. **Does cloning production's `site-packages` need its own authorisation?** It is a
+   bulk read of production followed by a write into a staging tree. Every read of
+   production so far has been a handful of files; this is the whole environment, and
+   it is the largest read S2 asks for. It writes nothing to production, but the size
+   of the read is itself worth granting explicitly rather than assuming.
+2. **How many repetitions for C2?** §4 says at least three. Three demonstrates the
+   seed varies; it does not bound how often an ordering difference might appear. If a
+   stronger claim is wanted, the number should come from the PI rather than from what
+   is convenient.
+3. **Is the interpreter difference acceptable?** The clone carries production's
+   packages but is run under a same-version interpreter that is not production's own
+   binary. If that gap matters, the alternative is running the clone under
+   production's interpreter — which is a heavier ask, since it means invoking a
+   production binary rather than only reading it.
+4. **What happens if C1 fails?** A byte difference under production's packages would
+   mean one of those 236 packages changes the output. S2 would then have found
+   something real, and the next step — bisecting the package set — is not in this
+   spec and would need its own.
+
+## 11. What is not yet decided, and is not assumed
 
 - The staging directory name, ports and workdir for any S2 run. They will be proposed
   with the run request, not fixed here.
