@@ -370,20 +370,46 @@ tree_boot_matches() {       # tree_boot_matches <name>
 # of them as possibilities was not a diagnosis — it was a guess printed at the
 # reader. Two runs have now failed on it, both times with the host already clean by
 # the time anyone could look, and neither told us which cause applied.
-TREE_SURVIVORS_REASON=""
+# Diagnostics are written to stderr AND to a file. Never to a shell variable.
+#
+# The first attempt at this set TREE_SURVIVORS_REASON and read it back in
+# stop_tracked — which calls tree_survivors inside `$( )`. That is a subshell, so
+# the assignment never crossed back and the message would have printed
+# "<none recorded>" on every failure. The same mistake had already appeared in the
+# test harness a few commits earlier, with a counter; a value that has to survive a
+# command substitution cannot live in a variable.
+#
+# stderr is not captured by `$( )`, so the detail reaches the run log the moment it
+# happens. The file outlives the process, so it is still there when someone comes to
+# look — which is the case that matters, because both cleanup failures so far were
+# only inspectable after the host had already gone clean.
+_diag() {                   # _diag <service> <stage> <branch> <detail>
+  local msg="$1: [$2/$3] $4"
+  printf '%s\n' "$msg" >> "$RUN/$1.diag" 2>/dev/null || true
+  printf '%s\n' "  DIAG $msg" >&2
+}
 
-tree_survivors() {          # tree_survivors <name>
-  local name="$1" line p want now out="" bst=0 tree="$RUN/$1.tree"
-  TREE_SURVIVORS_REASON=""
+# Which of <name>'s recorded processes are still running *and* still the same
+# process. A PID that no longer exists, or that now carries a different start time
+# because the number was recycled, is not ours and is not a survivor — reporting a
+# recycled PID as a stranded worker would be a false alarm that erodes the check.
+#
+# Status 2 means "cannot determine". Every path to it names the service, the cleanup
+# stage it happened in, the branch that failed, and the values involved.
+tree_survivors() {          # tree_survivors <name> [stage]
+  local name="$1" stage="${2:-unspecified}" line p want now out="" bst=0
+  local tree="$RUN/$1.tree"
 
   tree_boot_matches "$name" || bst=$?
   if [ "$bst" -ne 0 ]; then
     if _is_uncertain "$name"; then
-      TREE_SURVIVORS_REASON="a write to $name.tree was never confirmed"
+      _diag "$name" "$stage" "write-unconfirmed" \
+        "a previous write to $name.tree was never confirmed"
     elif [ ! -f "$tree" ]; then
-      TREE_SURVIVORS_REASON="$tree does not exist"
+      _diag "$name" "$stage" "tree-missing" "$tree does not exist"
     else
-      TREE_SURVIVORS_REASON="boot id mismatch: tree says '$(grep '^boot:' "$tree" 2>/dev/null | head -1 | cut -d: -f2-)', kernel says '$(boot_id 2>/dev/null)'"
+      _diag "$name" "$stage" "boot-mismatch" \
+        "tree says '$(grep '^boot:' "$tree" 2>/dev/null | head -1 | cut -d: -f2-)', kernel says '$(boot_id 2>/dev/null)'"
     fi
     return 2
   fi
@@ -392,38 +418,33 @@ tree_survivors() {          # tree_survivors <name>
     [ -n "$line" ] || continue
     case "$line" in
       boot:*) continue ;;
-      # The writer could not see everything, so whether every process exited is
-      # unknown, and unknown is never an all-clear.
-      incomplete:*) TREE_SURVIVORS_REASON="tree carries '$line'"; return 2 ;;
+      incomplete:*)
+        _diag "$name" "$stage" "incomplete-marker" "tree carries '$line'"
+        return 2 ;;
     esac
-
-    # A line that cannot be parsed makes the whole tree uninterpretable. Skipping it
-    # would silently shrink the set of processes cleanup is held to.
     case "$line" in
       *:*) ;;
-      *) TREE_SURVIVORS_REASON="line has no colon: '$line'"; return 2 ;;
+      *) _diag "$name" "$stage" "line-no-colon" "'$line'"; return 2 ;;
     esac
     p="${line%%:*}"; want="${line#*:}"
     case "$p" in
-      ''|*[!0-9]*) TREE_SURVIVORS_REASON="non-numeric pid: '$line'"; return 2 ;;
+      ''|*[!0-9]*) _diag "$name" "$stage" "pid-not-numeric" "'$line'"; return 2 ;;
     esac
-    # A recorded start time that is not a well-formed token is a corrupt file, not
-    # a process that has exited.
     if ! _valid_starttime "$want"; then
-      TREE_SURVIVORS_REASON="recorded start time '$want' is not a valid token here (procfs branch: $([ -r "${PROC_ROOT:-/proc}/1/stat" ] && echo yes || echo no))"
+      _diag "$name" "$stage" "recorded-token-invalid" \
+        "'$want' (procfs branch: $([ -r "${PROC_ROOT:-/proc}/1/stat" ] && echo yes || echo no))"
       return 2
     fi
 
     if pid_exists "$p"; then
       now="$(starttime_of "$p" || true)"
       if [ -z "$now" ] || ! _valid_starttime "$now"; then
-        # Two different things reach this point and they have to be told apart by
-        # re-checking, exactly as _record_one already does: the process exited
-        # between pid_exists and the read — the normal case during a stop, since we
-        # have just signalled it — or it is still there and its identity genuinely
-        # cannot be read.
+        # The process exited between pid_exists and the read — the normal case
+        # during a stop — or it is still there and its identity genuinely cannot be
+        # read. Only a re-check tells them apart.
         if pid_exists "$p"; then
-          TREE_SURVIVORS_REASON="pid $p is still present but its start time reads back as '$now' (recorded '$want'; /proc/$p/stat readable: $([ -r "${PROC_ROOT:-/proc}/$p/stat" ] && echo yes || echo no))"
+          _diag "$name" "$stage" "identity-unreadable" \
+            "pid $p present, recorded '$want', read back '$now', /proc/$p/stat readable: $([ -r "${PROC_ROOT:-/proc}/$p/stat" ] && echo yes || echo no)"
           return 2
         fi
         continue                # exited while we were looking at it
@@ -483,6 +504,9 @@ stop_tracked() {            # stop_tracked <name> <port|"">
   # nothing deleted.
   st=0; tree_boot_matches "$name" || st=$?
   if [ "$st" -ne 0 ]; then
+    # Re-run through tree_survivors purely to record *why*: this is before any
+    # signal, so nothing has changed underneath it.
+    tree_survivors "$name" "pre-signal" >/dev/null 2>&1 || true
     echo "$name: REFUSING TO ACT — the recorded process tree is not from the" >&2
     echo "  running kernel (missing, unreadable, or a different boot id). The PIDs" >&2
     echo "  in it may now belong to unrelated processes. Nothing signalled, nothing" >&2
@@ -532,7 +556,7 @@ stop_tracked() {            # stop_tracked <name> <port|"">
   fi
 
   for i in $(seq 1 "$STOP_WAIT_SECS"); do
-    surv="$(tree_survivors "$name")" || break     # boot changed mid-stop
+    surv="$(tree_survivors "$name" "wait")" || break
     if [ -z "$surv" ]; then
       [ -z "$port" ] && break
       port_released "$port" && break
@@ -540,7 +564,7 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     sleep 1
   done
 
-  st=0; surv="$(tree_survivors "$name")" || st=$?
+  st=0; surv="$(tree_survivors "$name" "final")" || st=$?
   if [ "$incomplete" -ne 0 ] && [ "$st" -eq 0 ]; then
     echo "$name: the tracked process was stopped, but the tree could not be" >&2
     echo "  brought up to date during this stop, so whether every process it had" >&2
@@ -552,8 +576,8 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     # guess printed at the reader, not a diagnosis — tree_survivors records which
     # predicate actually failed, and that is what gets reported.
     echo "$name: cannot determine whether every tracked process exited." >&2
-    echo "  reason: ${TREE_SURVIVORS_REASON:-<none recorded>}" >&2
-    echo "  State left for inspection." >&2
+    echo "  The DIAG line above names the stage and the branch that failed;" >&2
+    echo "  the same record is in $RUN/$name.diag. State left for inspection." >&2
     return 1
   fi
   if [ -n "$surv" ]; then

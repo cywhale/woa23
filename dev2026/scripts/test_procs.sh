@@ -263,39 +263,52 @@ check "a PID that stays live with an unreadable identity is still status 2" "2" 
 rm "$RUN/race.tree" "$RUN/race.out"
 
 echo
-echo "every status 2 names the predicate that failed"
-# Two runs failed on a message that listed three possible causes and identified
-# none of them; by the time anyone could look, the host was clean and the evidence
-# gone. Each cause must now say which one it was.
-reason_for() {              # reason_for <tree-body-line...>
+echo "every status 2 names the service, stage and branch — through a subshell"
+# The first version of this recorded the reason in a shell variable and read it back
+# in stop_tracked, which calls tree_survivors inside $( ). That is a subshell: the
+# assignment never crossed back, so the message would have printed "<none recorded>"
+# on every failure. These assertions go through a command substitution deliberately.
+diag_via_subshell() {       # diag_via_subshell <stage> <tree-body-line...>
+  local stage="$1"; shift
+  [ -f "$RUN/why.diag" ] && rm "$RUN/why.diag"
   { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$@"; } > "$RUN/why.tree"
-  set +e; tree_survivors why >/dev/null 2>&1; local st=$?; set -e
-  [ "$st" -eq 2 ] || { printf 'status %s (expected 2)' "$st"; return; }
-  printf '%s' "$TREE_SURVIVORS_REASON"
+  local out; out="$(tree_survivors why "$stage" 2>"$RUN/why.err")" || true
+  cat "$RUN/why.err"
 }
-check "a malformed line names itself" "yes" \
-      "$(has_text "$(reason_for 'nocolon')" "no colon")"
-check "a non-numeric pid names itself" "yes" \
-      "$(has_text "$(reason_for 'abc:123')" "non-numeric pid")"
-check "a bad start time names itself" "yes" \
-      "$(has_text "$(reason_for '4242:not-a-token')" "not a valid token")"
-check "an incompleteness marker names itself" "yes" \
-      "$(has_text "$(reason_for '4242:'"$race_tok" 'incomplete:staged')" "incomplete:staged")"
-{ printf 'boot:0000-not-this-boot-0000\n'; printf '4242:1\n'; } > "$RUN/why.tree"
-set +e; tree_survivors why >/dev/null 2>&1; set -e
-check "a boot mismatch names both ids" "yes" "$(has_text "$TREE_SURVIVORS_REASON" "boot id mismatch")"
+check "a malformed line names itself, via subshell" "yes" \
+      "$(has_text "$(diag_via_subshell final 'nocolon')" "final/line-no-colon")"
+check "and the same record is persisted to a file" "yes" \
+      "$([ -s "$RUN/why.diag" ] && echo yes || echo no)"
+check "the persisted line names the service" "yes" \
+      "$(has_text "$(cat "$RUN/why.diag")" "why:")"
+check "a non-numeric pid names its branch" "yes" \
+      "$(has_text "$(diag_via_subshell wait 'abc:123')" "wait/pid-not-numeric")"
+check "an invalid recorded token names its branch" "yes" \
+      "$(has_text "$(diag_via_subshell final '4242:not-a-token')" "final/recorded-token-invalid")"
+check "an incompleteness marker names its branch" "yes" \
+      "$(has_text "$(diag_via_subshell final "4242:$race_tok" 'incomplete:staged')" "final/incomplete-marker")"
+check "the stage is carried through, not hard-coded" "yes" \
+      "$(has_text "$(diag_via_subshell pre-signal 'nocolon')" "pre-signal/")"
+
+printf 'boot:0000-not-this-boot-0000\n4242:1\n' > "$RUN/why.tree"
+err="$(tree_survivors why final 2>&1 >/dev/null)" || true
+check "a boot mismatch names both ids" "yes" "$(has_text "$err" "boot-mismatch")"
 rm "$RUN/why.tree"
-set +e; tree_survivors why >/dev/null 2>&1; set -e
-check "a missing tree names the path" "yes" "$(has_text "$TREE_SURVIVORS_REASON" "does not exist")"
-# And a clean evaluation must leave no stale reason behind.
+err="$(tree_survivors why final 2>&1 >/dev/null)" || true
+check "a missing tree names the path" "yes" "$(has_text "$err" "tree-missing")"
+
+# A clean evaluation must stay silent: a diagnostic printed when nothing is wrong
+# is how a log stops being read.
 { printf 'boot:%s\n' "$(boot_id)"; printf '4242:%s\n' "$race_tok"; } > "$RUN/why.tree"
 pid_exists() { return 1; }
-set +e; tree_survivors why >/dev/null 2>&1; st=$?; set -e
+err="$(tree_survivors why final 2>&1 >/dev/null)"; st=$?
 check "a clean evaluation returns 0" "0" "$st"
-check "and clears the reason" "" "$TREE_SURVIVORS_REASON"
+check "and emits no diagnostic" "" "$err"
 # shellcheck source=lib_procs.sh
 . "$HERE/lib_procs.sh"
 rm "$RUN/why.tree"
+[ -f "$RUN/why.diag" ] && rm "$RUN/why.diag"
+[ -f "$RUN/why.err" ] && rm "$RUN/why.err"
 
 echo
 echo "a malformed tree line is uninterpretable, not empty"
