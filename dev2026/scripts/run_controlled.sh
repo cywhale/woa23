@@ -142,8 +142,44 @@ _abspath() {                # lexical absolute path; the target need not exist
   IFS="$oldIFS"
   printf '%s' "${out:-/}"
 }
-WORK_ABS="$(_abspath "$WORK")"
-PROD_ABS="$(_abspath "$PROD_DIR")"
+# Lexical normalisation alone is not a boundary check: it cannot see a symlink.
+# `--workdir /tmp/link/new-run`, where `/tmp/link` points at ~/python/woa23, is
+# lexically nowhere near production and physically inside it.
+#
+# So the deepest ancestor that actually exists is resolved physically — `cd -P`
+# plus `pwd -P`, which is POSIX and needs no GNU realpath — and the components
+# that do not exist yet are appended to that. Both sides are resolved the same
+# way, so a symlinked production directory is caught as well as a symlinked
+# workdir.
+#
+# Fails closed. A path whose ancestor is a symlink that does not resolve to a
+# directory — dangling, or pointing at a file — cannot be shown to be outside
+# production, so it is refused rather than assumed safe.
+_resolve_existing_parent() {    # physical path; the leaf need not exist
+  local p tail="" base phys
+  p="$(_abspath "$1")"
+  while [ ! -d "$p" ]; do
+    if [ -L "$p" ]; then
+      return 2                  # a symlink we cannot follow to a directory
+    fi
+    [ "$p" = "/" ] && break
+    base="${p##*/}"
+    tail="${base}${tail:+/$tail}"
+    p="${p%/*}"
+    [ -z "$p" ] && p=/
+  done
+  phys="$(cd -P "$p" 2>/dev/null && pwd -P)" || return 1
+  printf '%s' "$phys${tail:+/$tail}"
+}
+
+WORK_ABS="$(_resolve_existing_parent "$WORK")" || {
+  echo "cannot resolve $WORK to a physical path: its nearest existing ancestor is" >&2
+  echo "  a symlink that does not lead to a directory, so it cannot be shown to be" >&2
+  echo "  outside production. Refusing." >&2
+  exit 2; }
+PROD_ABS="$(_resolve_existing_parent "$PROD_DIR")" || {
+  echo "cannot resolve the production directory $PROD_DIR to a physical path" >&2
+  exit 2; }
 case "$WORK_ABS" in
   "$PROD_ABS"|"$PROD_ABS"/*)
     echo "workdir $WORK_ABS is inside production ($PROD_ABS). This script never" >&2

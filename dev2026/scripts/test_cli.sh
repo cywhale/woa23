@@ -106,6 +106,51 @@ check "an ordinary staging path gets past validation" "4" \
       "$(code --workdir "$HOME/woa23-s1-staging-merged")"
 
 echo
+echo "the workdir boundary survives a symlinked parent"
+# Lexical normalisation cannot see a symlink: --workdir /tmp/link/new-run, where
+# /tmp/link points at ~/python/woa23, is lexically nowhere near production and
+# physically inside it. The check resolves the deepest existing ancestor
+# physically, so the symlink is followed before the comparison.
+#
+# $HOME is the symlink target because it exists on every machine, so the real
+# end-to-end refusal runs here as well as on VM24 — the production directory
+# itself need not exist for the boundary to be tested.
+TMPD="$(mktemp -d)"
+ln -s "$HOME" "$TMPD/homelink"
+ln -s "$TMPD/nowhere" "$TMPD/dangling"
+: > "$TMPD/afile"; ln -s "$TMPD/afile" "$TMPD/tofile"
+ln -s "$TMPD" "$TMPD/selfish"
+
+check "a symlinked parent into production is refused" "2" \
+      "$(code --workdir "$TMPD/homelink/python/woa23/new-run")"
+check "and says it is inside production" "yes" \
+      "$(has_text "$(run --workdir "$TMPD/homelink/python/woa23/new-run")" "is inside production")"
+check "a deeper non-existent tail is still caught" "2" \
+      "$(code --workdir "$TMPD/homelink/python/woa23/a/b/c")"
+check "production itself through the symlink is refused" "2" \
+      "$(code --workdir "$TMPD/homelink/python/woa23")"
+
+# The near-miss that must NOT be refused: same symlink, a sibling whose name merely
+# shares the prefix.
+check "a sibling sharing the prefix is allowed through the same symlink" "4" \
+      "$(code --workdir "$TMPD/homelink/python/woa23-staging/new-run")"
+check "an unrelated path through the symlink is allowed" "4" \
+      "$(code --workdir "$TMPD/homelink/woa23-s1-staging-merged")"
+check "a symlink to somewhere unrelated is allowed" "4" \
+      "$(code --workdir "$TMPD/selfish/staging")"
+
+# Fail closed: an ancestor that cannot be followed to a directory cannot be shown to
+# be outside production.
+check "a dangling symlink parent is refused" "2" "$(code --workdir "$TMPD/dangling/x")"
+check "and says why it could not be resolved" "yes" \
+      "$(has_text "$(run --workdir "$TMPD/dangling/x")" "does not lead to a directory")"
+check "a symlink to a file as parent is refused" "2" "$(code --workdir "$TMPD/tofile/x")"
+
+for leftover in homelink dangling tofile selfish afile; do
+  [ -e "$TMPD/$leftover" ] || [ -L "$TMPD/$leftover" ] && rm "$TMPD/$leftover"
+done
+
+echo
 echo "authorisation still gates everything"
 check "no grant is exit 3, whatever the arguments" "3" \
       "$(WOA23_D2B_GRANTED= "$RUNNER" --contract-only --workdir /tmp/x >/dev/null 2>&1; echo $?)"
