@@ -263,6 +263,41 @@ check "a PID that stays live with an unreadable identity is still status 2" "2" 
 rm "$RUN/race.tree" "$RUN/race.out"
 
 echo
+echo "every status 2 names the predicate that failed"
+# Two runs failed on a message that listed three possible causes and identified
+# none of them; by the time anyone could look, the host was clean and the evidence
+# gone. Each cause must now say which one it was.
+reason_for() {              # reason_for <tree-body-line...>
+  { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$@"; } > "$RUN/why.tree"
+  set +e; tree_survivors why >/dev/null 2>&1; local st=$?; set -e
+  [ "$st" -eq 2 ] || { printf 'status %s (expected 2)' "$st"; return; }
+  printf '%s' "$TREE_SURVIVORS_REASON"
+}
+check "a malformed line names itself" "yes" \
+      "$(has_text "$(reason_for 'nocolon')" "no colon")"
+check "a non-numeric pid names itself" "yes" \
+      "$(has_text "$(reason_for 'abc:123')" "non-numeric pid")"
+check "a bad start time names itself" "yes" \
+      "$(has_text "$(reason_for '4242:not-a-token')" "not a valid token")"
+check "an incompleteness marker names itself" "yes" \
+      "$(has_text "$(reason_for '4242:'"$race_tok" 'incomplete:staged')" "incomplete:staged")"
+{ printf 'boot:0000-not-this-boot-0000\n'; printf '4242:1\n'; } > "$RUN/why.tree"
+set +e; tree_survivors why >/dev/null 2>&1; set -e
+check "a boot mismatch names both ids" "yes" "$(has_text "$TREE_SURVIVORS_REASON" "boot id mismatch")"
+rm "$RUN/why.tree"
+set +e; tree_survivors why >/dev/null 2>&1; set -e
+check "a missing tree names the path" "yes" "$(has_text "$TREE_SURVIVORS_REASON" "does not exist")"
+# And a clean evaluation must leave no stale reason behind.
+{ printf 'boot:%s\n' "$(boot_id)"; printf '4242:%s\n' "$race_tok"; } > "$RUN/why.tree"
+pid_exists() { return 1; }
+set +e; tree_survivors why >/dev/null 2>&1; st=$?; set -e
+check "a clean evaluation returns 0" "0" "$st"
+check "and clears the reason" "" "$TREE_SURVIVORS_REASON"
+# shellcheck source=lib_procs.sh
+. "$HERE/lib_procs.sh"
+rm "$RUN/why.tree"
+
+echo
 echo "a malformed tree line is uninterpretable, not empty"
 for bad in "notapid:123" "4321" "4321:"; do
   { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$bad"; } > "$RUN/bad.tree"

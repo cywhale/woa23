@@ -365,52 +365,72 @@ tree_boot_matches() {       # tree_boot_matches <name>
 #
 # Status 2 if the tree is from another boot; the caller must not read the empty
 # output as "all clear".
+# Set by tree_survivors whenever it returns 2, naming the predicate that could not
+# be settled. Status 2 has seven distinct causes, and the message that listed three
+# of them as possibilities was not a diagnosis — it was a guess printed at the
+# reader. Two runs have now failed on it, both times with the host already clean by
+# the time anyone could look, and neither told us which cause applied.
+TREE_SURVIVORS_REASON=""
+
 tree_survivors() {          # tree_survivors <name>
-  local name="$1" line p want now out=""
-  tree_boot_matches "$name" || return 2
+  local name="$1" line p want now out="" bst=0 tree="$RUN/$1.tree"
+  TREE_SURVIVORS_REASON=""
+
+  tree_boot_matches "$name" || bst=$?
+  if [ "$bst" -ne 0 ]; then
+    if _is_uncertain "$name"; then
+      TREE_SURVIVORS_REASON="a write to $name.tree was never confirmed"
+    elif [ ! -f "$tree" ]; then
+      TREE_SURVIVORS_REASON="$tree does not exist"
+    else
+      TREE_SURVIVORS_REASON="boot id mismatch: tree says '$(grep '^boot:' "$tree" 2>/dev/null | head -1 | cut -d: -f2-)', kernel says '$(boot_id 2>/dev/null)'"
+    fi
+    return 2
+  fi
+
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     case "$line" in
-      boot:*)       continue ;;
-      # The writer could not see everything. Whether every process exited is
-      # therefore unknown, and unknown is never an all-clear.
-      incomplete:*) return 2 ;;
+      boot:*) continue ;;
+      # The writer could not see everything, so whether every process exited is
+      # unknown, and unknown is never an all-clear.
+      incomplete:*) TREE_SURVIVORS_REASON="tree carries '$line'"; return 2 ;;
     esac
 
     # A line that cannot be parsed makes the whole tree uninterpretable. Skipping it
     # would silently shrink the set of processes cleanup is held to.
-    case "$line" in *:*) ;; *) return 2 ;; esac
+    case "$line" in
+      *:*) ;;
+      *) TREE_SURVIVORS_REASON="line has no colon: '$line'"; return 2 ;;
+    esac
     p="${line%%:*}"; want="${line#*:}"
-    case "$p" in ''|*[!0-9]*) return 2 ;; esac
+    case "$p" in
+      ''|*[!0-9]*) TREE_SURVIVORS_REASON="non-numeric pid: '$line'"; return 2 ;;
+    esac
     # A recorded start time that is not a well-formed token is a corrupt file, not
     # a process that has exited.
-    _valid_starttime "$want" || return 2
+    if ! _valid_starttime "$want"; then
+      TREE_SURVIVORS_REASON="recorded start time '$want' is not a valid token here (procfs branch: $([ -r "${PROC_ROOT:-/proc}/1/stat" ] && echo yes || echo no))"
+      return 2
+    fi
 
     if pid_exists "$p"; then
       now="$(starttime_of "$p" || true)"
       if [ -z "$now" ] || ! _valid_starttime "$now"; then
         # Two different things reach this point and they have to be told apart by
-        # *re-checking*, exactly as _record_one already does:
-        #
-        #   - the process exited between `pid_exists` and the read. During a stop
-        #     that is the normal case — we have just signalled it — and it means
-        #     the process is gone, which is the opposite of unknown.
-        #   - the process is still there and its identity genuinely cannot be read:
-        #     a restricted /proc, a PID that changed hands. Only then is the answer
-        #     "cannot determine".
-        #
-        # Without the re-check every stop raced its own kill. The 2026-08-08-r2 run
-        # passed both gates, left nothing running and freed all three ports, and
-        # still reported "cannot determine whether every tracked process exited" for
-        # all four services — each was reaped inside that window.
+        # re-checking, exactly as _record_one already does: the process exited
+        # between pid_exists and the read — the normal case during a stop, since we
+        # have just signalled it — or it is still there and its identity genuinely
+        # cannot be read.
         if pid_exists "$p"; then
+          TREE_SURVIVORS_REASON="pid $p is still present but its start time reads back as '$now' (recorded '$want'; /proc/$p/stat readable: $([ -r "${PROC_ROOT:-/proc}/$p/stat" ] && echo yes || echo no))"
           return 2
         fi
         continue                # exited while we were looking at it
       fi
       [ "$now" = "$want" ] && out="$out $p"
     fi
-  done < "$RUN/$name.tree"
+  done < "$tree"
   printf '%s' "${out# }"
 }
 
@@ -528,14 +548,12 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     return 1
   fi
   if [ "$st" -ne 0 ]; then
-    # Status 2 covers three things and the message must not name only one: the boot
-    # id changed mid-stop, a recorded line is malformed, or a PID is live but its
-    # identity cannot be read. All three mean the same thing here — whether every
-    # process exited is unknown, and unknown is not clean.
-    echo "$name: cannot determine whether every tracked process exited — the" >&2
-    echo "  recorded tree became uninterpretable (boot id changed, a line is" >&2
-    echo "  malformed, or a live PID's identity is unreadable). State left for" >&2
-    echo "  inspection." >&2
+    # Status 2 has several distinct causes. Naming them all as possibilities is a
+    # guess printed at the reader, not a diagnosis — tree_survivors records which
+    # predicate actually failed, and that is what gets reported.
+    echo "$name: cannot determine whether every tracked process exited." >&2
+    echo "  reason: ${TREE_SURVIVORS_REASON:-<none recorded>}" >&2
+    echo "  State left for inspection." >&2
     return 1
   fi
   if [ -n "$surv" ]; then
