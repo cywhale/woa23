@@ -311,6 +311,61 @@ rm "$RUN/why.tree"
 [ -f "$RUN/why.err" ] && rm "$RUN/why.err"
 
 echo
+echo "the diagnostic survives stop_tracked's own command substitution"
+# The unit tests call tree_survivors directly or through a $( ) of their own. This
+# one goes through stop_tracked, which is where the variable-based version was lost:
+# the caller is `surv="$(tree_survivors ...)"` inside a function invoked from a trap.
+# Nothing short of the real call path proves the record gets out.
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & intp=$!; STRAYS="$STRAYS $intp"
+sleep 1
+echo "$intp" > "$RUN/intg.pid"; starttime_of "$intp" > "$RUN/intg.starttime"
+record_tree intg >/dev/null
+kill "$intp" 2>/dev/null || true
+sleep 1
+# Corrupt the tree the way a real failure would leave it, then let stop_tracked run.
+printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/intg.tree"
+[ -f "$RUN/intg.diag" ] && rm "$RUN/intg.diag"
+set +e; out="$(stop_tracked intg "" 2>&1)"; st=$?; set -e
+check "stop_tracked fails" "1" "$st"
+check "the DIAG line reached stop_tracked's output" "yes" \
+      "$(has_text "$out" "DIAG intg: [final/line-no-colon]")"
+check "and the reason is quoted in the failure message" "yes" \
+      "$(has_text "$out" "reason: intg: [final/line-no-colon]")"
+check "not the placeholder the variable version would have printed" "no" \
+      "$(has_text "$out" "none recorded")"
+check "the record is persisted" "yes" \
+      "$([ -s "$RUN/intg.diag" ] && echo yes || echo no)"
+check "the message points at the file" "yes" "$(has_text "$out" "full record:")"
+check "state is kept" "yes" "$([ -f "$RUN/intg.pid" ] && echo yes || echo no)"
+
+echo
+echo "a diagnostic that cannot be persisted fails cleanup loudly"
+# _diag runs inside the command substitution, so a failed write there cannot raise
+# anything in stop_tracked. Its absence has to be the signal.
+DIAGLOCK="$RUN/diaglock"
+mkdir -p "$DIAGLOCK"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & dlp=$!; STRAYS="$STRAYS $dlp"
+sleep 1
+RUN_REAL="$RUN"; RUN="$DIAGLOCK"
+echo "$dlp" > "$RUN/dl.pid"; starttime_of "$dlp" > "$RUN/dl.starttime"
+record_tree dl >/dev/null
+kill "$dlp" 2>/dev/null || true; sleep 1
+printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/dl.tree"
+chmod 0555 "$DIAGLOCK"          # no new files, so the .diag cannot be created
+if printf 'probe\n' > "$DIAGLOCK/probe" 2>/dev/null; then
+  echo "  (skipped: this user can create files in a 0555 directory)"
+  chmod 0755 "$DIAGLOCK"; rm "$DIAGLOCK/probe"
+else
+  set +e; out="$(stop_tracked dl "" 2>&1)"; st=$?; set -e
+  check "cleanup still fails" "1" "$st"
+  check "the failed write is announced" "yes" "$(has_text "$out" "DIAG-WRITE-FAILED")"
+  check "and the missing record is called out, not glossed" "yes" \
+        "$(has_text "$out" "DIAGNOSTIC RECORD IS MISSING")"
+  chmod 0755 "$DIAGLOCK"
+fi
+RUN="$RUN_REAL"
+
+echo
 echo "a malformed tree line is uninterpretable, not empty"
 for bad in "notapid:123" "4321" "4321:"; do
   { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$bad"; } > "$RUN/bad.tree"

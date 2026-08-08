@@ -385,8 +385,15 @@ tree_boot_matches() {       # tree_boot_matches <name>
 # only inspectable after the host had already gone clean.
 _diag() {                   # _diag <service> <stage> <branch> <detail>
   local msg="$1: [$2/$3] $4"
-  printf '%s\n' "$msg" >> "$RUN/$1.diag" 2>/dev/null || true
   printf '%s\n' "  DIAG $msg" >&2
+  if ! printf '%s\n' "$msg" >> "$RUN/$1.diag" 2>/dev/null; then
+    # The persistent half is the half that matters — stderr scrolls past, the file
+    # is what is still there when someone comes to look. Losing it is not a
+    # cosmetic failure, so it is announced and stop_tracked checks for the record
+    # rather than assuming it landed.
+    printf '%s\n' "  DIAG-WRITE-FAILED cannot append to $RUN/$1.diag" >&2
+    return 1
+  fi
 }
 
 # Which of <name>'s recorded processes are still running *and* still the same
@@ -576,8 +583,17 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     # guess printed at the reader, not a diagnosis — tree_survivors records which
     # predicate actually failed, and that is what gets reported.
     echo "$name: cannot determine whether every tracked process exited." >&2
-    echo "  The DIAG line above names the stage and the branch that failed;" >&2
-    echo "  the same record is in $RUN/$name.diag. State left for inspection." >&2
+    if [ -s "$RUN/$name.diag" ]; then
+      echo "  reason: $(tail -1 "$RUN/$name.diag")" >&2
+      echo "  full record: $RUN/$name.diag" >&2
+    else
+      # tree_survivors runs inside a command substitution, so a failed write there
+      # cannot raise anything here. Its absence is the signal.
+      echo "  AND THE DIAGNOSTIC RECORD IS MISSING: $RUN/$name.diag is empty or" >&2
+      echo "  absent, so why this failed was not captured. See the DIAG lines on" >&2
+      echo "  stderr above if any were emitted." >&2
+    fi
+    echo "  State left for inspection." >&2
     return 1
   fi
   if [ -n "$surv" ]; then

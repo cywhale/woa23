@@ -33,7 +33,7 @@ STORE=$PROD_DIR/data
 # A new directory per attempt. The script refuses to reuse one, and the
 # 2026-08-08 attempts left ~/woa23-s1-controlled and -r2 behind, each holding the
 # reference copy its run was scored against — evidence, not scratch space.
-WORK=$HOME/woa23-s1-controlled-r3
+WORK=$HOME/woa23-s1-controlled-r4
 REF_DIR=$WORK/reference
 CAND_DIR=$WORK/candidate
 CAND_PORT=8051
@@ -44,6 +44,18 @@ PROD_PORT=8050
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUN=$HERE/run
 VENV=$HERE/.venv
+
+# --cleanup-only: bring the six processes up, record and verify their trees, collect
+# provenance, then stop. No contract gate, no latency gate, no pilot — so it produces
+# no measurement of any kind and none may be quoted from it. It exists to make a
+# cleanup failure reproducible and self-describing, nothing more.
+CLEANUP_ONLY=no
+for arg in "$@"; do
+  case "$arg" in
+    --cleanup-only) CLEANUP_ONLY=yes ;;
+    *) echo "unknown argument: $arg (only --cleanup-only is accepted)" >&2; exit 2 ;;
+  esac
+done
 
 if [ "${WOA23_D2B_GRANTED:-}" != "yes" ]; then
   echo "D2b authorisation not stated. This starts FOUR services on a production" >&2
@@ -127,7 +139,11 @@ shopt -s nullglob
 # what it had started, which is the state that most needs a person to look.
 # `.tree` as well: a stop that cannot remove its state leaves one behind, and a
 # tree naming PIDs from a previous run is exactly what must not be stepped over.
-leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.tree "$RUN"/*.uncertain)
+# `.diag` too: it is the record of why a previous cleanup could not confirm itself,
+# and it is written into the same directory the next run would write over. Evidence
+# that a run can silently destroy is evidence that will be destroyed.
+leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.tree "$RUN"/*.uncertain \
+           "$RUN"/*.diag)
 if [ ${#leftovers[@]} -gt 0 ]; then
   echo "leftover run state from a previous invocation:" >&2
   printf '  %s\n' "${leftovers[@]}" >&2
@@ -418,12 +434,20 @@ probe() {                   # probe <label> <port>
     return 1
   fi
 }
-for pair in "candidate:$CAND_PORT reference:$REF_PORT" \
-            "reference:$REF_PORT candidate:$CAND_PORT"; do
-  for entry in $pair; do
-    probe "${entry%%:*}" "${entry#*:}" || exit 1
+if [ "$CLEANUP_ONLY" = "yes" ]; then
+  # Skipped deliberately. The probe exists to catch an unreadable store before
+  # spending 64 contract cases; with no contract gate to protect there is nothing
+  # for it to save, and this mode's request count is meant to be as close to zero as
+  # the process tree allows.
+  echo "  data-path probe skipped (--cleanup-only): 0 requests"
+else
+  for pair in "candidate:$CAND_PORT reference:$REF_PORT" \
+              "reference:$REF_PORT candidate:$CAND_PORT"; do
+    for entry in $pair; do
+      probe "${entry%%:*}" "${entry#*:}" || exit 1
+    done
   done
-done
+fi
 echo "both arms ready"
 
 # Re-record each tree now that the children exist. start_tracked already wrote one
@@ -476,6 +500,15 @@ PYEOF
 # =============================================================== contract first ===
 # The latency gate is not run unless the contract gate passes. A speed number for a
 # backend that returns different bytes is not a result.
+if [ "$CLEANUP_ONLY" = "yes" ]; then
+  echo
+  echo "== --cleanup-only: stopping here =="
+  echo "   No contract gate, no latency gate, no pilot. This run measured nothing"
+  echo "   and nothing may be quoted from it. The trap now exercises cleanup, which"
+  echo "   is the only thing under observation."
+  exit 0
+fi
+
 echo "== contract gate, variant 5.2A (byte-exact), 64 cases per arm =="
 uv run python -m bench.contract_diff \
   --candidate "http://127.0.0.1:${CAND_PORT}" \
