@@ -36,7 +36,9 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bench.contract_cases import Case, all_cases  # noqa: E402
-from bench.provenance import load_meta, validate_meta  # noqa: E402
+from bench.provenance import (  # noqa: E402
+    load_meta, validate_meta, validate_store_agreement,
+    verify_group_path_agreement)
 
 INDEX = ("lon", "lat", "depth", "time_period")
 
@@ -196,6 +198,21 @@ def main() -> int:
         metas[label] = meta
         problems.extend(
             errs if errs else validate_meta(meta, label, require_pinned_seed=pinned))
+    # Both arms must be reading the same store, and — under 5.2A — building their
+    # zarr_group_paths from the same string. These live here, in the gate, and not
+    # only in the runner: the gate is what publishes a MATCH, so it is the gate that
+    # has to be unable to publish one it cannot justify. The 2026-08-08 run had both
+    # checks in the runner alone and still spent 128 requests establishing that two
+    # arms disagreed about something knowable before the first request.
+    if not problems:
+        problems.extend(validate_store_agreement(metas.get("candidate"),
+                                                 metas.get("reference")))
+        if args.variant == "5.2A":
+            # Only 5.2A. Under 5.2B the reference is live production, whose store
+            # literal is whatever it is and cannot be aligned — that is the reason
+            # 5.2B compares semantically in the first place.
+            problems.extend(verify_group_path_agreement(metas.get("candidate"),
+                                                        metas.get("reference")))
     if problems:
         print("INVALID_METADATA — refusing to compare:")
         for m in problems:

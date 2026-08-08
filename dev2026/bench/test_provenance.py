@@ -230,10 +230,29 @@ def test_resolve_store_is_label_driven() -> None:
     c2 = resolve_store("candidate", Path("/x"), {"WOA23_ZARR_STORE": "data/"})
     check("a trailing slash survives into the literal",
           c2["store_path_literal"] == "data/", str(c2))
-    check("while store_path is still normalised",
-          c2["store_path"] == "data", str(c2))
     check("so the two arms can be given a matching literal",
           c2["store_path_literal"] == r["store_path_literal"])
+
+    # The literal is relative; store_path must not be. It is resolved against the
+    # BACKEND's cwd, and zmetadata_fingerprints() walks it — a relative value made
+    # the sidecar fingerprint whatever sat under the collector's cwd instead, and a
+    # missing directory yields nothing rather than an error.
+    check("store_path is absolute even when the literal is relative",
+          Path(c2["store_path"]).is_absolute(), str(c2))
+    check("and it is resolved against the backend's cwd",
+          c2["store_path"] == str(Path("/x/data").resolve()), str(c2))
+    check("the reference resolves the same way",
+          Path(r["store_path"]).is_absolute() and r["store_path"].endswith("/data"),
+          str(r))
+
+    # Two arms with the same literal but different staging directories resolve to
+    # different stores unless their symlinks agree — which is what
+    # validate_store_agreement checks, and why the literal alone is not enough.
+    a = resolve_store("candidate", Path("/stage/a"), {"WOA23_ZARR_STORE": "data/"})
+    b = resolve_store("reference", Path("/stage/b"), {})
+    check("identical literals can still resolve to different stores",
+          a["store_path_literal"] == b["store_path_literal"]
+          and a["store_path"] != b["store_path"], f"{a} vs {b}")
     try:
         resolve_store("candidate", Path("/x"), {})
         check("candidate without the variable is refused", False, "no SystemExit")

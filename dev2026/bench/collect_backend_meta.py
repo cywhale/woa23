@@ -241,6 +241,33 @@ def hash_manifest(cwd: Path, label: str) -> dict:
     return out
 
 
+def _canonical_store(cwd: Path, literal: str) -> str:
+    """The store the backend actually reads: absolute, symlinks followed.
+
+    Two different things are recorded about the store and they must not be
+    conflated. `store_path_literal` is the raw string the process interpolates into
+    the group paths — it decides set iteration order and is kept exactly as
+    configured, trailing slash and all. `store_path` is *where that resolves to*,
+    and it has to be absolute for two reasons:
+
+    - it is relative to the **backend's** cwd, not the collector's, and the two
+      differ: the collector runs from the repository while each arm runs from its
+      own staging directory. `zmetadata_fingerprints()` walks this path, so a
+      relative value made it fingerprint whatever happened to sit under the
+      collector's cwd — silently, since a missing directory just yields nothing.
+    - each arm reaches the store through its own symlink, so only the resolved
+      path can show that both land on the same store.
+
+    Resolution is non-strict: a path that does not exist still comes back absolute,
+    and the emptiness is then reported by the fingerprint check rather than raising
+    here.
+    """
+    path = Path(literal)
+    if not path.is_absolute():
+        path = cwd / path
+    return str(path.resolve())
+
+
 def resolve_store(label: str, cwd: Path, env: dict) -> dict:
     """Where the backend's Zarr store is, decided by *which backend this is*.
 
@@ -266,7 +293,8 @@ def resolve_store(label: str, cwd: Path, env: dict) -> dict:
         # the 2026-08-08 run: the reference builds "data//1_degree/..." while the
         # candidate built an absolute path. The literal is pinned for the reference
         # by the runner's SHA-256 check on woa23_app.py, where line 63 sets it.
-        return {"store_path": str(cwd / "data"), "store_source": "hardcoded_relative",
+        return {"store_path": _canonical_store(cwd, "data/"),
+                "store_source": "hardcoded_relative",
                 "store_path_literal": "data/"}
     explicit = env.get("WOA23_ZARR_STORE")
     if not explicit:
@@ -277,7 +305,7 @@ def resolve_store(label: str, cwd: Path, env: dict) -> dict:
     # The literal is the *unmodified* environment value, not a normalised Path:
     # normalising would erase exactly the difference that matters here, since
     # "data/" and "data" hash differently and therefore order differently.
-    return {"store_path": str(Path(explicit)), "store_source": "env",
+    return {"store_path": _canonical_store(cwd, explicit), "store_source": "env",
             "store_path_literal": explicit}
 
 

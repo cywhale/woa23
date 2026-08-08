@@ -159,10 +159,22 @@ def validate_store_agreement(cand: dict | None, ref: dict | None) -> list[str]:
         return []          # absence is already reported by validate_meta
 
     problems = []
-    if cand.get("store_path") != ref.get("store_path"):
+    # Canonical absolute paths, symlinks already followed by the sidecar. Each arm
+    # reaches the store through its own staging symlink, so the literals can and do
+    # match while the targets differ — only the resolved path settles it. A relative
+    # value here is a defect in the record, not a store that happens to be relative:
+    # it would have been fingerprinted against the collector's cwd rather than the
+    # backend's.
+    for label, m in (("candidate", cand), ("reference", ref)):
+        sp = m.get("store_path")
+        if not isinstance(sp, str) or not sp.startswith("/"):
+            problems.append(f"{label}: store_path {sp!r} is not a canonical absolute "
+                            f"path, so it does not identify the store the backend read")
+    if not problems and cand.get("store_path") != ref.get("store_path"):
         problems.append(
             f"store mismatch: candidate reads {cand.get('store_path')!r}, reference "
-            f"reads {ref.get('store_path')!r}")
+            f"reads {ref.get('store_path')!r} — the two arms resolve to different "
+            f"stores, so any comparison measures the stores")
 
     cfp = cand.get("zmetadata_fingerprints")
     rfp = ref.get("zmetadata_fingerprints")

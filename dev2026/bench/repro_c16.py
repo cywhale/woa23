@@ -18,6 +18,7 @@ The seed matters: without it the group order is not reproducible at all, and the
 whole comparison is meaningless. The module refuses to run unpinned.
 """
 
+import ast
 import csv
 import io
 import json
@@ -64,9 +65,37 @@ def preconditions() -> list[str]:
     return problems
 
 
+def load_determine_subgroup():
+    """The real `determine_subgroup` from api/query.py, without importing it.
+
+    `import api.query` pulls in `api.config`, which reads `WOA23_ZARR_STORE` at
+    import time and raises `KeyError` when it is unset (spec 001 section 4.2 makes
+    it mandatory with no fallback). That is correct for the service and wrong for
+    this reproducer, whose whole point is to need no store and no environment — the
+    documented command failed in a clean shell for exactly that reason.
+
+    Copying the function here instead would let the copy drift from the original in
+    silence, and then this would reproduce something the candidate no longer does.
+    So the real source is parsed and only that one function is compiled. It is pure
+    string handling with no imports; if it ever grows a dependency, the exec below
+    raises rather than quietly producing something else.
+    """
+    src = (Path(__file__).resolve().parent.parent / "api" / "query.py").read_text()
+    tree = ast.parse(src)
+    node = next((n for n in tree.body
+                 if isinstance(n, ast.FunctionDef) and n.name == "determine_subgroup"),
+                None)
+    if node is None:
+        raise SystemExit("api/query.py no longer defines determine_subgroup; this "
+                         "reproducer cannot rebuild the arms' group paths")
+    ns: dict = {}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), "api/query.py", "exec"), ns)
+    return ns["determine_subgroup"]
+
+
 def group_order(root: str) -> list[str]:
     """The arm's `zarr_group_paths` iteration order for C16, exactly as built."""
-    from api.query import determine_subgroup
+    determine_subgroup = load_determine_subgroup()
     pars = list(set(c.strip() for c in C16_PARAMS["parameter"].split(",")))
     periods = sorted(set(p.strip() for p in str(C16_PARAMS["time_period"]).split(",")))
     paths = set()
@@ -153,9 +182,9 @@ def main() -> int:
         print(f"   {arm:10s} root={root!r}")
         for p in orders[arm]:
             print(f"              {p}")
-    差 = orders["reference"] != orders["candidate"]
-    print(f"\n   orders differ: {差}")
-    if not 差:
+    diverges = orders["reference"] != orders["candidate"]
+    print(f"\n   orders differ: {diverges}")
+    if not diverges:
         print("   -> the divergence does not reproduce; the rest is not meaningful")
         return 1
     print("   -> `result_list` is concatenated in a different order on each arm\n")

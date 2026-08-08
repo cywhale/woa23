@@ -106,10 +106,10 @@ its machine.
 
 | | |
 |---|---|
-| **work directory** | `~/woa23-s1-controlled/` — new, outside `~/python/woa23`, which is never written |
+| **work directory** | `~/woa23-s1-controlled-r2/` — new per attempt, outside `~/python/woa23`, which is never written. The 2026-08-08 attempt's directory is left in place as evidence and is not reused |
 | **reference source** | an unmodified copy of `woa23_app.py` + `src/`, made read-only, with **every file's SHA-256 checked against production's original before anything starts** |
-| **reference store** | `~/woa23-s1-controlled/reference/data` → symlink to `~/python/woa23/data`. `woa23_app.py:63` hard-codes the relative `data/`, so this gives it the real store without copying 31.9 GiB and without a writable path to it |
-| **candidate store** | absolute `WOA23_ZARR_STORE=/home/odbadmin/python/woa23/data` |
+| **reference store** | `~/woa23-s1-controlled-r2/reference/data` → symlink to `~/python/woa23/data`. `woa23_app.py:63` hard-codes the relative `data/`, so this gives it the real store without copying 31.9 GiB and without a writable path to it |
+| **candidate store** | `WOA23_ZARR_STORE=data/` — the same literal `woa23_app.py:63` sets, resolved against the candidate's own staging cwd through a read-only symlink. Still taken from the environment, so the candidate's configurability is unchanged; it is the *string* that is aligned, not the mechanism |
 | **environment** | **one venv, shared by both arms** — `dev2026/.venv`, Python 3.11.4, built from this branch's `uv.lock` |
 | **ports** | candidate `127.0.0.1:8051`, reference `127.0.0.1:8052`, isolated Dask scheduler `127.0.0.1:18787` |
 | **both arms** | `PYTHONHASHSEED=0`, `-w 1`, no `--reload`, plain HTTP, never contacting 8050 |
@@ -183,7 +183,7 @@ host's CPU and evicted production's page cache for nothing. In order:
 6. Production **is** listening on 8050. Its **listener PID set, master PID and the
    master's `/proc` start time** are recorded, along with the host's **boot ID**, so
    the post-run check can compare identity rather than mere occupancy.
-7. `~/woa23-s1-controlled` does not already exist. The script refuses rather than
+7. `~/woa23-s1-controlled-r2` does not already exist. The script refuses rather than
    clearing it.
 8. Every reference source file's SHA-256 equals production's original.
 9. Both arms' provenance passes full schema validation, then **two separate
@@ -581,7 +581,7 @@ The candidate is **not** modified. It still takes its store from
 `WOA23_ZARR_STORE`, and that configurability is a deliberate part of §4.4.
 
 What changes is that the benchmark stops introducing a difference of its own. Each
-arm now gets its own staging directory under `~/woa23-s1-controlled/` holding its
+arm now gets its own staging directory under `~/woa23-s1-controlled-r2/` holding its
 source and a read-only `data` symlink, and each is started with that directory as
 cwd. The candidate is given `WOA23_ZARR_STORE=data/` — byte-for-byte the literal
 `woa23_app.py:63` sets — so both arms interpolate the same string while the candidate
@@ -594,10 +594,22 @@ matched:
   that line has changed, rather than trusting a constant copied into the script.
 - The candidate's `api/` copy is SHA-256 checked against the repository's, as the
   reference's copy already was against production's.
-- Provenance records `store_path_literal` — the raw string, not a normalised path,
-  since normalising would erase the trailing slash that is the whole difference — and
-  `verify_group_path_agreement()` fails the run before either gate if the two arms
-  disagree.
+- Provenance records **two distinct things** about the store and they must not be
+  conflated. `store_path_literal` is the raw configured string — kept exactly as
+  given, trailing slash and all, because normalising it would erase the very
+  difference that reorders the set. `store_path` is where that *resolves to*:
+  absolute, symlinks followed, relative to the **backend's** cwd rather than the
+  collector's. That distinction is not cosmetic — `zmetadata_fingerprints()` walks
+  `store_path`, so a relative value made it fingerprint whatever sat under the
+  collector's cwd, and a missing directory yields nothing rather than an error.
+- `verify_group_path_agreement()` requires the two literals to be identical, and
+  `validate_store_agreement()` requires both resolved paths to be absolute and equal
+  — so the arms must reach the same store through their separate symlinks.
+- **Both checks run inside the contract gate**, not only in the runner. The gate is
+  what publishes a MATCH, so the gate is what must be unable to publish one it
+  cannot justify. On 2026-08-08 they lived in the runner alone, and 128 requests
+  were spent establishing that the two arms disagreed about something knowable
+  before the first request was sent.
 
 ### This needs a new authorisation
 
