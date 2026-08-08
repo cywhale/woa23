@@ -100,6 +100,27 @@ pid_exists() {
   kill -0 "$1" 2>/dev/null
 }
 
+# Strictly stronger than pid_exists, and the only predicate fit to re-check a failed
+# identity read.
+#
+# `/proc/<pid>` outlives the task by a moment: during teardown the directory is
+# still there while `/proc/<pid>/stat` already reads as absent. pid_exists — a test
+# on that directory — therefore answers "present" for a process that has gone,
+# which is weaker evidence than the read it would be re-checking. Three runs
+# reported "cannot determine" over an already-clean host because of it, and the
+# 2026-08-08 cleanup-only diagnostic caught all four services in exactly that
+# state: /proc/<pid> present, stat unreadable, every PID fully gone by the time
+# anyone could look.
+#
+# `kill -0` is exact for a process we started: 0 while it lives, including as a
+# zombie, and non-zero once it is reaped. It reports EPERM for another user's
+# process, which is why it is not the general-purpose check — but every PID in a
+# tracked tree is one of ours.
+pid_alive() {
+  pid_exists "$1" || return 1
+  kill -0 "$1" 2>/dev/null
+}
+
 # The one PID in the set whose parent is outside it. Used to tell a server's master
 # from the workers that inherited its listening socket.
 master_of() {
@@ -259,7 +280,7 @@ _mark_incomplete() {        # _mark_incomplete <name> <reason>
 _record_one() {             # _record_one <name> <pid>
   local name="$1" p="$2" st
   if ! st="$(starttime_of "$p" 2>/dev/null)" || [ -z "$st" ]; then
-    if pid_exists "$p"; then
+    if pid_alive "$p"; then
       echo "$name: PID $p is live but its start time cannot be read; the tree" >&2
       echo "  cannot be completed" >&2
       _mark_incomplete "$name" "unreadable-identity-$p" || true
@@ -449,7 +470,7 @@ tree_survivors() {          # tree_survivors <name> [stage]
         # The process exited between pid_exists and the read — the normal case
         # during a stop — or it is still there and its identity genuinely cannot be
         # read. Only a re-check tells them apart.
-        if pid_exists "$p"; then
+        if pid_alive "$p"; then
           _diag "$name" "$stage" "identity-unreadable" \
             "pid $p present, recorded '$want', read back '$now', /proc/$p/stat readable: $([ -r "${PROC_ROOT:-/proc}/$p/stat" ] && echo yes || echo no)"
           return 2

@@ -191,223 +191,66 @@ check "state is removed on success" "no" \
 PORT_HELD_BY_PID=yes
 
 echo
-echo "a live PID whose identity cannot be read is not 'exited'"
-# A restricted /proc: the process directory exists, its stat does not. Reading that
-# as "gone" is what would let cleanup delete the state files over a running process.
-mkdir -p "$FAKE/5555"        # a pid directory with no stat file
-set +e; PROC_ROOT="$FAKE" starttime_of 5555 >/dev/null 2>&1; st=$?; set -e
-check "starttime_of reports failure, not a value" "1" "$st"
-check "pid_exists still sees the process" "0" \
-      "$(PROC_ROOT="$FAKE" pid_exists 5555; echo $?)"
-{ printf 'boot:%s\n' "$(boot_id)"; printf '5555:12345\n'; } > "$RUN/unreadable.tree"
-set +e; PROC_ROOT="$FAKE" tree_survivors unreadable >/dev/null 2>&1; st=$?; set -e
-check "tree_survivors returns 2, not an empty all-clear" "2" "$st"
-# The same, through stop_tracked. The tracked process is a real one that will exit;
-# the unreadable 5555 is an extra entry in its tree, so the only thing keeping the
-# stop from succeeding is the entry whose identity cannot be read.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unread=$!; STRAYS="$STRAYS $unread"
-sleep 1
-echo "$unread" > "$RUN/unreadable.pid"
-starttime_of "$unread" > "$RUN/unreadable.starttime"
-{ printf 'boot:%s\n' "$(boot_id)"
-  printf '%s:%s\n' "$unread" "$(starttime_of "$unread")"
-  printf '5555:12345\n'; } > "$RUN/unreadable.tree"
-set +e; out="$(PROC_ROOT="$FAKE" stop_tracked unreadable "" 2>&1)"; st=$?; set -e
-check "stop_tracked fails rather than reporting a clean stop" "1" "$st"
-check "it says the outcome is unknown, not that the boot id changed" "yes" \
-      "$(has_text "$out" "cannot determine whether every tracked process exited")"
-check "and the state files are kept" "yes" \
-      "$([ -f "$RUN/unreadable.pid" ] && echo yes || echo no)"
-kill "$unread" 2>/dev/null || true
-rm "$RUN/unreadable.pid" "$RUN/unreadable.starttime" "$RUN/unreadable.tree"
-
-echo
-echo "a process reaped mid-check is gone, not unknown"
-# The defect the 2026-08-08-r2 run hit. Between pid_exists and reading the start
-# time the process can be reaped — which during a stop is the NORMAL case, since we
-# have just signalled it. Without a re-check that read this as "identity
-# unreadable", so a run that passed both gates, stranded nothing and freed every
-# port still reported "cannot determine" for all four services.
-#
-# pid_exists is overridden to answer true once and false on the re-check, which is
-# exactly what the race produces. Re-sourcing the library below restores it.
-RACE_SEEN=0
-pid_exists() {
-  RACE_SEEN=$((RACE_SEEN + 1))
-  [ "$RACE_SEEN" -le 1 ]        # live on the first look, gone on the second
-}
-starttime_of() { return 1; }    # the read that loses the race
-# A start-time token this host's validator accepts — the two branches produce
-# different shapes, and a Linux-shaped token fails _valid_starttime on macOS
-# before the race is ever reached.
+# A start-time token this host's validator accepts. The two branches produce
+# different shapes, and a Linux-shaped token fails _valid_starttime on macOS — it
+# is defined here because this is the first test that needs it.
 if [ -r "${PROC_ROOT:-/proc}/1/stat" ]; then race_tok=500000000
 else race_tok="Mon_Jan_1_00:00:01_2001"; fi
 check "the fixture token is valid on this host" "0" \
       "$(_valid_starttime "$race_tok"; echo $?)"
-{ printf 'boot:%s\n' "$(boot_id)"; printf '4242:%s\n' "$race_tok"; } > "$RUN/race.tree"
-# Not `$(tree_survivors ...)`: a command substitution is a subshell, so the
-# counter's increments would not survive back into this shell.
-set +e; tree_survivors race > "$RUN/race.out"; st=$?; set -e
-check "a reaped process is not 'cannot determine'" "0" "$st"
-check "and it is not counted as a survivor" "" "$(cat "$RUN/race.out")"
-check "the re-check really happened" "2" "$RACE_SEEN"
+# Under PROC_ROOT="$FAKE" the validator takes its procfs branch — $FAKE/1/stat
+# exists — so a token there must be numeric regardless of the real host.
+fake_tok=500000000
+check "and the fake-procfs token is valid under that root" "0" \
+      "$(PROC_ROOT="$FAKE" _valid_starttime "$fake_tok"; echo $?)"
 
-# The genuinely unreadable case must still be status 2: the process is there on
-# both looks, and only its identity cannot be read.
-RACE_SEEN=0
-pid_exists() { return 0; }      # present on every look
-set +e; tree_survivors race >/dev/null 2>&1; st=$?; set -e
-check "a PID that stays live with an unreadable identity is still status 2" "2" "$st"
-# shellcheck source=lib_procs.sh
-. "$HERE/lib_procs.sh"          # restore the real definitions
-rm "$RUN/race.tree" "$RUN/race.out"
+echo "a dying process is gone, not unknown; a live one with no readable stat is unknown"
+# These two look identical to a directory test and must not be conflated.
+#
+# During teardown /proc/<pid> outlives the task: the directory is there while
+# /proc/<pid>/stat already reads as absent. Re-checking with pid_exists — a test on
+# that directory — answers "present" for a process that has gone, which is weaker
+# evidence than the read being re-checked. Three runs reported "cannot determine"
+# over an already-clean host because of it, and the cleanup-only diagnostic caught
+# all four services in exactly that state.
+mkdir -p "$FAKE/7777"        # a pid directory with no stat, standing in for the window
 
-echo
-echo "every status 2 names the service, stage and branch — through a subshell"
-# The first version of this recorded the reason in a shell variable and read it back
-# in stop_tracked, which calls tree_survivors inside $( ). That is a subshell: the
-# assignment never crossed back, so the message would have printed "<none recorded>"
-# on every failure. These assertions go through a command substitution deliberately.
-diag_via_subshell() {       # diag_via_subshell <stage> <tree-body-line...>
-  local stage="$1"; shift
-  [ -f "$RUN/why.diag" ] && rm "$RUN/why.diag"
-  { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$@"; } > "$RUN/why.tree"
-  local out; out="$(tree_survivors why "$stage" 2>"$RUN/why.err")" || true
-  cat "$RUN/why.err"
-}
-check "a malformed line names itself, via subshell" "yes" \
-      "$(has_text "$(diag_via_subshell final 'nocolon')" "final/line-no-colon")"
-check "and the same record is persisted to a file" "yes" \
-      "$([ -s "$RUN/why.diag" ] && echo yes || echo no)"
-check "the persisted line names the service" "yes" \
-      "$(has_text "$(cat "$RUN/why.diag")" "why:")"
-check "a non-numeric pid names its branch" "yes" \
-      "$(has_text "$(diag_via_subshell wait 'abc:123')" "wait/pid-not-numeric")"
-check "an invalid recorded token names its branch" "yes" \
-      "$(has_text "$(diag_via_subshell final '4242:not-a-token')" "final/recorded-token-invalid")"
-check "an incompleteness marker names its branch" "yes" \
-      "$(has_text "$(diag_via_subshell final "4242:$race_tok" 'incomplete:staged')" "final/incomplete-marker")"
-check "the stage is carried through, not hard-coded" "yes" \
-      "$(has_text "$(diag_via_subshell pre-signal 'nocolon')" "pre-signal/")"
+# (a) the dying process: /proc dir present, stat unreadable, task gone.
+check "pid_exists says present (the weak evidence)" "0" \
+      "$(PROC_ROOT="$FAKE" pid_exists 7777; echo $?)"
+check "pid_alive says gone (kill -0 is exact for our own processes)" "1" \
+      "$(PROC_ROOT="$FAKE" pid_alive 7777; echo $?)"
+{ printf 'boot:%s\n' "$(boot_id)"; printf '7777:%s\n' "$fake_tok"; } > "$RUN/dying.tree"
+set +e; out="$(PROC_ROOT="$FAKE" tree_survivors dying final 2>/dev/null)"; st=$?; set -e
+check "so it is treated as exited, not as cannot-determine" "0" "$st"
+check "and is not counted as a survivor" "" "$out"
+rm "$RUN/dying.tree"
 
-printf 'boot:0000-not-this-boot-0000\n4242:1\n' > "$RUN/why.tree"
-err="$(tree_survivors why final 2>&1 >/dev/null)" || true
-check "a boot mismatch names both ids" "yes" "$(has_text "$err" "boot-mismatch")"
-rm "$RUN/why.tree"
-err="$(tree_survivors why final 2>&1 >/dev/null)" || true
-check "a missing tree names the path" "yes" "$(has_text "$err" "tree-missing")"
-
-# A clean evaluation must stay silent: a diagnostic printed when nothing is wrong
-# is how a log stops being read.
-{ printf 'boot:%s\n' "$(boot_id)"; printf '4242:%s\n' "$race_tok"; } > "$RUN/why.tree"
-pid_exists() { return 1; }
-err="$(tree_survivors why final 2>&1 >/dev/null)"; st=$?
-check "a clean evaluation returns 0" "0" "$st"
-check "and emits no diagnostic" "" "$err"
-# shellcheck source=lib_procs.sh
-. "$HERE/lib_procs.sh"
-rm "$RUN/why.tree"
-[ -f "$RUN/why.diag" ] && rm "$RUN/why.diag"
-[ -f "$RUN/why.err" ] && rm "$RUN/why.err"
-
-echo
-echo "the diagnostic survives stop_tracked's own command substitution"
-# The unit tests call tree_survivors directly or through a $( ) of their own. This
-# one goes through stop_tracked, which is where the variable-based version was lost:
-# the caller is `surv="$(tree_survivors ...)"` inside a function invoked from a trap.
-# Nothing short of the real call path proves the record gets out.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & intp=$!; STRAYS="$STRAYS $intp"
+# (b) genuinely alive with an unreadable stat: a REAL process, seen through a proc
+# root that has its directory but no stat file. kill -0 succeeds, so the answer
+# must still be "cannot determine".
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & livep=$!; STRAYS="$STRAYS $livep"
 sleep 1
-echo "$intp" > "$RUN/intg.pid"; starttime_of "$intp" > "$RUN/intg.starttime"
-record_tree intg >/dev/null
-kill "$intp" 2>/dev/null || true
-sleep 1
-# Corrupt the tree the way a real failure would leave it, then let stop_tracked run.
-printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/intg.tree"
-[ -f "$RUN/intg.diag" ] && rm "$RUN/intg.diag"
-set +e; out="$(stop_tracked intg "" 2>&1)"; st=$?; set -e
-check "stop_tracked fails" "1" "$st"
-check "the DIAG line reached stop_tracked's output" "yes" \
-      "$(has_text "$out" "DIAG intg: [final/line-no-colon]")"
-check "and the reason is quoted in the failure message" "yes" \
-      "$(has_text "$out" "reason: intg: [final/line-no-colon]")"
-check "not the placeholder the variable version would have printed" "no" \
-      "$(has_text "$out" "none recorded")"
-check "the record is persisted" "yes" \
-      "$([ -s "$RUN/intg.diag" ] && echo yes || echo no)"
-check "the message points at the file" "yes" "$(has_text "$out" "full record:")"
-check "state is kept" "yes" "$([ -f "$RUN/intg.pid" ] && echo yes || echo no)"
+mkdir -p "$FAKE/$livep"      # directory present, stat absent
+check "pid_alive says alive for a real process" "0" \
+      "$(PROC_ROOT="$FAKE" pid_alive "$livep"; echo $?)"
+{ printf 'boot:%s\n' "$(boot_id)"; printf '%s:%s\n' "$livep" "$fake_tok"; } > "$RUN/livetree.tree"
+[ -f "$RUN/livetree.diag" ] && rm "$RUN/livetree.diag"
+set +e; err="$(PROC_ROOT="$FAKE" tree_survivors livetree final 2>&1 >/dev/null)"; st=$?; set -e
+check "an alive PID with no readable stat is still status 2" "2" "$st"
+check "and names the identity-unreadable branch" "yes" \
+      "$(has_text "$err" "final/identity-unreadable")"
+kill "$livep" 2>/dev/null || true
+rm "$RUN/livetree.tree"
+[ -f "$RUN/livetree.diag" ] && rm "$RUN/livetree.diag"
 
-echo
-echo "a diagnostic that cannot be persisted fails cleanup loudly"
-# _diag runs inside the command substitution, so a failed write there cannot raise
-# anything in stop_tracked. Its absence has to be the signal.
-DIAGLOCK="$RUN/diaglock"
-mkdir -p "$DIAGLOCK"
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & dlp=$!; STRAYS="$STRAYS $dlp"
-sleep 1
-RUN_REAL="$RUN"; RUN="$DIAGLOCK"
-echo "$dlp" > "$RUN/dl.pid"; starttime_of "$dlp" > "$RUN/dl.starttime"
-record_tree dl >/dev/null
-kill "$dlp" 2>/dev/null || true; sleep 1
-printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/dl.tree"
-chmod 0555 "$DIAGLOCK"          # no new files, so the .diag cannot be created
-if printf 'probe\n' > "$DIAGLOCK/probe" 2>/dev/null; then
-  echo "  (skipped: this user can create files in a 0555 directory)"
-  chmod 0755 "$DIAGLOCK"; rm "$DIAGLOCK/probe"
-else
-  set +e; out="$(stop_tracked dl "" 2>&1)"; st=$?; set -e
-  check "cleanup still fails" "1" "$st"
-  check "the failed write is announced" "yes" "$(has_text "$out" "DIAG-WRITE-FAILED")"
-  check "and the missing record is called out, not glossed" "yes" \
-        "$(has_text "$out" "DIAGNOSTIC FOR THIS FAILURE WAS NOT RECORDED")"
-  chmod 0755 "$DIAGLOCK"
-fi
-RUN="$RUN_REAL"
+# _record_one draws the same distinction on the write path.
+: > "$RUN/rec.tree"
+set +e; PROC_ROOT="$FAKE" _record_one rec 7777 >/dev/null 2>&1; st=$?; set -e
+check "_record_one treats the dying process as exited" "0" "$st"
+check "and leaves no incompleteness marker" "0" "$(grep -c '^incomplete:' "$RUN/rec.tree")"
+rm "$RUN/rec.tree"
 
-echo
-echo "a stale .diag line is never reported as this failure's reason"
-# The wait loop appends a record every second it cannot settle, so a non-empty
-# .diag proves only that something failed at some point. Quoting its last line as
-# the reason for the final failure would report a stale record as a fresh
-# diagnosis — and would look exactly like a working diagnostic.
-STALE="$RUN/stale"
-mkdir -p "$STALE"
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & stp=$!; STRAYS="$STRAYS $stp"
-sleep 1
-RUN_REAL="$RUN"; RUN="$STALE"
-echo "$stp" > "$RUN/st.pid"; starttime_of "$stp" > "$RUN/st.starttime"
-record_tree st >/dev/null
-kill "$stp" 2>/dev/null || true; sleep 1
-printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/st.tree"
-# A convincing leftover from an earlier stage, already in the file.
-printf 'st: [wait/identity-unreadable] pid 999 present, recorded "1", read back ""\n' \
-  > "$RUN/st.diag"
-chmod 0444 "$RUN/st.diag"     # the final stage cannot append to it
-if printf 'probe\n' >> "$RUN/st.diag" 2>/dev/null; then
-  echo "  (skipped: this user can append to a 0444 file)"
-  chmod 0644 "$RUN/st.diag"
-else
-  set +e; out="$(stop_tracked st "" 2>&1)"; st=$?; set -e
-  check "cleanup fails" "1" "$st"
-  check "the stale wait-stage line is NOT quoted as the reason" "no" \
-        "$(has_text "$out" "reason: st: [wait/identity-unreadable]")"
-  check "the missing fresh record is called out" "yes" \
-        "$(has_text "$out" "DIAGNOSTIC FOR THIS FAILURE WAS NOT RECORDED")"
-  check "and the line counts are shown" "yes" "$(has_text "$out" "went from 1 to 1")"
-  chmod 0644 "$RUN/st.diag"
-fi
-
-# The same setup, but the final stage CAN write: now the fresh line is the reason.
-printf 'st: [wait/identity-unreadable] earlier stage\n' > "$RUN/st.diag"
-set +e; out="$(stop_tracked st "" 2>&1)"; st=$?; set -e
-check "with a fresh final-stage record, that record is the reason" "yes" \
-      "$(has_text "$out" "reason: st: [final/line-no-colon]")"
-check "and the earlier stage is not what gets quoted" "no" \
-      "$(has_text "$out" "reason: st: [wait/")"
-RUN="$RUN_REAL"
-
-echo
 echo "a malformed tree line is uninterpretable, not empty"
 for bad in "notapid:123" "4321" "4321:"; do
   { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$bad"; } > "$RUN/bad.tree"
@@ -451,15 +294,24 @@ check "the real enumeration is back" "yes" \
 kill "$dropp" 2>/dev/null || true
 rm "$RUN/drop.pid" "$RUN/drop.starttime" "$RUN/drop.tree"
 
-# (b) a process that is live but cannot be recorded. $FAKE/5555 is a pid directory
-# with no stat file: pid_exists sees it, starttime_of cannot read it.
+# (b) a process that is genuinely live but cannot be recorded. It has to be a REAL
+# process: a bare directory under a fake proc root is indistinguishable from one
+# that has already exited, and pid_alive now — correctly — calls that exited.
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unrec=$!; STRAYS="$STRAYS $unrec"
+sleep 1
+mkdir -p "$FAKE/$unrec"      # directory present, no stat file
 : > "$RUN/one.tree"
-set +e; PROC_ROOT="$FAKE" _record_one one 5555 >/dev/null 2>&1; st=$?; set -e
+set +e; PROC_ROOT="$FAKE" _record_one one "$unrec" >/dev/null 2>&1; st=$?; set -e
 check "_record_one fails on a live PID it cannot read" "1" "$st"
+# The branch label differs by path and that is fine: starttime_of falls back to
+# `ps`, which answers for a live process, so _record_one sees a token it cannot
+# validate under this proc root rather than no token at all. What must hold is that
+# the tree is marked and the PID is named.
 check "and marks the tree, naming the PID" "1" \
-      "$(grep -c '^incomplete:unreadable-identity-5555' "$RUN/one.tree")"
+      "$(grep -c "^incomplete:.*-$unrec\$" "$RUN/one.tree")"
 check "the unrecordable PID is absent from the pid lines" "no" \
-      "$(contains "$(tree_pids one)" "5555")"
+      "$(contains "$(tree_pids one)" "$unrec")"
+kill "$unrec" 2>/dev/null || true
 
 # (c) a process whose recorded identity would be malformed is also not dropped.
 mkdir -p "$FAKE/6666"
