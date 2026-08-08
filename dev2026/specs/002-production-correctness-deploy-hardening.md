@@ -11,7 +11,8 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
-| 2 | 2026-08-08 | **Settled per PI direction.** C1's environment is a read-only forensic clone of production's Python environment, not a rebuild — §4.1 and the open question it replaces. C2's worker count is read from the host, not assumed: production runs `-w 2`, and the first draft's `-w 4` was a guess. C2's unpinned seed is verified across repeated independent starts rather than one. Added §5, separating production-like gunicorn validation from formal PM2/nginx deployment validation — production is supervised by **PM2**, not systemd, which the first draft assumed. Added §6, the boundary between byte-exact, semantic and order-stability. |
+| 3 | 2026-08-08 | Renamed the artefact **production package-tree clone** — "forensic clone" over-claimed. §4.1 now enumerates acceptance per component (site-packages, dist-info, `.pth`, native libraries, symlinks, bytecode, secrets) and states plainly that **full runtime byte-equivalence is not claimed**: the stdlib is outside the tree and the interpreter is not cloned. Survey of the real tree recorded, including a **`.pth` editable install pointing at production's own `src`**, which the clone must neutralise. C2's three starts reframed as observing *this run's* seed diversity, with `INSUFFICIENT` as an outcome rather than a reason to add starts. §6 given a concrete order-stability acceptance and its relationship to C2's verdict. PI decisions on C2 repetitions and the interpreter recorded. |
+| 2 | 2026-08-08 | **Settled per PI direction.** C1's environment is a read-only clone of production's package tree, not a rebuild — §4.1 and the open question it replaces. C2's worker count is read from the host, not assumed: production runs `-w 2`, and the first draft's `-w 4` was a guess. C2's unpinned seed is verified across repeated independent starts rather than one. Added §5, separating production-like gunicorn validation from formal PM2/nginx deployment validation — production is supervised by **PM2**, not systemd, which the first draft assumed. Added §6, the boundary between byte-exact, semantic and order-stability. |
 
 ---
 
@@ -44,8 +45,8 @@ returns, when both are given production's packages?** It does not ask how fast.
 
 ## 2. Scope
 
-1. **C1 — production-environment contract.** A **read-only forensic clone** of
-   production's Python environment, shared by both arms, `PYTHONHASHSEED=0`, and the
+1. **C1 — production-environment contract.** A **read-only package-tree clone** of
+   production's installed packages, shared by both arms, `PYTHONHASHSEED=0`, and the
    64 contract cases as **5.2A byte-exact**. Cloned, not rebuilt — §4.
 2. **C2 — multi-worker contract.** `gunicorn` with **production's own worker count,
    read from the host** (observed `-w 2`, re-read at run time), seed unpinned as
@@ -83,34 +84,119 @@ them is the event-loop spec's job.** S2 names what it finds and stops.
 
 ### C1 — production's packages, byte-exact
 
-#### The environment is a read-only forensic clone, not a rebuild
+#### The environment is a production **package-tree clone**
 
-Two ways to get production's packages were considered in rev 1 and the difference
-matters more than it looks: freezing to a requirements file and reinstalling produces
-*a resolution of the same names*, which is not the same artefact — a re-resolve can
-pick different wheels, different transitive pins, different build metadata, and every
-one of those is a variable S2 exists to hold still.
+Called what it is. It is a copy of production's installed package tree — not a
+"forensic clone" of the runtime, which would imply an equivalence this does not
+establish and §4.1.3 says it does not.
 
-So the environment is **cloned, not rebuilt**: production's `site-packages` is copied
-byte for byte into an isolated tree, made read-only, and used as-is.
+Rebuilding was considered and rejected: freezing to a requirements file and
+reinstalling produces *a resolution of the same names*, and a re-resolve can pick
+different wheels, different transitive pins and different build metadata. Every one
+of those is a variable S2 exists to hold still. So the tree is **copied, not
+rebuilt**.
+
+##### 4.1.1 Source and scale, surveyed rather than assumed
+
+Read-only from VM24 on 2026-08-08:
+
+```
+interpreter    /home/odbadmin/.pyenv/versions/py311/bin/python3.11
+site-packages  /home/odbadmin/.pyenv/versions/py311/lib/python3.11/site-packages
+               (= sysconfig purelib)
+               33,567 files, 3,762 directories, 1.7 GB
+stdlib         /home/odbadmin/.pyenv/versions/3.11.4/lib/python3.11   <- NOT in the tree
+py311          symlink -> /home/odbadmin/.pyenv/versions/3.11.4/envs/py311
+               pyvenv.cfg: base 3.11.4, include-system-site-packages = false
+```
+
+##### 4.1.2 Acceptance, per component
+
+| component | observed | how the clone is accepted |
+|---|---|---|
+| **site-packages tree** | 33,567 files / 3,762 dirs / 1.7 GB | per-file SHA-256 against the source, and file and directory counts equal |
+| **`*.dist-info`** | **240** directories, while `importlib.metadata` reports **236** distributions | all 240 copied; **the discrepancy is reconciled and named before the run** — four directories that do not yield a distribution are either stale, malformed or dual-named, and which it is decides whether the clone is faithful or the source is untidy |
+| **`*.pth`** | 4: `easy-install.pth` (empty), `distutils-precedence.pth`, `basemap_data_hires-…-nspkg.pth`, **`__editable__.src-1.0.pth`** | see §4.1.4 — the editable one **must be neutralised** |
+| **native libraries** | 431 `*.so` | copied byte for byte, **never rebuilt**; digests compared like any other file |
+| **symlinks** | **0** in the tree today | the clone asserts zero symlinks. If any appear, the run stops: a symlink would leave the clone reading files it does not own |
+| **bytecode** | 1,385 `__pycache__` dirs, 12,130 `*.pyc` | copied **with mtimes preserved**. `.pyc` validity is an mtime-and-size check against its source, so a copy that loses mtimes silently invalidates 12,130 caches and changes what the first request does |
+| **build provenance** | 255 `RECORD`, 3 `direct_url.json` | copied; recorded, not interpreted |
+| **secrets** | see §4.1.5 | scanned by filename, contents never read |
+
+##### 4.1.3 What the clone does **not** establish
+
+It is a copy of the package tree. It is **not** a byte-equivalent runtime, and no
+result from it may be described as one:
+
+- **the standard library is not in the tree.** It lives under
+  `…/versions/3.11.4/lib/python3.11` and is reached through the venv's `pyvenv.cfg`.
+  The clone carries production's *packages*, not production's *Python*.
+- **the interpreter binary is not copied** — see the PI decision in §4.1.6.
+- **the process is not production's.** Different uptime, different memory state,
+  different page cache, no accumulated state from serving traffic.
+
+##### 4.1.4 The editable install is a real hazard, not a formality
+
+`__editable__.src-1.0.pth` runs `__editable___src_1_0_finder.install()`, and that
+finder points at:
+
+```
+/home/odbadmin/python/woa23/src        exists: yes    inside site-packages: NO
+```
+
+That is **production's own source directory**. Copied as-is into the clone, the
+`.pth` would still redirect `src.*` imports there — so both arms would import
+production's live `src`, from outside the clone, outside the read-only reference
+copy, and outside anything the provenance check hashes. The comparison would be
+between two processes reading the same production files, which is not the
+comparison this spec describes.
+
+S1 was not exposed to this: it ran under `dev2026/.venv`, built from `uv.lock`, which
+has no such `.pth`. The hazard appears only because C1 uses production's tree.
+
+**Acceptance:** the editable `.pth` and its finder module are excluded from the clone,
+their absence is asserted, and `sys.path` inside each arm is recorded in provenance
+and checked to contain **no path outside the clone, the arm's own staging directory,
+and the stdlib**. This is a deliberate deviation from "identical to production" and is
+recorded as one — production really does load `src` that way, and the clone
+deliberately does not.
+
+##### 4.1.5 Secrets exclusion
+
+Scanned by **filename only**; no file contents are read at any point, by the scan or
+by this spec's author.
+
+Patterns: `*.pem *.key *.crt *.p12 .env* *credential* *secret* *token* id_rsa*
+id_ed25519* .netrc .pgpass`.
+
+**68 filenames matched, and every one examined is a false positive by name** —
+library source such as `packaging/_tokenizer.py`, `keyring/credentials.py`,
+`dns/tokenizer.py`, and `pip/_vendor/certifi/cacert.pem`, which is a public CA bundle.
+No credential material was found.
+
+Acceptance: the scan is re-run against the **clone** after copying; any match that is
+not on the reviewed false-positive list stops the run for a human to look at. A name
+scan cannot prove the absence of secrets and is not claimed to — it is a cheap check
+against the obvious, and the stronger control is that the tree copied is a package
+directory, not a configuration or data directory.
+
+##### 4.1.6 PI decision — the interpreter
+
+**Preferred: run the clone under production's own Python binary.** That removes the
+last interpreter variable, and the binary is read and executed but never modified.
+
+Executing a production binary is a different act from reading production's files, and
+every prior authorisation in this project has been for reading. **It needs granting
+explicitly.**
+
+**If it is not granted**, the clone runs under a separately installed Python 3.11.4
+and the difference is carried as an explicit limitation: same version, different
+build, and anything sensitive to interpreter build flags is outside what C1
+establishes.
 
 | | |
 |---|---|
-| direction | one-way, production → clone. Production is **read** and never written, never moved, never relinked |
-| method | copy, not symlink: a symlink would leave both arms executing production's own files, so a stray write during the run would land in production |
-| verification | per-file SHA-256 of the clone against the source, and the distribution-list digest (`60236d7210c8c364`) recomputed **from inside the clone** |
-| permissions | the clone is read-only for the duration of the run |
-| interpreter | production's own Python 3.11.4 is **not** copied; the clone is used with an interpreter of the same version, and that difference is recorded rather than glossed |
-| what it is | a forensic artefact — a snapshot of what production has, faithful to the byte |
-| what it is not | a build, a lockfile, or anything reproducible from a manifest. It cannot be recreated from this spec; it can only be re-cloned |
-
-If the clone's recomputed digest does not equal production's, the clone is wrong and
-the run does not proceed. That check is what makes this a clone rather than an
-approximation.
-
-| | |
-|---|---|
-| environment | the forensic clone above, **shared by both arms** |
+| environment | the package-tree clone above, **shared by both arms** |
 | interpreter | Python 3.11.4, matching production |
 | seed | `PYTHONHASHSEED=0` on both arms |
 | store literal | identical string on both arms (S1's finding: the string, not the directory, orders `zarr_group_paths`) |
@@ -145,11 +231,28 @@ pid 3960  gunicorn woa23_app:app -w 2 -k uvicorn.workers.UvicornWorker ...
 ```
 
 **One start is not evidence that the seed is unpinned.** A single process has one
-seed, and any output it produces is self-consistent. Showing that the seed is *not*
-fixed — and that the contract survives it — takes **repeated independent starts**:
-the arms are started, the cases run, both are stopped, and the whole thing is
-repeated. The seed's variation is established by observing it differ across those
-starts, and the contract is asserted on every one of them.
+seed and its output is self-consistent, so nothing about seed variation can be read
+from it.
+
+**PI decision: three independent start/stop cycles.** The arms are started, the cases
+run, both are stopped, and the whole thing is repeated three times.
+
+What those three cycles establish is **the seed diversity observed in this run** — not
+that the seed is unpinned in general, and not a bound on how often an ordering
+difference appears. Three observations of a randomised value is three observations.
+
+The outcome is therefore one of three, and the third is not a failure:
+
+| observed | verdict |
+|---|---|
+| seeds differ across cycles **and** all three cycles pass the contract | **PASS** |
+| any cycle fails the contract | **FAIL** — reported with the cycle and the case |
+| all three cycles record the **same** seed | **INSUFFICIENT** — the premise was not exercised, so the contract result says nothing about unpinned seeds |
+
+`INSUFFICIENT` is reported as it stands. **The run does not add cycles to chase a
+different answer**: deciding to sample more after seeing the sample is how a result
+stops meaning what it appears to mean. If more cycles are wanted, the number comes
+from the PI, before the next run.
 
 | | |
 |---|---|
@@ -197,6 +300,48 @@ did.
 | **byte-exactness** (C1) | do the two arms emit identical bytes? | 5.2A, seed pinned, one environment | nothing — it is the strongest form, but it needs a pinned seed, so it cannot be applied to a process we may not restart |
 | **semantic equivalence** (C2) | do they emit the same *content*? | 5.2B, seed unpinned | column order, key order, float formatting |
 | **order stability** | does one arm emit the same order **twice**? | the same arm, repeated independent starts, compared to itself | nothing about the other arm — it is a property of one implementation, not of the pair |
+
+### 6.1 Order-stability acceptance
+
+Measured per arm, per case, across C2's three cycles. Two forms, and the second is
+used only where the first cannot be:
+
+| form | comparison | when |
+|---|---|---|
+| **raw byte** | the arm's response body from cycle *n* compared byte for byte with cycle 1 | the default. It is the strongest and needs nothing parsed |
+| **order fingerprint** | SHA-256 over the ordered column-name list, followed by the ordered sequence of `(lon, lat, depth, time_period)` index tuples | when the bodies legitimately differ in something that is not order — a timestamp, a float rendered differently — so a raw comparison would report a difference that is not an ordering one |
+
+The fingerprint deliberately excludes values: it answers "was the same content laid
+out in the same sequence", not "was the same content returned". The latter is C2's
+question and is already answered semantically.
+
+**Per case, per arm, the outcome is:**
+
+| | |
+|---|---|
+| all three cycles identical (bytes, or fingerprint) | `STABLE` |
+| any cycle differs | `UNSTABLE`, recorded with the first differing cycle and whether it was column order, row order, or both |
+| C2 returned `INSUFFICIENT` | order stability is `UNKNOWN` — three cycles that happened to share a seed cannot show order varying with the seed |
+
+### 6.2 Order stability does **not** decide C2
+
+They are separate verdicts and conflating them would make each less useful:
+
+- **C2 is 5.2B semantic and is order-insensitive by construction.** An `UNSTABLE`
+  case can and should still pass C2: the content is the same, the sequence is not.
+  Failing C2 on it would be measuring the thing 5.2B explicitly does not measure.
+- **`UNSTABLE` is reported as a finding in its own right**, because it is one. S1
+  established that this candidate's output order depends on the *string* used to
+  reach the store, which means order is a function of configuration, not only of
+  code. A consumer indexing CSV columns by position, or a GeoServer SQL view bound to
+  a column sequence, is exposed to that whether or not the two arms agree.
+- **An `UNSTABLE` result blocks nothing in S2 and decides nothing about deployment.**
+  What to do about it belongs to the deployment and consumer-compatibility work, not
+  here. S2's obligation is to find it and say so.
+
+A case that is `STABLE` on the reference and `UNSTABLE` on the candidate — or the
+reverse — is the most interesting outcome available from C2 and must be reported
+prominently rather than averaged into a pass.
 
 Order stability is neither of the other two and S1 never measured it. It matters
 because S1 established that the candidate's output order depends on the *string* used
@@ -287,15 +432,15 @@ history. What remains:
    production so far has been a handful of files; this is the whole environment, and
    it is the largest read S2 asks for. It writes nothing to production, but the size
    of the read is itself worth granting explicitly rather than assuming.
-2. **How many repetitions for C2?** §4 says at least three. Three demonstrates the
-   seed varies; it does not bound how often an ordering difference might appear. If a
-   stronger claim is wanted, the number should come from the PI rather than from what
-   is convenient.
-3. **Is the interpreter difference acceptable?** The clone carries production's
-   packages but is run under a same-version interpreter that is not production's own
-   binary. If that gap matters, the alternative is running the clone under
-   production's interpreter — which is a heavier ask, since it means invoking a
-   production binary rather than only reading it.
+2. **Executing production's Python binary** — the PI's preference for C1, recorded in
+   §4.1.6. Every authorisation so far has been to *read* production; running its
+   interpreter is a different act and needs granting on its own. If it is not
+   granted, the interpreter difference stands as a stated limitation and C1 still
+   runs.
+3. **The 240 vs 236 discrepancy** in §4.1.2 — four `dist-info` directories that yield
+   no distribution. Whether that is stale state in production, a packaging quirk, or
+   something else is unknown, and it should be understood before the clone is called
+   faithful.
 4. **What happens if C1 fails?** A byte difference under production's packages would
    mean one of those 236 packages changes the output. S2 would then have found
    something real, and the next step — bisecting the package set — is not in this
