@@ -222,6 +222,47 @@ kill "$unread" 2>/dev/null || true
 rm "$RUN/unreadable.pid" "$RUN/unreadable.starttime" "$RUN/unreadable.tree"
 
 echo
+echo "a process reaped mid-check is gone, not unknown"
+# The defect the 2026-08-08-r2 run hit. Between pid_exists and reading the start
+# time the process can be reaped — which during a stop is the NORMAL case, since we
+# have just signalled it. Without a re-check that read this as "identity
+# unreadable", so a run that passed both gates, stranded nothing and freed every
+# port still reported "cannot determine" for all four services.
+#
+# pid_exists is overridden to answer true once and false on the re-check, which is
+# exactly what the race produces. Re-sourcing the library below restores it.
+RACE_SEEN=0
+pid_exists() {
+  RACE_SEEN=$((RACE_SEEN + 1))
+  [ "$RACE_SEEN" -le 1 ]        # live on the first look, gone on the second
+}
+starttime_of() { return 1; }    # the read that loses the race
+# A start-time token this host's validator accepts — the two branches produce
+# different shapes, and a Linux-shaped token fails _valid_starttime on macOS
+# before the race is ever reached.
+if [ -r "${PROC_ROOT:-/proc}/1/stat" ]; then race_tok=500000000
+else race_tok="Mon_Jan_1_00:00:01_2001"; fi
+check "the fixture token is valid on this host" "0" \
+      "$(_valid_starttime "$race_tok"; echo $?)"
+{ printf 'boot:%s\n' "$(boot_id)"; printf '4242:%s\n' "$race_tok"; } > "$RUN/race.tree"
+# Not `$(tree_survivors ...)`: a command substitution is a subshell, so the
+# counter's increments would not survive back into this shell.
+set +e; tree_survivors race > "$RUN/race.out"; st=$?; set -e
+check "a reaped process is not 'cannot determine'" "0" "$st"
+check "and it is not counted as a survivor" "" "$(cat "$RUN/race.out")"
+check "the re-check really happened" "2" "$RACE_SEEN"
+
+# The genuinely unreadable case must still be status 2: the process is there on
+# both looks, and only its identity cannot be read.
+RACE_SEEN=0
+pid_exists() { return 0; }      # present on every look
+set +e; tree_survivors race >/dev/null 2>&1; st=$?; set -e
+check "a PID that stays live with an unreadable identity is still status 2" "2" "$st"
+# shellcheck source=lib_procs.sh
+. "$HERE/lib_procs.sh"          # restore the real definitions
+rm "$RUN/race.tree" "$RUN/race.out"
+
+echo
 echo "a malformed tree line is uninterpretable, not empty"
 for bad in "notapid:123" "4321" "4321:"; do
   { printf 'boot:%s\n' "$(boot_id)"; printf '%s\n' "$bad"; } > "$RUN/bad.tree"

@@ -389,11 +389,24 @@ tree_survivors() {          # tree_survivors <name>
     if pid_exists "$p"; then
       now="$(starttime_of "$p" || true)"
       if [ -z "$now" ] || ! _valid_starttime "$now"; then
-        # The PID is live but its identity cannot be read — a restricted /proc, a
-        # process that changed hands. "Exited" is the one thing it is definitely
-        # not, and treating it as exited is what would let cleanup delete the state
-        # files and report success over a running process.
-        return 2
+        # Two different things reach this point and they have to be told apart by
+        # *re-checking*, exactly as _record_one already does:
+        #
+        #   - the process exited between `pid_exists` and the read. During a stop
+        #     that is the normal case — we have just signalled it — and it means
+        #     the process is gone, which is the opposite of unknown.
+        #   - the process is still there and its identity genuinely cannot be read:
+        #     a restricted /proc, a PID that changed hands. Only then is the answer
+        #     "cannot determine".
+        #
+        # Without the re-check every stop raced its own kill. The 2026-08-08-r2 run
+        # passed both gates, left nothing running and freed all three ports, and
+        # still reported "cannot determine whether every tracked process exited" for
+        # all four services — each was reaped inside that window.
+        if pid_exists "$p"; then
+          return 2
+        fi
+        continue                # exited while we were looking at it
       fi
       [ "$now" = "$want" ] && out="$out $p"
     fi
