@@ -265,8 +265,10 @@ cp -r "$HERE/api" "$CAND_DIR/api"
 # reference interpolates the hard-coded "data/" from woa23_app.py:63 while the
 # candidate interpolated whatever WOA23_ZARR_STORE said, which was an absolute path.
 # Different strings, different set order, different `result_list` order — and the two
-# cases spanning more than one Zarr group came back with the same rows in a different
-# order. The candidate is NOT modified: it still reads the store from
+# cases spanning more than one Zarr group are exactly the two that differed. That is
+# a strongly supported mechanism, not a proven one: the actual bodies were never
+# captured, so how the difference decomposes is not established. The candidate is
+# NOT modified: it still reads the store from
 # WOA23_ZARR_STORE and keeps that configurability. It is simply given the same
 # string the reference uses, so the benchmark stops introducing a difference of its
 # own.
@@ -457,8 +459,8 @@ problems = (validate_meta(cand, "candidate") + validate_meta(ref, "reference")
             + verify_environment_record(env, cand, "candidate")
             + verify_environment_record(env, ref, "reference")
             # and do they build zarr_group_paths from the same string? Different
-            # strings hash differently, so the set iterates in a different order and
-            # a multi-group query returns the same rows rearranged.
+            # strings hash differently, so the set iterates in a different order
+            # for any query spanning more than one group.
             + verify_group_path_agreement(cand, ref))
 if problems:
     print("arms are not comparable:", file=sys.stderr)

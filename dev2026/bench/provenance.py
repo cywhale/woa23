@@ -698,12 +698,17 @@ def verify_group_path_agreement(cand_meta: dict | None, ref_meta: dict | None
     logical group can still iterate them in different orders — which reorders
     `result_list`, and so the rows of the response.
 
-    That is what the 2026-08-08 5.2A run hit. Both arms were correct and returned the
-    same content; the reference interpolated `"data/"` (giving `data//1_degree/...`)
-    while the candidate interpolated an absolute path, and the two cases whose query
-    spans more than one Zarr group — C16 and C16-csv — came back with the same bytes
-    in a different order. 62 of 64 matched because every other case touches exactly
-    one group, where order cannot differ.
+This is the strongly supported mechanism behind the 2026-08-08 5.2A failure.
+    The reference interpolated `"data/"` (giving `data//1_degree/...`) while the
+    candidate interpolated an absolute path, so the arms iterate the set in different
+    orders; the only two cases whose query spans more than one Zarr group — C16 and
+    C16-csv — are exactly the two that differed, and the other 62 matched byte for
+    byte because they touch a single group where order cannot differ.
+
+    **The actual decomposition of those bodies is not established.** Only an offline
+    synthetic reproducer has been run; C16's real responses were never captured, so
+    which of row order, key order or something else accounts for the difference
+    remains unproven.
 
     This does not check that the strings are *correct*, only that they are the same.
     Whether they point at the same data is `validate_store_agreement`'s job.
@@ -721,8 +726,8 @@ def verify_group_path_agreement(cand_meta: dict | None, ref_meta: dict | None
     if a != b:
         return [f"the arms build zarr_group_paths from different strings: "
                 f"candidate {a!r} vs reference {b!r}. Set iteration order depends on "
-                f"the string, so result_list is concatenated in a different order and "
-                f"a multi-group query returns the same rows in a different order."]
+                f"the string, so result_list is concatenated in a different order "
+                f"for any query spanning more than one group."]
     return []
 
 

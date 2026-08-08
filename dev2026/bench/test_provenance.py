@@ -17,7 +17,7 @@ from pathlib import Path
 from bench.manifests import MANIFESTS, expand
 from bench.collect_backend_meta import (
     build_meta, compare_identity, compare_store, local_port_of, master_of,
-    parse_ss_listeners, resolve_store)
+    parse_ss_listeners, resolve_store, zmetadata_fingerprints)
 from bench.provenance import (
     REQUIRED_META_FIELDS, load_meta, validate_meta, validate_store_agreement,
     verify_environment_match, verify_environment_record,
@@ -1191,7 +1191,8 @@ def test_verify_group_path_agreement() -> None:
     The 2026-08-08 5.2A run failed on exactly this: both arms read the same store,
     but the reference interpolated "data/" and the candidate an absolute path, so
     `zarr_group_paths` iterated in a different order on each arm and the two cases
-    spanning more than one Zarr group returned the same rows rearranged.
+    spanning more than one Zarr group came back differing. How those bodies
+    decompose is not established — only a synthetic reproducer has been run.
     """
     ref = {"store_path_literal": "data/"}
     check("identical literals agree", verify_group_path_agreement(dict(ref), ref) == [])
@@ -1219,6 +1220,97 @@ def test_verify_group_path_agreement() -> None:
               "store_path_literal"))
 
 
+def test_canonical_store_fingerprint_integration() -> None:
+    """resolve_store -> zmetadata_fingerprints, with the two cwds actually different.
+
+    The unit tests check each half. What they cannot catch is the seam: the sidecar
+    runs from the repository while each arm runs from its own staging directory, so a
+    `store_path` that is merely *plausible* — a relative string, or an unresolved
+    symlink — fingerprints the wrong directory. `zmetadata_fingerprints` returns
+    `None` for a falsy store and an `error` dict for a non-directory, but a relative
+    path that happens to resolve to *something* under the collector's cwd yields a
+    confident, wrong answer, which is the failure this exercises.
+
+    Real directories and a real symlink, so the resolution is the OS's, not a mock's.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        # The one real store, reached by both arms through their own symlinks.
+        store = root / "real_store"
+        (store / "1_degree" / "annual" / "TS").mkdir(parents=True)
+        (store / "1_degree" / "annual" / "TS" / ".zmetadata").write_text('{"real": 1}')
+
+        # A decoy under the *collector's* cwd, positioned exactly where a relative
+        # "data" would land. Different content, so a wrong answer is distinguishable
+        # from a missing one.
+        collector_cwd = root / "repo"
+        (collector_cwd / "data" / "1_degree" / "annual" / "TS").mkdir(parents=True)
+        (collector_cwd / "data" / "1_degree" / "annual" / "TS" / ".zmetadata").write_text(
+            '{"decoy": 1}')
+
+        arms = {}
+        for label, staging in (("candidate", root / "stage_c"),
+                               ("reference", root / "stage_r")):
+            staging.mkdir()
+            (staging / "data").symlink_to(store)
+            env = {"WOA23_ZARR_STORE": "data/"} if label == "candidate" else {}
+            arms[label] = resolve_store(label, staging, env)
+
+        c, r = arms["candidate"], arms["reference"]
+        check("both arms record the same literal",
+              c["store_path_literal"] == r["store_path_literal"] == "data/",
+              f"{c} {r}")
+        check("both resolve to an absolute path",
+              Path(c["store_path"]).is_absolute() and Path(r["store_path"]).is_absolute())
+        check("and the symlinks canonicalise to the SAME store",
+              c["store_path"] == r["store_path"] == str(store.resolve()),
+              f"{c['store_path']} vs {r['store_path']} vs {store.resolve()}")
+        check("verify_group_path_agreement accepts them",
+              verify_group_path_agreement(c, r) == [])
+
+        # The seam: fingerprint from a *different* cwd, as the sidecar really does.
+        cand_fp = zmetadata_fingerprints(c["store_path"])
+        ref_fp = zmetadata_fingerprints(r["store_path"])
+        check("the canonical path fingerprints the real store",
+              cand_fp == ref_fp and list(cand_fp) == ["1_degree/annual/TS/.zmetadata"],
+              str(cand_fp))
+        real_digest = hashlib.sha256(b'{"real": 1}').hexdigest()
+        check("and it is the real store's content, not the decoy's",
+              cand_fp["1_degree/annual/TS/.zmetadata"]["sha256"] == real_digest,
+              str(cand_fp))
+
+        # What the pre-fix behaviour did: a relative store_path, resolved by the
+        # process that happens to be walking it.
+        import os
+        here = os.getcwd()
+        try:
+            os.chdir(collector_cwd)
+            decoy_fp = zmetadata_fingerprints("data")
+            check("a relative store_path silently fingerprints the collector's cwd",
+                  decoy_fp is not None
+                  and decoy_fp["1_degree/annual/TS/.zmetadata"]["sha256"]
+                  == hashlib.sha256(b'{"decoy": 1}').hexdigest(),
+                  str(decoy_fp))
+            check("which is why store_path must be absolute",
+                  decoy_fp != cand_fp)
+        finally:
+            os.chdir(here)
+
+        # Same literal, different staging, symlinks pointing elsewhere: the literals
+        # still agree, so only the resolved comparison catches it.
+        other = root / "other_store"
+        (other / "1_degree").mkdir(parents=True)
+        stage_x = root / "stage_x"; stage_x.mkdir()
+        (stage_x / "data").symlink_to(other)
+        x = resolve_store("candidate", stage_x, {"WOA23_ZARR_STORE": "data/"})
+        check("identical literals over different stores pass the literal check",
+              verify_group_path_agreement(x, r) == [])
+        check("but validate_store_agreement rejects them",
+              has(validate_store_agreement({**x, "zmetadata_fingerprints": {}},
+                                           {**r, "zmetadata_fingerprints": {}}),
+                  "store mismatch"))
+
+
 def main() -> int:
     for fn in (test_good_meta_passes, test_source_set_must_match_manifest,
                test_ss_parsing_accumulates_rows, test_ss_port_matching_is_exact,
@@ -1229,6 +1321,7 @@ def main() -> int:
                test_verify_prior_rung, test_verify_prior_contract,
                test_verify_environment_match, test_verify_environment_record,
                test_verify_group_path_agreement,
+               test_canonical_store_fingerprint_integration,
                test_gate_precedence,
                test_schema_matches_sidecar_output,
                test_source_digests_are_recomputed,

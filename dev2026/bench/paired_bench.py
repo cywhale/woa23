@@ -49,6 +49,7 @@ from bench.collect_backend_meta import (  # noqa: E402
 )
 from bench.provenance import (  # noqa: E402
     _verify_source_set, load_meta, validate_meta, validate_store_agreement,
+    verify_group_path_agreement,
 )
 from bench.queries import Query, select  # noqa: E402
 
@@ -294,6 +295,16 @@ def main() -> int:
                 f"variant compares semantically rather than byte for byte.")
     cand_meta, ref_meta = metas["candidate"], metas["reference"]
     meta_problems.extend(validate_store_agreement(cand_meta, ref_meta))
+    if args.gate_variant == "5.2A":
+        # 5.2A only. Under 5.2B the reference is live production, whose store
+        # literal is whatever it is and cannot be aligned — which is the reason that
+        # variant compares semantically in the first place.
+        #
+        # This is checked here as well as in the contract gate because the two tools
+        # are run separately and a latency result carries its own provenance. A
+        # latency number produced from arms that build their group paths differently
+        # would be measuring an ordering difference alongside the change under test.
+        meta_problems.extend(verify_group_path_agreement(cand_meta, ref_meta))
     if meta_problems:
         # Abort before the first request. Sampling against a run we already know is
         # unpublishable wastes the operator's time, puts avoidable load on a
