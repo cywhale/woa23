@@ -360,9 +360,51 @@ else
   check "cleanup still fails" "1" "$st"
   check "the failed write is announced" "yes" "$(has_text "$out" "DIAG-WRITE-FAILED")"
   check "and the missing record is called out, not glossed" "yes" \
-        "$(has_text "$out" "DIAGNOSTIC RECORD IS MISSING")"
+        "$(has_text "$out" "DIAGNOSTIC FOR THIS FAILURE WAS NOT RECORDED")"
   chmod 0755 "$DIAGLOCK"
 fi
+RUN="$RUN_REAL"
+
+echo
+echo "a stale .diag line is never reported as this failure's reason"
+# The wait loop appends a record every second it cannot settle, so a non-empty
+# .diag proves only that something failed at some point. Quoting its last line as
+# the reason for the final failure would report a stale record as a fresh
+# diagnosis — and would look exactly like a working diagnostic.
+STALE="$RUN/stale"
+mkdir -p "$STALE"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & stp=$!; STRAYS="$STRAYS $stp"
+sleep 1
+RUN_REAL="$RUN"; RUN="$STALE"
+echo "$stp" > "$RUN/st.pid"; starttime_of "$stp" > "$RUN/st.starttime"
+record_tree st >/dev/null
+kill "$stp" 2>/dev/null || true; sleep 1
+printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/st.tree"
+# A convincing leftover from an earlier stage, already in the file.
+printf 'st: [wait/identity-unreadable] pid 999 present, recorded "1", read back ""\n' \
+  > "$RUN/st.diag"
+chmod 0444 "$RUN/st.diag"     # the final stage cannot append to it
+if printf 'probe\n' >> "$RUN/st.diag" 2>/dev/null; then
+  echo "  (skipped: this user can append to a 0444 file)"
+  chmod 0644 "$RUN/st.diag"
+else
+  set +e; out="$(stop_tracked st "" 2>&1)"; st=$?; set -e
+  check "cleanup fails" "1" "$st"
+  check "the stale wait-stage line is NOT quoted as the reason" "no" \
+        "$(has_text "$out" "reason: st: [wait/identity-unreadable]")"
+  check "the missing fresh record is called out" "yes" \
+        "$(has_text "$out" "DIAGNOSTIC FOR THIS FAILURE WAS NOT RECORDED")"
+  check "and the line counts are shown" "yes" "$(has_text "$out" "went from 1 to 1")"
+  chmod 0644 "$RUN/st.diag"
+fi
+
+# The same setup, but the final stage CAN write: now the fresh line is the reason.
+printf 'st: [wait/identity-unreadable] earlier stage\n' > "$RUN/st.diag"
+set +e; out="$(stop_tracked st "" 2>&1)"; st=$?; set -e
+check "with a fresh final-stage record, that record is the reason" "yes" \
+      "$(has_text "$out" "reason: st: [final/line-no-colon]")"
+check "and the earlier stage is not what gets quoted" "no" \
+      "$(has_text "$out" "reason: st: [wait/")"
 RUN="$RUN_REAL"
 
 echo

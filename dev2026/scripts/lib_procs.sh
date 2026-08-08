@@ -571,6 +571,13 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     sleep 1
   done
 
+  # Count the records before the call so the one it writes can be told from one an
+  # earlier stage left behind. The wait loop appends a line every second it cannot
+  # settle, so a non-empty .diag proves only that *something* failed at *some*
+  # point — quoting its last line as the reason for this failure would be reporting
+  # a stale record as a fresh diagnosis.
+  local diag_before=0
+  [ -f "$RUN/$name.diag" ] && diag_before="$(wc -l < "$RUN/$name.diag" | tr -d ' ')"
   st=0; surv="$(tree_survivors "$name" "final")" || st=$?
   if [ "$incomplete" -ne 0 ] && [ "$st" -eq 0 ]; then
     echo "$name: the tracked process was stopped, but the tree could not be" >&2
@@ -582,16 +589,25 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     # Status 2 has several distinct causes. Naming them all as possibilities is a
     # guess printed at the reader, not a diagnosis — tree_survivors records which
     # predicate actually failed, and that is what gets reported.
+    local diag_after=0 last=""
+    [ -f "$RUN/$name.diag" ] && diag_after="$(wc -l < "$RUN/$name.diag" | tr -d ' ')"
+    [ "$diag_after" -gt 0 ] && last="$(tail -1 "$RUN/$name.diag")"
     echo "$name: cannot determine whether every tracked process exited." >&2
-    if [ -s "$RUN/$name.diag" ]; then
-      echo "  reason: $(tail -1 "$RUN/$name.diag")" >&2
+    # Both conditions. The file must have grown during *this* call, and the record
+    # it grew by must be from the final stage. Either alone can be satisfied by a
+    # leftover from the wait loop.
+    if [ "$diag_after" -gt "$diag_before" ] && case "$last" in *"[final/"*) true ;; *) false ;; esac; then
+      echo "  reason: $last" >&2
       echo "  full record: $RUN/$name.diag" >&2
     else
       # tree_survivors runs inside a command substitution, so a failed write there
-      # cannot raise anything here. Its absence is the signal.
-      echo "  AND THE DIAGNOSTIC RECORD IS MISSING: $RUN/$name.diag is empty or" >&2
-      echo "  absent, so why this failed was not captured. See the DIAG lines on" >&2
-      echo "  stderr above if any were emitted." >&2
+      # cannot raise anything here. Its absence is the signal, and a stale record is
+      # not a substitute for a missing one.
+      echo "  AND THE DIAGNOSTIC FOR THIS FAILURE WAS NOT RECORDED." >&2
+      echo "  $RUN/$name.diag went from $diag_before to $diag_after line(s) and its" >&2
+      echo "  last entry is '${last:-<none>}'. Why this failed was not captured;" >&2
+      echo "  anything already in that file describes an earlier stage. See the DIAG" >&2
+      echo "  lines on stderr above if any were emitted." >&2
     fi
     echo "  State left for inspection." >&2
     return 1
