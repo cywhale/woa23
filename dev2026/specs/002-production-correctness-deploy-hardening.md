@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 4 | 2026-08-08 | The 240/236 "discrepancy" resolved, and it was **mine**: my digest script filtered on `metadata["Name"]`, silently dropping four distributions whose `METADATA` does not exist. Production has 240 dist-info directories and 240 distributions, no orphans. Two real findings surfaced instead — four abandoned install stubs and two double-installed packages — recorded in §4.1.2. The recorded digest is corrected. §4.2 added: provenance for C1 must prove, from inside each arm, that nothing resolves to production's `site-packages` or `src`, with `PYTHONDONTWRITEBYTECODE=1`. §4.1.7 added: the clone's file scope, exclusions and manifest acceptance. |
 | 3 | 2026-08-08 | Renamed the artefact **production package-tree clone** — "forensic clone" over-claimed. §4.1 now enumerates acceptance per component (site-packages, dist-info, `.pth`, native libraries, symlinks, bytecode, secrets) and states plainly that **full runtime byte-equivalence is not claimed**: the stdlib is outside the tree and the interpreter is not cloned. Survey of the real tree recorded, including a **`.pth` editable install pointing at production's own `src`**, which the clone must neutralise. C2's three starts reframed as observing *this run's* seed diversity, with `INSUFFICIENT` as an outcome rather than a reason to add starts. §6 given a concrete order-stability acceptance and its relationship to C2's verdict. PI decisions on C2 repetitions and the interpreter recorded. |
 | 2 | 2026-08-08 | **Settled per PI direction.** C1's environment is a read-only clone of production's package tree, not a rebuild — §4.1 and the open question it replaces. C2's worker count is read from the host, not assumed: production runs `-w 2`, and the first draft's `-w 4` was a guess. C2's unpinned seed is verified across repeated independent starts rather than one. Added §5, separating production-like gunicorn validation from formal PM2/nginx deployment validation — production is supervised by **PM2**, not systemd, which the first draft assumed. Added §6, the boundary between byte-exact, semantic and order-stability. |
 
@@ -22,8 +23,8 @@ S1 showed that removing Dask from the read path is byte-for-byte correct and fas
 **under one venv of 58 distributions with `PYTHONHASHSEED=0` on both arms**. That was
 the point of D2b: make the packages stop being a variable.
 
-Production is not that environment. It has **236 distributions** (digest
-`60236d7210c8c364`, Python 3.11.4), and the versions differ from S1's venv in ways
+Production is not that environment. It has **240 distributions** (digest `a796572708598804` over all 240;
+`60236d7210c8c364` was an earlier figure over 236 named entries — §4.1.2a), and the versions differ from S1's venv in ways
 that touch the read path directly:
 
 | package | S1's isolated venv | production |
@@ -37,7 +38,7 @@ that touch the read path directly:
 `fsspec` mediates zarr/xarray store access, `anyio` is starlette's async path, and
 `pyarrow`/`pandas` sit in the interchange the query pipeline uses. S1's data says
 nothing about them: **its whole validity rests on both arms having been identical
-apart from the Dask change**, and re-introducing 236 packages re-introduces the
+apart from the Dask change**, and re-introducing 240 packages re-introduces the
 variable S1 removed.
 
 S2 asks one question: **does the candidate still return exactly what the reference
@@ -115,13 +116,53 @@ py311          symlink -> /home/odbadmin/.pyenv/versions/3.11.4/envs/py311
 | component | observed | how the clone is accepted |
 |---|---|---|
 | **site-packages tree** | 33,567 files / 3,762 dirs / 1.7 GB | per-file SHA-256 against the source, and file and directory counts equal |
-| **`*.dist-info`** | **240** directories, while `importlib.metadata` reports **236** distributions | all 240 copied; **the discrepancy is reconciled and named before the run** — four directories that do not yield a distribution are either stale, malformed or dual-named, and which it is decides whether the clone is faithful or the source is untidy |
+| **`*.dist-info`** | **240** directories, **240** distributions, 235 distinct names — see §4.1.2a | all 240 copied verbatim, stubs and duplicates included. The clone reproduces production's untidiness rather than tidying it |
 | **`*.pth`** | 4: `easy-install.pth` (empty), `distutils-precedence.pth`, `basemap_data_hires-…-nspkg.pth`, **`__editable__.src-1.0.pth`** | see §4.1.4 — the editable one **must be neutralised** |
 | **native libraries** | 431 `*.so` | copied byte for byte, **never rebuilt**; digests compared like any other file |
 | **symlinks** | **0** in the tree today | the clone asserts zero symlinks. If any appear, the run stops: a symlink would leave the clone reading files it does not own |
 | **bytecode** | 1,385 `__pycache__` dirs, 12,130 `*.pyc` | copied **with mtimes preserved**. `.pyc` validity is an mtime-and-size check against its source, so a copy that loses mtimes silently invalidates 12,130 caches and changes what the first request does |
 | **build provenance** | 255 `RECORD`, 3 `direct_url.json` | copied; recorded, not interpreted |
 | **secrets** | see §4.1.5 | scanned by filename, contents never read |
+
+##### 4.1.2a The 240 dist-info directories, itemised
+
+Rev 1–3 recorded "236 distributions" and called the gap with 240 directories a
+discrepancy to be reconciled. **The gap was an artefact of my own script**, which
+filtered on `metadata["Name"]` being truthy and so dropped four entries silently.
+`importlib.metadata` reports **240 distributions from 240 directories, with no
+orphans**. The reconciliation found nothing wrong with production's bookkeeping in
+that respect — but it did surface two things that are worth recording.
+
+**Four abandoned install stubs.** Each contains **only an empty `REQUESTED` file** —
+no `METADATA`, no `RECORD` — which is what pip leaves behind when an install is
+started and then superseded or interrupted. Decisively, the package each stub names
+is present at a *different* version, with its own complete dist-info:
+
+| stub directory | version the stub claims | version actually importable |
+|---|---|---|
+| `pyproj-3.7.0.dist-info` | 3.7.0 | **3.6.1** |
+| `lxml-5.3.0.dist-info` | 5.3.0 | **6.0.2** |
+| `packaging-24.1.dist-info` | 24.1 | **25.0** |
+| `timescale-0.0.5.dist-info` | 0.0.5 | **0.1.0** |
+
+They contribute no code and change no import. They are copied because the clone is a
+copy; they are recorded because a reader counting directories will otherwise find the
+same puzzle.
+
+**Two packages installed twice.** Both resolve to the newer, and neither is on the
+read path, but a tree with two versions of a package is a fact about production worth
+stating:
+
+| package | dist-info present | resolves to |
+|---|---|---|
+| `h5py` | 3.12.1 and 3.9.0 | **3.12.1** |
+| `netCDF4` | 1.7.3 and 1.7.1.post2 | **1.7.3** |
+
+**Digest correction.** The value `60236d7210c8c364` quoted in rev 1–3 is over the
+**236 named** entries and therefore over an incomplete list. The digest of all **240**
+is `a796572708598804`. Both are recorded here so the earlier figure is traceable
+rather than merely replaced; the clone is verified against the 240-entry digest,
+computed with unnamed entries identified by their directory.
 
 ##### 4.1.3 What the clone does **not** establish
 
@@ -214,6 +255,75 @@ The 64 cases are unchanged from S1: **33 JSON-path and 31 CSV, which partition t
 set**; within them, 15 expect a non-200 status and 2 are the OpenAPI document and the
 Swagger page. 47 return row payloads. Request order is counterbalanced RC/CR and
 recorded per case.
+
+##### 4.1.7 File scope, exclusions and manifest
+
+**In scope** — everything under
+`…/versions/py311/lib/python3.11/site-packages`, recursively: package directories,
+`*.dist-info` (including the four stubs), `*.pth` except as excluded below, native
+`*.so`, data files, `__pycache__` and `*.pyc` with mtimes preserved.
+
+**Excluded, each for a stated reason:**
+
+| excluded | reason |
+|---|---|
+| `__editable__.src-1.0.pth` | redirects `src.*` to production's own source — §4.1.4 |
+| `__editable___src_1_0_finder.py` | the module that `.pth` invokes; excluding one without the other leaves a broken import |
+| nothing else | no blanket exclusions. Anything else omitted would have to be justified here, and nothing is |
+
+**Manifest acceptance.** The clone is accepted only if all of these hold:
+
+1. a manifest of `relative path → SHA-256 → size → mtime_ns` is written for the source
+   tree and recomputed for the clone, and the two are **identical except for the two
+   excluded paths**, which must be present in the source manifest and absent from the
+   clone's;
+2. file and directory counts match the source, less the exclusions;
+3. **zero symlinks** in the clone;
+4. the 240-entry distribution digest recomputed **from inside the clone** equals the
+   source's;
+5. the secrets audit (§4.1.5) re-run against the clone yields no match outside the
+   reviewed false-positive list;
+6. the clone is read-only when the manifest is taken, and stays read-only for the run.
+
+Any failure stops the run. The manifest is an artefact of the run and is archived with
+its results.
+
+### 4.2 Runtime provenance — proving what was actually loaded
+
+The clone's manifest proves what is *on disk*. It says nothing about what the running
+process *imported*, and those differ the moment a `.pth`, a `PYTHONPATH`, a stray
+`sys.path` entry or an inherited environment variable gets involved. C1 is only worth
+running if that gap is closed, and closing it is cheap.
+
+Collected **from inside each arm**, after startup and before the first contract case,
+and recorded in that arm's provenance:
+
+| recorded | must satisfy |
+|---|---|
+| `sys.executable` | the interpreter the run intends — production's binary if §4.1.6 is granted, otherwise the separately installed 3.11.4, and **which one is recorded, not assumed** |
+| `sys.prefix`, `sys.base_prefix` | consistent with that interpreter; a mismatch means an unexpected venv is active |
+| `sys.path`, in order | **every entry** lies within the clone, the arm's own staging directory, or the stdlib. **No entry under `/home/odbadmin/.pyenv/versions/py311/lib/python3.11/site-packages` and none under `/home/odbadmin/python/woa23`** |
+| `module.__file__` for a named set | resolves inside the clone (third-party) or the arm's staging directory (application) — never production |
+| `PYTHONDONTWRITEBYTECODE` | `1`. The run writes no bytecode: the clone stays byte-identical to its manifest, and no `.pyc` can be written anywhere else either |
+| `PYTHONPATH` | recorded verbatim; if set to anything outside the clone and staging, the run stops |
+| `PYTHONHASHSEED` | `0` for C1 — already required, recorded here alongside the rest |
+
+**The named set for `module.__file__`** is the read path and the serving stack, not a
+sample: `xarray`, `zarr`, `numpy`, `pandas`, `polars`, `pyarrow`, `fsspec`, `fastapi`,
+`starlette`, `uvicorn`, `gunicorn`, plus `dask` and `distributed` on the reference
+arm, plus the application module each arm serves — `src.*` for the reference,
+`api.*` for the candidate.
+
+`src` is the one that matters most. §4.1.4 excludes the editable `.pth` precisely so
+that `src` cannot resolve to `/home/odbadmin/python/woa23/src`; **this check is what
+proves the exclusion worked** rather than assuming it did. An arm whose `src.config`
+resolves under `/home/odbadmin/python/woa23` has invalidated the run, and the run
+stops there rather than producing a comparison of production against itself.
+
+`PYTHONDONTWRITEBYTECODE=1` is a safety control as much as a hygiene one: with the
+clone read-only, an attempted write would fail noisily, but the variable removes the
+attempt. It has no effect on which bytecode is *used* — the copied `.pyc` remain valid
+because their mtimes were preserved (§4.1.2).
 
 ### C2 — multiple workers, unpinned seed, semantic
 
@@ -437,10 +547,10 @@ history. What remains:
    interpreter is a different act and needs granting on its own. If it is not
    granted, the interpreter difference stands as a stated limitation and C1 still
    runs.
-3. **The 240 vs 236 discrepancy** in §4.1.2 — four `dist-info` directories that yield
-   no distribution. Whether that is stale state in production, a packaging quirk, or
-   something else is unknown, and it should be understood before the clone is called
-   faithful.
+3. **Production has four abandoned install stubs and two double-installed packages**
+   (§4.1.2a). Neither affects the read path and the clone reproduces both faithfully,
+   so nothing here blocks S2. They are production hygiene findings and belong to
+   whoever owns that environment — raised, not acted on.
 4. **What happens if C1 fails?** A byte difference under production's packages would
    mean one of those 236 packages changes the output. S2 would then have found
    something real, and the next step — bisecting the package set — is not in this
