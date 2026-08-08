@@ -194,3 +194,97 @@ Sketch only. To be broken into steps after phase 1. Evidence so far is in
 5. **Rewrite the zarr→PostGIS ingest.** `dev/zarr2postgis.ipynb` inserts row by row
    through four nested Python loops, building a Shapely polygon per cell.
 6. **GeoServer / GWC tile-cache review.**
+
+## D2b controlled run, 2026-08-08 — the first result that may be quoted
+
+**Commit `48ca10f`**, VM24, workdir `~/woa23-s1-controlled-r6`. Both gates PASS and
+cleanup confirmed itself. Three earlier attempts (r2, r3, r4) are recorded as FAIL
+and **none of their numbers are carried into this table** — they were produced by a
+harness whose cleanup could not verify itself, and two of them by one that let the
+benchmark introduce a difference of its own.
+
+### Contract gate — PASS, 64/64 byte-exact
+
+Variant 5.2A, all 64 verdicts `MATCH`, no `DIFFER`, no `ERROR`. Request order
+counterbalanced **RC 32 / CR 32**, recorded per case in the artefact.
+
+`C16` and `C16-csv` — the two multi-group cases that differed on 2026-08-08's first
+attempt — match byte for byte here. The candidate's ordering logic was never
+changed: `api/query.py` is `93b64fc0…`, the same blob as at `ee30084`. What changed
+is that the benchmark stopped introducing a difference: both arms now interpolate the
+identical store literal.
+
+### Latency gate — PASS, 8/8
+
+rung 21, 21 warm samples per arm (+1 discarded), ±5% practical-significance margin,
+bootstrap 5,000 rounds, seed 20260805. `ratio` is candidate ÷ reference, so lower is
+faster.
+
+| case | ratio (median) | 95% CI | ≈ speedup | verdict |
+|---|---|---|---|---|
+| `point_profile_multiparam` | 0.0651 | [0.0641, 0.0660] | ~15.36× | NO_REGRESSION · IMPROVED |
+| `point_profile` | 0.1045 | [0.1026, 0.1069] | ~9.57× | NO_REGRESSION · IMPROVED |
+| `point_profile_025` | 0.1162 | [0.1120, 0.1209] | ~8.61× | NO_REGRESSION · IMPROVED |
+| `readme_example` | 0.1524 | [0.1477, 0.1549] | ~6.56× | NO_REGRESSION · IMPROVED |
+| `small_bbox_full_depth` | 0.2115 | [0.2094, 0.2147] | ~4.73× | NO_REGRESSION · IMPROVED |
+| `regional_bbox` | 0.4357 | [0.4284, 0.4471] | ~2.30× | NO_REGRESSION · IMPROVED |
+| `regional_bbox_025` | 0.4931 | [0.4414, 0.5077] | ~2.03× | NO_REGRESSION · IMPROVED |
+| `surface_global` | 0.7795 | [0.7632, 0.7918] | ~1.28× | NO_REGRESSION · IMPROVED |
+
+Every case establishes **both** `NO_REGRESSION` and `IMPROVED`, and every interval
+lies wholly below 1.0.
+
+### What made this run controlled
+
+| variable | D2a (2026-08-07) | here |
+|---|---|---|
+| package environment | 23 shared distributions differed | **one venv**, `distributions_sha256 cca6aa8460ab175a` on both arms |
+| interpreter | production's, unverified | **Python 3.11.4**, 58 distributions, both arms |
+| hash seed | production's could not be pinned | **`PYTHONHASHSEED=0`** on both arms |
+| store path string | absolute vs `data/` | **`'data/'` on both**, canonical store `/home/odbadmin/python/woa23/data` on both |
+| comparison | semantic | **byte-exact 5.2A** |
+| request order | reference always first | **RC 32 / CR 32** |
+| boot | — | `7c674929…` on both arms |
+
+`post_run_drift: []`, `metadata_complete: true`, `metadata_problems: []`.
+
+### Traffic and isolation
+
+- **production `8050`: 0 requests.** The harness was invoked against
+  `http://127.0.0.1:8051` and `http://127.0.0.1:8052` only.
+- production's shared Dask scheduler on `8786` was never contacted; this run used an
+  isolated scheduler on `127.0.0.1:18787`.
+- 4 services / **6 OS processes**, verified against the authorised set before the
+  gates ran.
+- `~/python/woa23` was never written; the reference read the store through a
+  read-only symlink.
+
+### Cleanup — PASS
+
+All four services stopped, every process in every recorded tree confirmed exited,
+all three ports confirmed free, state files removed, and production on `8050`
+unchanged across the run — full listener set `[3960 4334 4366]`, master PID, start
+time and boot id all matching what was recorded at preflight.
+
+### What this result is, and what it is not
+
+It is an **8-case, warm-cache, loopback, single-worker controlled comparison** of the
+same code with and without Dask on the read path, at rung 21.
+
+It is **not**:
+
+- a public SLA or any statement about what users experience;
+- a cold-cache measurement — the 31.9 GiB store was resident in VM24's page cache,
+  and these ratios say nothing about a cold store;
+- a concurrency result — both arms ran `-w 1` and requests were issued one at a
+  time, so nothing here describes behaviour under load;
+- a measurement over TLS, nginx or the public path — it is plain HTTP on loopback;
+- generalisable beyond these eight queries.
+
+`surface_global` at ~1.28× is the smallest gain and the closest to the margin, which
+is expected: it is the largest query, so decompression and serialisation dominate and
+Dask's scheduling overhead is proportionally smallest. It is the case to re-examine
+first if the rung or the case set changes.
+
+Rung 60 and rung 150 were **not** run. `next_rung: 60` in the artefact is the
+ladder's suggestion, not an authorisation.
