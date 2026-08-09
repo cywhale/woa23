@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 16 | 2026-08-09 | **C2 executed and PASSED — `C2 PASS — isolated package-tree semantic correctness at production worker count, with observed sibling seed diversity`** — §7a.5b. Commit `5cfbf0aa`, archive verified against its digest before shipping, 78/78 files. Production's worker count **measured at run time in every cycle: actual = 2**, `--expected-workers 2` an assertion only, production's identity re-checked after each measurement; **8 processes per cycle**, derived. **Three independent cycles, 5.2B semantic, 64/64 each, all PASS**, under `both-unpinned` with `PYTHONHASHSEED` unset on both arms. **Seed diversity OBSERVED** — three distinct digests, no precondition problems; the `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` branch was not taken. **Nine clone-integrity verifications, 9/9 MATCH**; **cleanup PASS in all three cycles** with zero blocking state left; **8050/8786/8787 zero requests and never connected**; 402–576 requests total against ceilings of 288 per arm and 576 overall; per-cycle evidence isolated and complete. **Separate finding:** `C16` and `C16-csv` — and only those two of sixty-four — varied their row order across cycles on both arms while remaining semantically equivalent; **effect directly observed, source-level mechanism strongly supported**, not proven step by step in the running process. Limitations retained unchanged: `-S` ran no `site.py` or `.pth`, no worker-level import provenance, seed diversity is **sibling / launch-environment level and not worker level**, the launcher is not PM2, and **D1, formal deployment validation and all performance validation remain open**. |
 | 15 | 2026-08-09 | **C1 executed and PASSED — `C1 PASS — isolated package-tree contract correctness`** — §7a.5a. Commit `c1166bfa`, archive verified against its authorised digest before shipping, 75/75 files. **5.2A byte-exact, 64/64 MATCH, 0 DIFFER, RC/CR 32/32**, 24,440,431 bytes per arm, **15 error-status cases byte-exact as well**. Both arms on production's interpreter with `PYTHONHASHSEED=0` and `'data/'`; `clone_manifest_sha256` `f3b66c49…`, `package_tree_digest` `b8754d32…`, `runtime_distribution_digest` `a26ca6c3…`, with `60236d72…` recorded only as the deprecated `name_version_set_sha256`. Clone integrity **three MATCHes**; import isolation clean with 0 production-mapped files; **cleanup PASS**; **production 8050 = 0 requests**; 67–96 requests per arm, 134–192 total. C16 and C16-csv, the two cases that differed under D2b, now match with identical row-order digests. Limitations retained in full and unchanged: `-S` did not run `site.py` or any `.pth`, the launcher is not PM2, there is **no worker-level import provenance**, `/home/odbadmin` remains writable so the manifest checks are **bounded detection and not immutability**, **D1 is not fixed**, **C2 has not run**, and **no latency, throughput or deployment-readiness conclusion exists**. |
 | 14 | 2026-08-09 | **The third C1 attempt is `INVALID_PRE_START`** — §7a.3h. It failed earlier than either predecessor: nothing was started, no port bound, no workdir created, zero requests of every kind. `ModuleNotFoundError: bench.dist_digests` — the module existed and its tests passed **in the working tree**, but `.gitignore`'s `**/dist_*` matched it, `git add -A` skipped it silently, `git status` did not list it, and the commit shipped without it. The per-file sync verified 72 of 72 files correctly; the commit was what was incomplete. Module renamed **`bench/package_digests.py`**, and `scripts/test_tracked.sh` added: every harness source must be tracked and unignored, every `bench.*` module imported anywhere must exist and be tracked, no harness module may be named `dist_*`, and **the committed tree is exported and checked to contain every imported module** — the check that would have failed before the run rather than during it. |
 | 13 | 2026-08-09 | **`60236d72…` identified: it is the superseded rev 1–5 digest, recomputed live** — §7a.3f. `dependencies()` hashes a sorted `Name==Version` set, which is that canonicalization, so the field named `distributions_sha256` was silently reproducing the digest revision 6 replaced. Renamed **`name_version_set_sha256`**, kept because it is the only one of the three an arm's own interpreter can compute, and every record now carries `clone_manifest_sha256` `f3b66c49…`, `package_tree_digest` `b8754d32…`, `runtime_distribution_digest` `a26ca6c3…` and the name-keyed digest **each beside its canonicalization**; the S2 field and digest lists check all three clone digests, not one. New `bench/package_digests.py`. **§7a.3g: the offline S2 integration test** — real artefacts, materialised source trees with recomputed digests so `validate_meta` re-hashes for real and **nothing is filtered**, `compare_arms(s2=True)` at zero problems, and the 64 cases served over loopback through the gate **invoked with the argument list read out of the runner**, reaching PASS 64/64 and FAIL naming the one altered case. |
@@ -1427,6 +1428,166 @@ Each of these is a limitation of the run, not a hedge about it.
   unexamined.
 - **No latency, throughput or resource conclusion of any kind.** None was measured;
   the latency gate and the noise pilot did not run.
+
+### 7a.5b C2, executed 2026-08-09
+
+
+**Result: C2 PASS — isolated package-tree semantic correctness at production worker
+count, with observed sibling seed diversity.**
+
+The name is the result. §"What this is not" is part of it, not a caveat appended
+to it.
+
+| | |
+|---|---|
+| commit | **`5cfbf0aa70883af28ffd2e03ce21b4497ac30891`** |
+| archive verified before shipping | `3f642dd0…ace0ba`, 78 files, file-list `3be3d046…7fe5c909` |
+| staging | `~/woa23-s2-c2c/`, workdirs `~/woa23-s2-c2c-work-cycle{1,2,3}`, all new |
+| cycles | **three independent start/stop cycles** |
+| gate | **5.2B semantic**, 64 cases per arm per cycle |
+| seed policy | **`both-unpinned`** — `PYTHONHASHSEED` **unset on both arms**, stated explicitly rather than inherited from the variant |
+| verdict | **PASS (exit 0)** |
+
+#### Production's worker count, measured not assumed
+
+Read from production's own argv at run time in **every** cycle: **actual = 2**.
+`--expected-workers 2` was an assertion only; the arms take the measured number and
+a disagreement would have aborted before any arm started. Each cycle also re-read
+production's listener set, master PID, start time and boot id after the measurement
+and confirmed them unchanged.
+
+Process count is derived from that measurement — `2 Dask + 2 × (1 arbiter + 2
+workers)` = **8 per cycle**, verified against the tracked trees:
+
+| cycle | the eight processes |
+|---|---|
+| 1 | 3631498 3631556 3631617 3631619 3631639 3631715 3631717 3631718 |
+| 2 | 3633166 3633229 3633282 3633284 3633285 3633387 3633389 3633390 |
+| 3 | 3634816 3634879 3634934 3634936 3634956 3635039 3635041 3635042 |
+
+#### 1. Contract — 5.2B semantic, three of three
+
+| | |
+|---|---|
+| gate | **PASS** |
+| per cycle | `PASS`, `PASS`, `PASS` |
+| cases | **64/64 per cycle** |
+| problems | none |
+
+#### 2. Seed diversity — `OBSERVED`
+
+| cycle | candidate seed digest | reference seed digest | `PYTHONHASHSEED` | `hash_randomization` |
+|---|---|---|---|---|
+| 1 | `d327c5f70cf4c105…` | `93eda1b784141c14…` | unset | 1 |
+| 2 | `a529e1a76865da1b…` | `14f58361cfd4d38a…` | unset | 1 |
+| 3 | `9bccce43aaec4040…` | `e253f07863f7e86d…` | unset | 1 |
+
+**3 distinct digests across 3 cycles**, with no precondition problems — the seed was
+genuinely unset, hash randomisation was genuinely on, and the fixed 11-string probe
+was complete in every cycle. The `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` branch was
+**not** taken.
+
+Measured per cycle by hashing a fixed eleven-string tuple with the same binary, the
+same `-S`, `PYTHONPATH`, cwd and environment each arm was launched with.
+
+**This is sibling / launch-environment seed diversity.** The interpreter measured is
+a sibling launched by the same procedure — **not** the gunicorn master and not any
+worker that served a request.
+
+#### 3. Order stability — recorded, deliberately outside the verdict
+
+| | |
+|---|---|
+| cases | 64 |
+| comparable (case, arm) pairs across cycles | 94 |
+| **varied** | **4** |
+| responses with no row structure | 102 (counted, not called stable) |
+
+The four are `C16/candidate`, `C16/reference`, `C16-csv/candidate`,
+`C16-csv/reference` — and they are a separate finding, below.
+
+#### Traffic, cleanup and host state
+
+- **Requests:** 64 contract + 2 data probe + 1–30 readiness per arm per cycle =
+  **67–96 per arm per cycle**, **201–288 per arm** and **402–576 total** across three
+  cycles. Ceilings were 288 and 576.
+- **Production 8050, 8786, 8787: 0 requests, never connected to.** 8050 was read from
+  `/proc` and `ss` only.
+- **Clone integrity: nine full verifications, 9/9 MATCH** — three per cycle
+  (preflight, before reference, before candidate), 33,565 entries against 33,565
+  files, 1,690,025,002 bytes each time.
+- **Cleanup: PASS in all three cycles.** Every service stopped, every process in every
+  recorded tree exited, 18091/18092/18819 confirmed free each time, production
+  unchanged (master 3960, start time 1874, listeners 3960/4334/4366). **Zero blocking
+  state files across the whole `run/` tree afterwards.**
+- **Per-cycle evidence is isolated and complete:** 10 result artefacts and 4 service
+  logs under each of `c2_cycle1`, `c2_cycle2`, `c2_cycle3`; no cycle overwrote
+  another.
+- **Afterwards:** clone 555/555, manifest digest unchanged, 33,565 files, **0
+  writable, 0 new `.pyc`**; production site-packages 33,567 files at mtime
+  2026-02-12; `~/python/woa23` at mtime 2026-08-05.
+
+#### Finding — C16 and C16-csv: row order varies across cycles, semantics hold
+
+Across the three unpinned cycles, **exactly two of the sixty-four cases changed their
+row order between cycles, on both arms**: `C16` and `C16-csv`. The other 90
+comparable (case, arm) pairs were stable.
+
+**Effect directly observed; source-level mechanism strongly supported.**
+
+What was observed at runtime: the row-order fingerprints of those two cases, and only
+those two, differ between cycles on both arms, under an unpinned hash seed, while the
+5.2B semantic comparison passed for them in every cycle.
+
+What is strongly supported but **not** established step by step at runtime: that this
+arises because `zarr_group_paths` is a `set` of path strings whose iteration order
+depends on the process's hash seed, so a query spanning more than one Zarr group
+concatenates its groups in a per-process order. The supporting evidence is that C16
+and C16-csv are precisely the two cases in the suite that span more than one group,
+that the same two cases were the only ones to differ in the 2026-08-08 D2b run when
+the arms were given different store strings, and that `bench/repro_c16.py`
+demonstrates the mechanism offline on synthetic rows. **No runtime instrumentation
+observed the set iteration inside a worker**, and none was authorised; the internal
+causal chain is inferred from the shape of the effect and from offline reproduction,
+not proven in the running process.
+
+**It is not a defect against this gate.** 5.2B compares the row multiset and the
+column set; row order is not part of the criterion, and under an unpinned seed a
+per-process ordering is the expected consequence of the arrangement C2 exists to
+observe. It matters because **any consumer that depends on row order would see it**,
+and because a byte-exact comparison of these two cases across unpinned processes
+would fail for a reason that is not a correctness defect. Whether the candidate
+should impose a deterministic order is a separate question and a separate decision.
+
+#### What this result is
+
+The candidate and the unmodified reference return **semantically equivalent
+responses across all 64 contract cases, in each of three independent start/stop
+cycles**, when both run on production's interpreter and a read-only copy of
+production's package tree, **at production's measured worker count of two**, with no
+pinned hash seed — and three independent starts were observed to choose different
+hash seeds.
+
+#### What this result is **not**
+
+- **Not deployment validated, and not ready to deploy.**
+- **No latency, throughput or resource conclusion of any kind.** None was measured;
+  the latency gate, the noise pilot and every rung above 21 did not run.
+- **`-S` means `site.py` never ran** in any cycle, so no `.pth` in the clone was
+  processed. Production's site/`.pth` startup semantics were not exercised.
+- **The launcher is not production's PM2 path.**
+- **No worker-level Python import provenance exists.** The interpreter probe is a
+  sibling process; `/proc/<pid>/maps` can refute isolation but its silence proves
+  nothing, because it lists mapped files and not imports.
+- **The seed diversity is sibling / launch-environment level, not worker level.** It
+  says three starts of that launch procedure chose different seeds. It does not
+  measure the seed of any gunicorn master or worker that served a request.
+- **D1 is still open.** A missing `WOA23_ZARR_STORE` fails at import and startup; an
+  invalid or non-Zarr store still starts cleanly and fails on the first data request.
+  No candidate change is proposed or made.
+- **Formal deployment validation is still open** — PM2, site/`.pth` semantics,
+  readiness, nginx and TLS.
+- **Performance validation is still open** in its entirety for S2.
 
 ### 7a.4 C2: three cycles, and the three statements they support
 
