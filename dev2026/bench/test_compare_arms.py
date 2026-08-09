@@ -221,6 +221,53 @@ check("and are rejected under both-unpinned", True,
       bool(offhost(compare_arms(*load(), s2=True, seed_policy="both-unpinned"))))
 
 print()
+print("the full policy x arm-shape matrix, on real records throughout")
+# Three real shapes, none invented:
+#   pinned/pinned      the C1 run                     -> both-pinned
+#   pinned/unpinned    5.2B's arrangement, assembled from C1's candidate and C2's
+#                      reference (a pinned candidate against an unpinned reference,
+#                      which is what live production is)
+#   unpinned/unpinned  the C2 cycle                   -> both-unpinned
+c1c, c1r, c1e = load()
+SHAPES = {
+    "pinned/pinned":     (c1c, c1r, c1e),
+    "pinned/unpinned":   (c1c, c2r, c1e),
+    "unpinned/unpinned": (c2c, c2r, c2e),
+}
+# accepted[policy][shape]: does the seed rule let it through?
+EXPECTED = {
+    "both-pinned":        {"pinned/pinned": True,  "pinned/unpinned": False, "unpinned/unpinned": False},
+    "reference-unpinned": {"pinned/pinned": True,  "pinned/unpinned": True,  "unpinned/unpinned": False},
+    "both-unpinned":      {"pinned/pinned": False, "pinned/unpinned": False, "unpinned/unpinned": True},
+}
+for policy, row in EXPECTED.items():
+    for shape, want_ok in row.items():
+        cand, ref, env = SHAPES[shape]
+        probs = [p for p in offhost(compare_arms(cand, ref, env, s2=True,
+                                                 seed_policy=policy))
+                 if "PYTHONHASHSEED" in p]
+        check(f"{policy:18s} x {shape:18s} -> {'accept' if want_ok else 'reject'}",
+              want_ok, not probs)
+
+# The two ways C2 could be waved through without anyone deciding to.
+check("no policy lets an unpinned CANDIDATE through as 'any'", True,
+      all(reqs["candidate"] != "any" for reqs in SEED_POLICIES.values()))
+check("only the reference is ever 'any', and only under reference-unpinned",
+      {"reference-unpinned"},
+      {name for name, reqs in SEED_POLICIES.items() if "any" in reqs.values()})
+check("the 5.2B variant default alone does NOT accept the C2 shape", False,
+      not [p for p in offhost(compare_arms(c2c, c2r, c2e, s2=True,
+                                           seed_policy="reference-unpinned"))
+           if "PYTHONHASHSEED" in p])
+runner_src = (Path(__file__).resolve().parent.parent / "scripts" / "run_controlled.sh").read_text()
+check("the runner states both-unpinned for C2 rather than inheriting a default", True,
+      "SEED_POLICY=both-unpinned" in runner_src)
+check("and passes it to the gate explicitly", True,
+      '--seed-policy "$SEED_POLICY"' in runner_src)
+check("C1 and D2b state both-pinned rather than relying on the variant", True,
+      "SEED_POLICY=both-pinned" in runner_src)
+
+print()
 print("the three policies are distinct and fail closed")
 check("there are exactly three", 3, len(SEED_POLICIES))
 check("both-pinned pins both", ("pinned", "pinned"),

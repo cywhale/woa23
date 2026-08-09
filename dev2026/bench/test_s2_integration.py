@@ -367,6 +367,36 @@ with tempfile.TemporaryDirectory() as td:
     check("a real difference still fails under 5.2B", 1, r.returncode)
     check("and is reported", "FAIL", payload["gate"])
 
+    # 5.2B's own arrangement, through the real gate, so the fix to C2 cannot have
+    # regressed it. The shape is assembled from real records: C1's pinned candidate
+    # against C2's unpinned reference, which is what a live-production reference
+    # looks like.
+    c1c_5b = json.loads(cand_path.read_text())          # pinned candidate
+    live_path = root / "results" / "live_meta_reference.json"
+    live_path.write_text(json.dumps(c2r))               # unpinned reference
+    csrv, curl = make_server("candidate", None)
+    rsrv, rurl = make_server("reference", None)
+    try:
+        subst = {'"http://127.0.0.1:${CAND_PORT}"': curl,
+                 '"http://127.0.0.1:${REF_PORT}"': rurl,
+                 '"$VARIANT"': "5.2B",
+                 '"$SEED_POLICY"': "reference-unpinned",
+                 '"results/${LABEL}_meta_candidate.json"': str(cand_path),
+                 '"results/${LABEL}_meta_reference.json"': str(live_path),
+                 '"results/${LABEL}_contract.json"': str(root / "results" / "live.json")}
+        argv = [subst.get(a, a) for a in argv_template]
+        argv = [sys.executable] + argv[3:]
+        r5b = subprocess.run(argv, cwd=str(HERE), capture_output=True, text=True)
+    finally:
+        csrv.shutdown(); rsrv.shutdown()
+    live = json.loads((root / "results" / "live.json").read_text())
+    check("5.2B against an unpinned reference still passes — no regression", 0,
+          r5b.returncode)
+    check("with its own policy recorded", "reference-unpinned", live["seed_policy"])
+    check("over 64 cases", 64, len(live["results"]))
+    check("and the pinned candidate was still required", True,
+          "PYTHONHASHSEED" not in (r5b.stdout + r5b.stderr))
+
     print()
     print("the two layers guard different things, in the runner's order")
     # A disagreeing name==version set between the arms is NOT contract_diff's job.
