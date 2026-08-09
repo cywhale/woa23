@@ -241,6 +241,7 @@ with tempfile.TemporaryDirectory() as td:
                 '"http://127.0.0.1:${CAND_PORT}"': curl,
                 '"http://127.0.0.1:${REF_PORT}"': rurl,
                 '"$VARIANT"': "5.2A",
+                '"$SEED_POLICY"': "both-pinned",
                 '"results/${LABEL}_meta_candidate.json"': str(cand_path),
                 '"results/${LABEL}_meta_reference.json"': str(ref_path),
                 '"results/${LABEL}_contract.json"': str(root / "results" / out_name),
@@ -289,6 +290,84 @@ with tempfile.TemporaryDirectory() as td:
                     if x["verdict"] == "DIFFER")))
 
     print()
+    print("C2: the same gate, over unpinned arms, with the 5.2B policy")
+    # The C1 path above is not enough on its own. Every fixture in it is pinned, so
+    # the seed rule is never exercised in the arrangement C2 actually uses — both
+    # arms ours, both unset — which is precisely how a pinned-only rule reached a
+    # real C2 cycle and stopped it before the contract.
+    c2c = json.loads((FIX / "c2_cycle1_meta_candidate.json").read_text())
+    c2r = json.loads((FIX / "c2_cycle1_meta_reference.json").read_text())
+    c2e = json.loads((FIX / "c2_cycle1_environment.json").read_text())
+    for meta, base in ((c2c, root / "candidate"), (c2r, root / "reference")):
+        meta["cwd"] = str(base)
+        meta["source_sha256"] = {
+            str(p2.relative_to(base)): hashlib.sha256(p2.read_bytes()).hexdigest()
+            for p2 in sorted(base.rglob("*.py"))}
+    check("compare_arms accepts the unpinned arms under both-unpinned", [],
+          compare_arms(c2c, c2r, c2e, s2=True, seed_policy="both-unpinned"))
+
+    c2c_path = root / "results" / "c2_meta_candidate.json"
+    c2r_path = root / "results" / "c2_meta_reference.json"
+    c2c_path.write_text(json.dumps(c2c)); c2r_path.write_text(json.dumps(c2r))
+
+    def run_c2_gate(policy, out_name, differ_on=None):
+        csrv, curl = make_server("candidate", differ_on)
+        rsrv, rurl = make_server("reference", differ_on)
+        try:
+            subst = {'"http://127.0.0.1:${CAND_PORT}"': curl,
+                     '"http://127.0.0.1:${REF_PORT}"': rurl,
+                     '"$VARIANT"': "5.2B",
+                     '"$SEED_POLICY"': policy,
+                     '"results/${LABEL}_meta_candidate.json"': str(c2c_path),
+                     '"results/${LABEL}_meta_reference.json"': str(c2r_path),
+                     '"results/${LABEL}_contract.json"': str(root / "results" / out_name)}
+            argv = [subst.get(a, a) for a in argv_template]
+            argv = [sys.executable] + argv[3:]
+            r = subprocess.run(argv, cwd=str(HERE), capture_output=True, text=True)
+            out = root / "results" / out_name
+            return r, (json.loads(out.read_text()) if out.exists() else None)
+        finally:
+            csrv.shutdown(); rsrv.shutdown()
+
+    check("the runner passes a seed policy to the gate", True,
+          '"$SEED_POLICY"' in argv_template)
+
+    r, payload = run_c2_gate("both-unpinned", "c2_contract.json")
+    check("the 5.2B gate runs with unpinned arms", 0, r.returncode)
+    check("and passes", "PASS", payload["gate"])
+    check("over 64 cases", 64, len(payload["results"]))
+    check("all semantic MATCH", 64,
+          sum(1 for x in payload["results"] if x["verdict"] == "MATCH"))
+    check("the variant is 5.2B", "5.2B", payload["variant"])
+    check("and the policy is recorded in the artefact", "both-unpinned",
+          payload["seed_policy"])
+    # Every 200 that is a row payload carries a row-order digest; the OpenAPI
+    # document is a 200 with no rows and correctly carries none. Asserting "every
+    # 200" would have been asserting a fabricated ordering into existence.
+    rowed = [x for x in payload["results"]
+             if x["reference_status"] == 200 and x["candidate_order"]["n_rows"] is not None]
+    orderless = [x for x in payload["results"]
+                 if x["reference_status"] == 200 and x["candidate_order"]["n_rows"] is None]
+    check("every row-bearing 200 has a row-order digest", True,
+          bool(rowed) and all(x["candidate_order"]["row_order_sha256"] is not None
+                              for x in rowed))
+    check("and the non-row 200s have none, rather than a fabricated one", True,
+          all(x["candidate_order"]["row_order_sha256"] is None for x in orderless))
+    check("both kinds are present, so neither branch is untested", True,
+          bool(rowed) and bool(orderless))
+
+    # The failure that actually happened, reproduced through the real gate.
+    r, payload = run_c2_gate("both-pinned", "c2_contract_wrongpolicy.json")
+    check("under both-pinned the same run is refused", True, r.returncode != 0)
+    check("naming PYTHONHASHSEED", True, "PYTHONHASHSEED" in (r.stdout + r.stderr))
+    check("and no contract artefact is produced", None, payload)
+
+    r, payload = run_c2_gate("both-unpinned", "c2_contract_differ.json",
+                             differ_on=victim_id)
+    check("a real difference still fails under 5.2B", 1, r.returncode)
+    check("and is reported", "FAIL", payload["gate"])
+
+    print()
     print("the two layers guard different things, in the runner's order")
     # A disagreeing name==version set between the arms is NOT contract_diff's job.
     # compare_arms catches it, and the runner runs compare_arms first — so the gate
@@ -321,6 +400,7 @@ with tempfile.TemporaryDirectory() as td:
         subst = {'"http://127.0.0.1:${CAND_PORT}"': curl,
                  '"http://127.0.0.1:${REF_PORT}"': rurl,
                  '"$VARIANT"': "5.2A",
+                 '"$SEED_POLICY"': "both-pinned",
                  '"results/${LABEL}_meta_candidate.json"': str(div_path),
                  '"results/${LABEL}_meta_reference.json"': str(ref_path),
                  '"results/${LABEL}_contract.json"': str(root / "results" / "x.json")}

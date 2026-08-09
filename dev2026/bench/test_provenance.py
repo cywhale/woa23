@@ -1182,10 +1182,10 @@ def test_hash_seed_requirement_is_per_arm() -> None:
         check("an unpinned seed fails when the caller requires one",
               has(validate_meta(m, "reference"), "PYTHONHASHSEED"))
         check("an unpinned seed passes when the caller waives it",
-              not has(validate_meta(m, "reference", require_pinned_seed=False),
+              not has(validate_meta(m, "reference", seed_requirement="any"),
                       "PYTHONHASHSEED"))
         check("waiving the seed does not waive anything else",
-              validate_meta({"env": {}}, "reference", require_pinned_seed=False) != [])
+              validate_meta({"env": {}}, "reference", seed_requirement="any") != [])
 
 
 def test_hash_seed() -> None:

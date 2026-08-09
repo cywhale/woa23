@@ -1381,7 +1381,12 @@ s2_mode = os.environ["S2_MODE"]
 cand = json.load(open(f"results/{label}_meta_candidate.json"))
 ref = json.load(open(f"results/{label}_meta_reference.json"))
 env = json.load(open(f"results/{label}_environment.json"))
-problems = compare_arms(cand, ref, env, s2=(s2_mode != "none"))
+# C2 is the only mode whose arms are deliberately unpinned, and it requires the
+# seed to be ABSENT rather than merely tolerating it: a cycle that ran pinned
+# observed nothing about the thing C2 exists to observe.
+seed_policy = "both-unpinned" if s2_mode == "c2" else "both-pinned"
+problems = compare_arms(cand, ref, env, s2=(s2_mode != "none"),
+                        seed_policy=seed_policy)
 if problems:
     print("arms are not comparable:", file=sys.stderr)
     for p in problems:
@@ -1412,12 +1417,20 @@ fi
 # multiset and the column set instead, and order is recorded separately below rather
 # than folded into the verdict.
 VARIANT=5.2A
-[ "$S2_MODE" = c2 ] && VARIANT=5.2B
+SEED_POLICY=both-pinned
+if [ "$S2_MODE" = c2 ]; then
+  VARIANT=5.2B
+  # Not the 5.2B default. That default is "pinned candidate against live
+  # production"; C2's arms are both ours and both unpinned, so the requirement is
+  # stated rather than inferred from the variant.
+  SEED_POLICY=both-unpinned
+fi
 echo "== contract gate, variant $VARIANT ($([ "$VARIANT" = 5.2A ] && echo byte-exact \
      || echo semantic)), 64 cases per arm =="
 uv run python -m bench.contract_diff \
   --candidate "http://127.0.0.1:${CAND_PORT}" \
   --reference "http://127.0.0.1:${REF_PORT}" --variant "$VARIANT" \
+  --seed-policy "$SEED_POLICY" \
   --candidate-meta "results/${LABEL}_meta_candidate.json" \
   --reference-meta "results/${LABEL}_meta_reference.json" \
   --out "results/${LABEL}_contract.json" \

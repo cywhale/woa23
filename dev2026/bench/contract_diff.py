@@ -38,7 +38,7 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bench.contract_cases import Case, all_cases  # noqa: E402
 from bench.provenance import (  # noqa: E402
-    load_meta, validate_meta, validate_store_agreement,
+    load_meta, seed_requirement_for, validate_meta, validate_store_agreement,
     verify_group_path_agreement)
 
 INDEX = ("lon", "lat", "depth", "time_period")
@@ -218,8 +218,24 @@ def main() -> int:
                     help="skip TLS verification — needed under 5.2B, where the "
                          "reference is production's TLS listener on loopback and its "
                          "certificate names the public host")
+    ap.add_argument("--seed-policy", default=None,
+                    choices=("both-pinned", "reference-unpinned", "both-unpinned"),
+                    help="which arms must have a pinned PYTHONHASHSEED. Defaults to "
+                         "both-pinned under 5.2A and reference-unpinned under 5.2B — "
+                         "the latter being 5.2B's original arrangement, a pinned "
+                         "candidate against live production. C2 is neither: both "
+                         "arms are ours and both are deliberately unpinned, which "
+                         "needs both-unpinned stated explicitly.")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
+
+    # Explicit when given; otherwise the variant's historical default. That default
+    # is kept so 5.2A and the original 5.2B behave as they did — but it is only a
+    # default: C2 is a third arrangement (both arms ours, both unpinned) that neither
+    # covers, and it must state `both-unpinned` rather than inherit either.
+    policy = args.seed_policy or (
+        "reference-unpinned" if args.variant == "5.2B" else "both-pinned")
+    print(f"seed policy: {policy}")
 
     # Provenance first, before any request: the same rule the latency gate follows.
     problems = []
@@ -230,11 +246,11 @@ def main() -> int:
         # let it be None under 5.2B, which meant a carried-over contract result had
         # nothing recorded about the backend it was compared against — so a later
         # run could not tell whether that backend had since changed.
-        pinned = not (args.variant == "5.2B" and label == "reference")
+        req = seed_requirement_for(policy, label)
         meta, errs = load_meta(path, label)
         metas[label] = meta
         problems.extend(
-            errs if errs else validate_meta(meta, label, require_pinned_seed=pinned))
+            errs if errs else validate_meta(meta, label, seed_requirement=req))
     # Both arms must be reading the same store, and — under 5.2A — building their
     # zarr_group_paths from the same string. These live here, in the gate, and not
     # only in the runner: the gate is what publishes a MATCH, so it is the gate that
@@ -325,6 +341,7 @@ def main() -> int:
         "kind": "contract_diff",
         "gate": gate,
         "variant": args.variant,
+        "seed_policy": policy,
         "candidate_url": args.candidate,
         "reference_url": args.reference,
         "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),

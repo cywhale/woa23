@@ -25,8 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bench.provenance import (  # noqa: E402
-    ARM_MATCH_DIGESTS, S2_ARM_MATCH_DIGESTS, compare_arms,
-    verify_environment_match,
+    ARM_MATCH_DIGESTS, S2_ARM_MATCH_DIGESTS, SEED_POLICIES, compare_arms,
+    seed_requirement_for, verify_environment_match,
 )
 
 PASS = 0
@@ -169,6 +169,74 @@ check("and S2 also compares both dist-info-keyed digests", True,
           {f for f, _ in S2_ARM_MATCH_DIGESTS}))
 check("the default is unchanged for D2b callers", ARM_MATCH_DIGESTS,
       verify_environment_match.__defaults__[0])
+
+print()
+print("C2: both arms ours, both deliberately unpinned — a third seed arrangement")
+# The fixtures are the real c2_cycle1 records from VM24, where both arms ran with
+# PYTHONHASHSEED unset and two workers each. The C1 fixtures are pinned, so nothing
+# built on them could have caught this: the gate applied the pinned rule to a run
+# whose entire purpose is to be unpinned, and stopped cycle 1 before the contract.
+def load_c2():
+    return (json.loads((FIX / "c2_cycle1_meta_candidate.json").read_text()),
+            json.loads((FIX / "c2_cycle1_meta_reference.json").read_text()),
+            json.loads((FIX / "c2_cycle1_environment.json").read_text()))
+
+c2c, c2r, c2e = load_c2()
+check("both arms really are unpinned in the fixture",
+      ("<unset — randomised>", "<unset — randomised>"),
+      (c2c["env"]["PYTHONHASHSEED"], c2r["env"]["PYTHONHASHSEED"]))
+check("and each ran production's two workers", (2, 2),
+      (len(c2c["worker_pids"]), len(c2r["worker_pids"])))
+
+check("the both-unpinned policy accepts them", [],
+      offhost(compare_arms(c2c, c2r, c2e, s2=True, seed_policy="both-unpinned")))
+# What actually happened on 2026-08-09.
+under_pinned = offhost(compare_arms(c2c, c2r, c2e, s2=True, seed_policy="both-pinned"))
+check("the both-pinned policy rejects them — the bug that stopped cycle 1", True,
+      any("PYTHONHASHSEED" in p for p in under_pinned))
+check("and it rejects BOTH arms, as it did", 2,
+      len([p for p in under_pinned if "PYTHONHASHSEED" in p]))
+# 5.2B's own default is not right either: it was written for a pinned candidate
+# against live production.
+under_5_2b = offhost(compare_arms(c2c, c2r, c2e, s2=True,
+                                  seed_policy="reference-unpinned"))
+check("5.2B's historical default also rejects them", True,
+      any("PYTHONHASHSEED" in p for p in under_5_2b))
+check("because it still requires the candidate to be pinned", 1,
+      len([p for p in under_5_2b if "PYTHONHASHSEED" in p]))
+
+# Inverted, and that inversion is the point: a C2 cycle that ran pinned observed
+# nothing about unpinned behaviour and must not be counted as if it had.
+pinned_c2 = copy.deepcopy(c2c)
+pinned_c2["env"]["PYTHONHASHSEED"] = "0"
+probs = offhost(compare_arms(pinned_c2, c2r, c2e, s2=True, seed_policy="both-unpinned"))
+check("a pinned arm in a C2 cycle is rejected", True,
+      any("requires it to be unset" in p for p in probs))
+check("and says why it is not merely tolerated", True,
+      any("observes nothing about unpinned" in p for p in probs))
+
+check("the C1 fixtures still pass under both-pinned", [],
+      offhost(compare_arms(*load(), s2=True, seed_policy="both-pinned")))
+check("and are rejected under both-unpinned", True,
+      bool(offhost(compare_arms(*load(), s2=True, seed_policy="both-unpinned"))))
+
+print()
+print("the three policies are distinct and fail closed")
+check("there are exactly three", 3, len(SEED_POLICIES))
+check("both-pinned pins both", ("pinned", "pinned"),
+      (seed_requirement_for("both-pinned", "candidate"),
+       seed_requirement_for("both-pinned", "reference")))
+check("reference-unpinned pins only the candidate", ("pinned", "any"),
+      (seed_requirement_for("reference-unpinned", "candidate"),
+       seed_requirement_for("reference-unpinned", "reference")))
+check("both-unpinned requires both to be unset", ("unpinned", "unpinned"),
+      (seed_requirement_for("both-unpinned", "candidate"),
+       seed_requirement_for("both-unpinned", "reference")))
+try:
+    seed_requirement_for("whatever", "candidate")
+    check("an unknown policy raises", True, False)
+except ValueError as exc:
+    check("an unknown policy raises rather than defaulting", True, "unknown seed policy" in str(exc))
 
 print()
 if FAIL:

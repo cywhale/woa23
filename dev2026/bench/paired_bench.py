@@ -285,7 +285,8 @@ def main() -> int:
         # required to be pinned.
         pinned = not (args.gate_variant == "5.2B" and label == "reference")
         meta_problems.extend(
-            errs if errs else validate_meta(meta, label, require_pinned_seed=pinned))
+            errs if errs else validate_meta(
+                meta, label, seed_requirement="pinned" if pinned else "any"))
         if not pinned:
             seed = ((meta or {}).get("env") or {}).get("PYTHONHASHSEED")
             unpinned_note.append(

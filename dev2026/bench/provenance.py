@@ -29,6 +29,38 @@ from bench.manifests import MANIFESTS, expand
 # backend we start ourselves.
 REQUIRED_HASH_SEED = "0"
 
+#: What `collect_backend_meta.whitelisted_env` records when PYTHONHASHSEED is absent.
+#: An unset seed is a finding, not a gap, so it is recorded as a value.
+UNSET_HASH_SEED = "<unset — randomised>"
+
+#: Which arms must have a pinned seed, by campaign. Three cases, not two — and the
+#: third is what stopped C2 cycle 1.
+#:
+#:   both-pinned         D2b and C1. Both arms are ours and both are pinned; a
+#:                       byte-exact comparison depends on it.
+#:   reference-unpinned  5.2B against live production. The reference is production,
+#:                       which we may not restart, so its seed is whatever it is —
+#:                       "any", because we cannot assert either way.
+#:   both-unpinned       C2. Both arms are ours and both are deliberately UNPINNED.
+#:                       This one requires the seed to be absent rather than merely
+#:                       tolerating it: a C2 cycle that ran with a pinned seed
+#:                       observed nothing about unpinned behaviour, and would report
+#:                       three identical seeds as if that were a fact about the
+#:                       interpreter instead of about the launch.
+SEED_POLICIES: dict[str, dict[str, str]] = {
+    "both-pinned":        {"candidate": "pinned",   "reference": "pinned"},
+    "reference-unpinned": {"candidate": "pinned",   "reference": "any"},
+    "both-unpinned":      {"candidate": "unpinned", "reference": "unpinned"},
+}
+
+
+def seed_requirement_for(policy: str, label: str) -> str:
+    """What `label` must show under `policy`. Unknown policies fail closed."""
+    if policy not in SEED_POLICIES:
+        raise ValueError(f"unknown seed policy {policy!r}; "
+                         f"expected one of {sorted(SEED_POLICIES)}")
+    return SEED_POLICIES[policy].get(label, "pinned")
+
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # Every field the sidecar must supply, with the type it must have. Checking only
@@ -202,7 +234,7 @@ def validate_store_agreement(cand: dict | None, ref: dict | None) -> list[str]:
 
 
 def validate_meta(meta: dict | None, label: str,
-                  require_pinned_seed: bool = True) -> list[str]:
+                  seed_requirement: str = "pinned") -> list[str]:
     """Reasons this run's provenance is not good enough to publish a number.
 
     Incompleteness here is not cosmetic. A result whose backend cannot be
@@ -306,9 +338,18 @@ def validate_meta(meta: dict | None, label: str,
 
     env = meta.get("env")
     seed = env.get("PYTHONHASHSEED") if isinstance(env, dict) else None
-    if require_pinned_seed and seed != REQUIRED_HASH_SEED:
+    if seed_requirement not in ("pinned", "unpinned", "any"):
+        problems.append(f"{label}: unknown seed requirement {seed_requirement!r}")
+    elif seed_requirement == "pinned" and seed != REQUIRED_HASH_SEED:
         problems.append(
             f"{label}: PYTHONHASHSEED is {seed!r}, must be {REQUIRED_HASH_SEED!r}")
+    elif seed_requirement == "unpinned" and seed != UNSET_HASH_SEED:
+        # Inverted on purpose. C2 exists to observe what an unpinned seed does; a
+        # cycle that ran pinned answers a different question and must not be counted
+        # as having answered this one.
+        problems.append(
+            f"{label}: PYTHONHASHSEED is {seed!r}, but this run requires it to be "
+            f"unset — a pinned seed observes nothing about unpinned behaviour")
 
     expected_source = "hardcoded_relative" if label == "reference" else "env"
     if meta.get("store_source") not in (None, expected_source):
@@ -629,9 +670,9 @@ def verify_prior_contract(prior: dict | None, cand_meta: dict | None,
             if then.get(field) != now.get(field):
                 problems.append(f"{label}: {note} since the contract gate ran "
                                 f"({field})")
-        pinned = label == "candidate"
+        req = "pinned" if label == "candidate" else "any"
         problems.extend(f"prior contract {m}" for m in
-                        validate_meta(then, label, require_pinned_seed=pinned))
+                        validate_meta(then, label, seed_requirement=req))
 
     return problems
 
@@ -814,7 +855,8 @@ def verify_environment_record(env_record: dict | None, meta: dict | None,
 
 
 def compare_arms(cand_meta: dict | None, ref_meta: dict | None,
-                 env_record: dict | None, *, s2: bool) -> list[str]:
+                 env_record: dict | None, *, s2: bool,
+                 seed_policy: str = "both-pinned") -> list[str]:
     """Everything that must hold before the two arms may be compared at all.
 
     This lives here, and not inline in the runner, because it was inline in the
@@ -834,6 +876,11 @@ def compare_arms(cand_meta: dict | None, ref_meta: dict | None,
     3. is what they agree on the environment this run actually prepared
        (`verify_environment_record`) — two arms sharing a stale venv, or a clone
        nobody verified, agree perfectly and prove nothing;
+    `seed_policy` decides what each arm's `PYTHONHASHSEED` must be. It is not
+    inferred from the variant: 5.2B was written for a pinned candidate against live
+    production, and C2 is a third arrangement — both arms ours, both unpinned — that
+    a two-valued rule reported as a defect. See `SEED_POLICIES`.
+
     4. do they build `zarr_group_paths` from the same string
        (`verify_group_path_agreement`) — different strings hash differently, so the
        set iterates in a different order for any query spanning more than one group,
@@ -841,8 +888,10 @@ def compare_arms(cand_meta: dict | None, ref_meta: dict | None,
     """
     fields = S2_ENVIRONMENT_RECORD_FIELDS if s2 else ENVIRONMENT_RECORD_FIELDS
     digests = S2_ARM_MATCH_DIGESTS if s2 else ARM_MATCH_DIGESTS
-    return (validate_meta(cand_meta, "candidate")
-            + validate_meta(ref_meta, "reference")
+    return (validate_meta(cand_meta, "candidate",
+                          seed_requirement=seed_requirement_for(seed_policy, "candidate"))
+            + validate_meta(ref_meta, "reference",
+                            seed_requirement=seed_requirement_for(seed_policy, "reference"))
             + verify_environment_match(cand_meta, ref_meta, digests=digests)
             + verify_environment_record(env_record, cand_meta, "candidate", fields)
             + verify_environment_record(env_record, ref_meta, "reference", fields)
