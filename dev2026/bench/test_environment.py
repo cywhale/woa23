@@ -117,6 +117,47 @@ def test_dependencies_answers_for_the_launch_not_the_binary() -> None:
           "interpreter_args" not in plain and "interpreter_env" not in plain)
 
 
+def test_dash_valued_options_reach_the_parser() -> None:
+    """`--env-python-arg=-S` parses; `--env-python-arg -S` does not.
+
+    argparse reads a value beginning with a dash as the next *option*, so the
+    separated form exits 2 with "expected one argument". The runner used it, and the
+    first real C1 attempt died there — after both arms were up, the process trees
+    verified and the store probed, with the contract gate never reached.
+
+    Nothing offline caught it: every CLI test stops at argument validation, and a
+    grep for the right spelling only checks the spelling. This runs the parser.
+    """
+    def parse(*args):
+        r = subprocess.run(
+            [sys.executable, "-m", "bench.collect_backend_meta",
+             "--port", "18061", "--manifest", "candidate",
+             "--expect-argv-contains", "api.app:app",
+             "--env-python", sys.executable, "--env-python-pythonpath", "/tmp",
+             *args],
+            cwd=str(HERE), capture_output=True, text=True)
+        return r.returncode, r.stderr
+
+    rc, err = parse("--env-python-arg=-S")
+    check("the = form gets past argument parsing",
+          "expected one argument" not in err, err[-200:])
+    # It still fails, on the host check rather than the parser: nothing is listening
+    # on 18061 here. That is the proof it got past argparse.
+    check("and fails later, on the host, not the parser",
+          "nothing is listening" in (err or ""), err[-200:])
+
+    rc, err = parse("--env-python-arg", "-S")
+    check("the separated form is the failure that was hit",
+          "expected one argument" in err, err[-200:])
+    check("and it exits 2, which reads like a configuration error", rc == 2, str(rc))
+
+    # A value that does not start with a dash works either way — which is why the
+    # bug survived: every other option in the command line looked fine.
+    rc, err = parse("--env-python-arg", "-X")
+    check("any dash-leading value has the same problem",
+          "expected one argument" in err, err[-200:])
+
+
 def test_resolve_never_follows_the_symlink() -> None:
     """The whole point: the venv python and its target are different environments."""
     if not VENV_PY.exists():
@@ -182,6 +223,7 @@ def main() -> int:
                test_resolve_reports_failure_rather_than_guessing,
                test_resolve_override_outranks_both_heuristics,
                test_dependencies_answers_for_the_launch_not_the_binary,
+               test_dash_valued_options_reach_the_parser,
                test_resolve_never_follows_the_symlink,
                test_dependencies_lists_the_pinned_versions,
                test_dependencies_fails_loudly,

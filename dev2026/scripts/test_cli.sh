@@ -489,6 +489,38 @@ check "the refusal states it would start the arms three times" "yes" \
 check "--help exits 0" "0" "$(cyc "" --help)"
 
 echo
+echo "the embedded Python is fed to a quoted heredoc"
+# An unquoted heredoc is shell-expanded before python ever sees it. A comment inside
+# one of them contained backticks around a module name; the shell ran it as a
+# command ("importlib.metadata: command not found") and handed python a source line
+# with the name deleted. It happened to land in a comment, so the run continued and
+# the only sign was one stray line on stderr. Quoting every heredoc removes the class
+# rather than that instance; the values they used to interpolate now arrive as
+# environment variables.
+check "every embedded-python heredoc is quoted" "3" \
+      "$(grep -c "uv run python - <<'PYEOF'" "$RUNNER")"
+check "and none is left unquoted" "0" \
+      "$(grep -c 'uv run python - <<PYEOF' "$RUNNER" || true)"
+check "no backticks survive inside the embedded python" "0" \
+      "$(awk "/<<.PYEOF/,/^PYEOF\$/" "$RUNNER" | grep -c '\`' || true)"
+check "the heredocs read their values from the environment" "yes" \
+      "$(has_text "$(cat "$RUNNER")" 'os.environ["PKG_CLONE"]')"
+
+echo
+echo "an option value that begins with a dash is passed unambiguously"
+# `--env-python-arg -S` makes argparse read -S as the next option and exit 2 with
+# "expected one argument". That is what ended the first real C1 attempt, after both
+# arms were up and the store had been probed — offline tests never reached it
+# because they all stop at argument validation.
+check "the runner uses the = form for -S" "yes" \
+      "$(has_text "$(cat "$RUNNER")" '--env-python-arg=-S')"
+# Comments stripped: the runner explains the rule in a comment that quotes the
+# broken form, and matching the explanation against the mistake reports the mistake.
+# Third time this exact trap has bitten in this file.
+check "and not the separated form" "no" \
+      "$(has_text "$(grep -v '^[[:space:]]*#' "$RUNNER")" '--env-python-arg -S')"
+
+echo
 echo "the C2 process count is derived, never written down"
 # 8 is what production's measured -w 2 implies, not a fact about the system. A
 # reconfiguration to four workers makes it twelve, and a count that did not move

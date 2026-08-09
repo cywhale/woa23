@@ -552,13 +552,15 @@ prod_py_version="$("$PROD_PY" --version 2>&1 | awk '{print $2}')"
 uv sync --locked --python "$PROD_PY" >&2
 
 if [ "$S2_MODE" = none ]; then
-uv run python - <<PYEOF || exit 1
-import hashlib, json, subprocess, sys
+VENV_PY="$VENV/bin/python" WANT_PY="$EXPECT_PY" LABEL="$LABEL" \
+uv run python - <<'PYEOF' || exit 1
+import hashlib, json, os, subprocess, sys
 sys.path.insert(0, ".")
 from bench.collect_backend_meta import dependencies
 
-venv_py = "$VENV/bin/python"
-want_py = "$EXPECT_PY"
+venv_py = os.environ["VENV_PY"]
+want_py = os.environ["WANT_PY"]
+label = os.environ["LABEL"]
 
 deps = dependencies(venv_py, __import__("pathlib").Path("uv.lock"))
 if "distributions_error" in deps:
@@ -577,7 +579,7 @@ json.dump({"kind": "controlled_environment",
            "distributions_sha256": deps["distributions_sha256"],
            "n_distributions": len(deps["distributions"]),
            "distributions": deps["distributions"]},
-          open("results/${LABEL}_environment.json", "w"), indent=2)
+          open(f"results/{label}_environment.json", "w"), indent=2)
 print(f"  python {deps['python_version']}  "
       f"{len(deps['distributions'])} distributions  "
       f"lock {deps['lockfile_sha256'][:16]}  dists {deps['distributions_sha256'][:16]}")
@@ -588,19 +590,22 @@ else
 # `-S`, the clone on PYTHONPATH, no VIRTUAL_ENV and no PYTHONHOME. Listing it any
 # other way — including simply running the binary — reports production's own 236
 # distributions, which is the environment this run exists to stay out of.
-uv run python - <<PYEOF || exit 1
-import json, sys
+PY_BINARY="$PY_BINARY" PKG_CLONE="$PKG_CLONE" CLONE_MANIFEST="$CLONE_MANIFEST" \
+WANT_PY="$EXPECT_PY" S2_MODE="$S2_MODE" LABEL="$LABEL" \
+uv run python - <<'PYEOF' || exit 1
+import json, os, sys
 from pathlib import Path
 sys.path.insert(0, ".")
 from bench.collect_backend_meta import dependencies
 from bench.s2_provenance import launch_env
 
-binary = "$PY_BINARY"
-clone = "$PKG_CLONE"
-manifest = Path("$CLONE_MANIFEST")
-want_py = "$EXPECT_PY"
+binary = os.environ["PY_BINARY"]
+clone = os.environ["PKG_CLONE"]
+manifest = Path(os.environ["CLONE_MANIFEST"])
+want_py = os.environ["WANT_PY"]
+label = os.environ["LABEL"]
 
-# hashseed=None here regardless of mode: this listing is `importlib.metadata`, whose
+# hashseed=None here regardless of mode: this listing is importlib.metadata, whose
 # answer does not depend on the hash seed, and pinning it would suggest it did.
 env = launch_env(clone, hashseed=None)
 deps = dependencies(binary, None, interp_args=("-S",), env=env,
@@ -623,7 +628,7 @@ if not deps["distributions"]:
     raise SystemExit(1)
 
 json.dump({"kind": "s2_package_clone_environment",
-           "mode": "$S2_MODE",
+           "mode": os.environ["S2_MODE"],
            "python_version": deps["python_version"],
            "env_python": binary,
            "package_clone": clone,
@@ -638,7 +643,7 @@ json.dump({"kind": "s2_package_clone_environment",
                "-S: site.py does not run, so no .pth in the clone is processed. "
                "This is isolated package-tree import correctness, not production's "
                "site/.pth startup semantics (spec 002 section 4.3.1).")},
-          open("results/${LABEL}_environment.json", "w"), indent=2)
+          open(f"results/{label}_environment.json", "w"), indent=2)
 print(f"  clone python {deps['python_version']}  "
       f"{len(deps['distributions'])} distributions  "
       f"manifest {deps['package_manifest_sha256'][:16]}  "
@@ -1169,9 +1174,14 @@ else
   for arm in candidate reference; do
     if [ "$arm" = candidate ]; then p="$CAND_PORT"; expect=api.app:app
     else p="$REF_PORT"; expect=woa23_app:app; fi
+    # --env-python-arg=-S, not `--env-python-arg -S`. argparse reads a value
+    # beginning with a dash as the next *option*, so the separated form makes it
+    # report "expected one argument" and exit 2 — which is what happened on the
+    # first real C1 attempt, after both arms were up and the store had been probed.
+    # The `=` form is unambiguous.
     uv run python -m bench.collect_backend_meta --port "$p" --manifest "$arm" \
       --expect-argv-contains "$expect" \
-      --env-python "$PY_BINARY" --env-python-arg -S \
+      --env-python "$PY_BINARY" --env-python-arg=-S \
       --env-python-pythonpath "$PKG_CLONE" \
       --package-manifest "$CLONE_MANIFEST" \
       --out "results/${LABEL}_meta_${arm}.json"
@@ -1206,15 +1216,16 @@ else
 fi
 
 echo "== the arms must share an environment, or the comparison proves nothing =="
-uv run python - <<PYEOF || exit 1
-import json, sys
+LABEL="$LABEL" S2_MODE="$S2_MODE" \
+uv run python - <<'PYEOF' || exit 1
+import json, os, sys
 sys.path.insert(0, ".")
 from bench.provenance import (ENVIRONMENT_RECORD_FIELDS,
                               S2_ENVIRONMENT_RECORD_FIELDS,
                               validate_meta, verify_environment_match,
                               verify_environment_record, verify_group_path_agreement)
-label = "$LABEL"
-s2_mode = "$S2_MODE"
+label = os.environ["LABEL"]
+s2_mode = os.environ["S2_MODE"]
 fields = ENVIRONMENT_RECORD_FIELDS if s2_mode == "none" else S2_ENVIRONMENT_RECORD_FIELDS
 cand = json.load(open(f"results/{label}_meta_candidate.json"))
 ref = json.load(open(f"results/{label}_meta_reference.json"))
