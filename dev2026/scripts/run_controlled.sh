@@ -654,7 +654,7 @@ import json, os, sys
 from pathlib import Path
 sys.path.insert(0, ".")
 from bench.collect_backend_meta import dependencies
-from bench.dist_digests import CANONICALIZATION
+from bench.package_digests import CANONICALIZATION
 from bench.s2_provenance import launch_env
 
 binary = os.environ["PY_BINARY"]

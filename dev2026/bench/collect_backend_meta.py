@@ -484,7 +484,7 @@ def dependencies(env_python: str | None, lockfile: Path | None,
         # itself. Recorded alongside the name-keyed one so all three appear together
         # with their canonicalizations and none can stand in for another.
         try:
-            from bench.dist_digests import digests as _dd
+            from bench.package_digests import digests as _dd
             d = _dd(clone_root)
             out["package_tree_digest"] = d["package_tree_digest"]
             out["runtime_distribution_digest"] = d["runtime_distribution_digest"]

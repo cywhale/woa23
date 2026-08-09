@@ -11,7 +11,8 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
-| 13 | 2026-08-09 | **`60236d72…` identified: it is the superseded rev 1–5 digest, recomputed live** — §7a.3f. `dependencies()` hashes a sorted `Name==Version` set, which is that canonicalization, so the field named `distributions_sha256` was silently reproducing the digest revision 6 replaced. Renamed **`name_version_set_sha256`**, kept because it is the only one of the three an arm's own interpreter can compute, and every record now carries `clone_manifest_sha256` `f3b66c49…`, `package_tree_digest` `b8754d32…`, `runtime_distribution_digest` `a26ca6c3…` and the name-keyed digest **each beside its canonicalization**; the S2 field and digest lists check all three clone digests, not one. New `bench/dist_digests.py`. **§7a.3g: the offline S2 integration test** — real artefacts, materialised source trees with recomputed digests so `validate_meta` re-hashes for real and **nothing is filtered**, `compare_arms(s2=True)` at zero problems, and the 64 cases served over loopback through the gate **invoked with the argument list read out of the runner**, reaching PASS 64/64 and FAIL naming the one altered case. |
+| 14 | 2026-08-09 | **The third C1 attempt is `INVALID_PRE_START`** — §7a.3h. It failed earlier than either predecessor: nothing was started, no port bound, no workdir created, zero requests of every kind. `ModuleNotFoundError: bench.dist_digests` — the module existed and its tests passed **in the working tree**, but `.gitignore`'s `**/dist_*` matched it, `git add -A` skipped it silently, `git status` did not list it, and the commit shipped without it. The per-file sync verified 72 of 72 files correctly; the commit was what was incomplete. Module renamed **`bench/package_digests.py`**, and `scripts/test_tracked.sh` added: every harness source must be tracked and unignored, every `bench.*` module imported anywhere must exist and be tracked, no harness module may be named `dist_*`, and **the committed tree is exported and checked to contain every imported module** — the check that would have failed before the run rather than during it. |
+| 13 | 2026-08-09 | **`60236d72…` identified: it is the superseded rev 1–5 digest, recomputed live** — §7a.3f. `dependencies()` hashes a sorted `Name==Version` set, which is that canonicalization, so the field named `distributions_sha256` was silently reproducing the digest revision 6 replaced. Renamed **`name_version_set_sha256`**, kept because it is the only one of the three an arm's own interpreter can compute, and every record now carries `clone_manifest_sha256` `f3b66c49…`, `package_tree_digest` `b8754d32…`, `runtime_distribution_digest` `a26ca6c3…` and the name-keyed digest **each beside its canonicalization**; the S2 field and digest lists check all three clone digests, not one. New `bench/package_digests.py`. **§7a.3g: the offline S2 integration test** — real artefacts, materialised source trees with recomputed digests so `validate_meta` re-hashes for real and **nothing is filtered**, `compare_arms(s2=True)` at zero problems, and the 64 cases served over loopback through the gate **invoked with the argument list read out of the runner**, reaching PASS 64/64 and FAIL naming the one altered case. |
 | 12 | 2026-08-09 | **The first C1 attempt is `INVALID_PRECONTRACT_HARNESS`, not a C1 FAIL** — §7a.3d. The contract gate was never reached: contract, latency, noise and production-8050 requests were all 0, while the process tree, store probe, three clone-integrity verifications and cleanup all completed. No C1 contract result may be written or cited from it. Two harness defects fixed (`--env-python-arg=-S`; all embedded-Python heredocs quoted), and a third found while fixing them: the worker-count scan flattened NUL-separated argv to newline-delimited text, so an argument containing a newline would shift every later position and make the wrong token the worker count — now parsed from the bytes and crossing into the shell as one integer, with regression tests over argv containing quotes, backticks, newlines, semicolons and `$(…)`. **§7a.3e added: harness bootstrap vs environment under test.** `uv sync --locked` is authorised for `dev2026/.venv` **only**; it is recorded in its own artefact with its scope stated, and the package clone and production site-packages stay immutable — enforced by mode bits, the ancestor check and three manifest re-verifications per run, not by uv's good behaviour. |
 | 11 | 2026-08-09 | **The immutability claim was too strong and is withdrawn** — §7a.3c. `dist/` at 555 protects its contents; the 775 parent leaves the *path* replaceable, because unlinking needs write on the directory rather than the file, and the runner's `[ -w ]` check would not have noticed. The ancestor chain is now inspected and classified — a writable immediate parent is a **refusal** (so C1 would refuse to start today), a writable `/home/odbadmin` is **residual exposure** that cannot be fixed and is recorded — and the **full manifest is re-verified three times per run**, at preflight and immediately before each arm starts. What this gives is **detection with a bounded window, not immutability**, and that sentence travels in every record. `chmod a-w` on the parent is named as a **staging write action** needing its own authorisation; it was not performed. New `bench/clone_integrity.py` (63 offline assertions, including the real VM24 chain as a fixture) and `scripts/test_c2_driver.sh` (41 end-to-end assertions on the C2 driver). |
 | 10 | 2026-08-09 | **The clone manifest identified by content and verified** — §7a.3b. The directory holds two manifests; `clone.manifest` is the one, distinguished by the two excluded entries rather than by its name. All **33,565 files re-hashed from the tree: 0 mismatches** of digest, size or `mtime_ns`, 0 missing, 0 extra. Both digests recomputed under the current definition and reproduce `b8754d32…` / `a26ca6c3…`. **Discrepancy recorded, not reconciled:** `clone.provenance` carries the rev 1–5 name-keyed values, because it was written before the definition changed and the clone is immutable. **Read-only measured, not assumed:** `dist/` and the four artefacts are unwritable, **the parent directory is not**, so the artefacts could be replaced and `dist` renamed — the contents cannot. **C2 outcome semantics:** three named outcomes with three exit codes, `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` sharing neither `PASS`'s nor `FAIL`'s. **Process count derived** from the measured worker count with the arithmetic printed; 8 holds only for `-w 2`. |
@@ -1279,6 +1280,43 @@ closes that:
 - and the two layers are held to their own jobs: an inter-arm environment drift is
   `compare_arms`'s to catch, a store disagreement is the gate's, and the test asserts
   the runner calls the first before the second and guards the second on its status.
+
+### 7a.3h The third C1 attempt: `INVALID_PRE_START`
+
+Earlier than either predecessor, and for a reason none of the offline suites could
+see. Classification **`INVALID_PRE_START`**: no service was started, no port was
+bound, no staging workdir was created, and every request count — contract, latency,
+noise, production 8050 — is **0**. Only the harness venv and its bootstrap record
+came into existence. Nothing may be cited from it, including as a harness failure of
+the kind §7a.3d describes; it never reached the stage those did.
+
+```
+ModuleNotFoundError: No module named 'bench.dist_digests'
+```
+
+The module existed. It imported cleanly. Its tests passed. **In the working tree.**
+`.gitignore` line 38 is `**/dist_*` — a pattern for build artefacts — and it matched
+`dist_digests.py`. `git add -A` skips ignored files **without saying so**, and
+`git status --porcelain` does not list them, so the commit looked complete from every
+angle a person checks. The per-file SHA-256 sync then verified 72 of 72 files against
+that commit, correctly: the sync was right and the commit was incomplete.
+
+A test suite run from the working tree cannot catch this, because it imports the file
+that is there. `scripts/test_tracked.sh` asks git instead:
+
+- every `.py`, `.sh`, `.md` and `.json` under `bench/`, `scripts/`, `api/` and
+  `specs/` must be **tracked** and must not be **ignored**;
+- every `bench.*` module imported anywhere in `bench/` or `scripts/` must exist and
+  be tracked — the import graph, because an import error is the shape this takes at
+  run time;
+- no harness module may be named `dist_*`, and the `.gitignore` pattern is asserted
+  to still match such a name, so the collision is refused when a file is added rather
+  than when a run consumes it;
+- and **the committed tree is exported with `git archive` and checked to contain
+  every imported module**. That is the check that fails before a run instead of
+  during one, and it was red against the offending commit.
+
+The module is now `bench/package_digests.py`.
 
 ### 7a.4 C2: three cycles, and the three statements they support
 
