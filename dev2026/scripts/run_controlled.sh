@@ -1293,27 +1293,19 @@ LABEL="$LABEL" S2_MODE="$S2_MODE" \
 uv run python - <<'PYEOF' || exit 1
 import json, os, sys
 sys.path.insert(0, ".")
-from bench.provenance import (ENVIRONMENT_RECORD_FIELDS,
-                              S2_ENVIRONMENT_RECORD_FIELDS,
-                              validate_meta, verify_environment_match,
-                              verify_environment_record, verify_group_path_agreement)
+# One call, into tested code. The composition used to be spelled out here, and the
+# S2 branch computed the right field list into a variable it then never passed —
+# a dead assignment that reads exactly like working code, and every S2 run failed
+# on the D2b field list complaining about a lockfile this campaign does not have.
+# Inline logic in a heredoc is logic no test can reach.
+from bench.provenance import compare_arms
+
 label = os.environ["LABEL"]
 s2_mode = os.environ["S2_MODE"]
-fields = ENVIRONMENT_RECORD_FIELDS if s2_mode == "none" else S2_ENVIRONMENT_RECORD_FIELDS
 cand = json.load(open(f"results/{label}_meta_candidate.json"))
 ref = json.load(open(f"results/{label}_meta_reference.json"))
 env = json.load(open(f"results/{label}_environment.json"))
-problems = (validate_meta(cand, "candidate") + validate_meta(ref, "reference")
-            # do the two arms agree with each other?
-            + verify_environment_match(cand, ref)
-            # and is what they agree on the environment this run actually built?
-            # Two arms sharing a stale .venv agree perfectly and prove nothing.
-            + verify_environment_record(env, cand, "candidate")
-            + verify_environment_record(env, ref, "reference")
-            # and do they build zarr_group_paths from the same string? Different
-            # strings hash differently, so the set iterates in a different order
-            # for any query spanning more than one group.
-            + verify_group_path_agreement(cand, ref))
+problems = compare_arms(cand, ref, env, s2=(s2_mode != "none"))
 if problems:
     print("arms are not comparable:", file=sys.stderr)
     for p in problems:

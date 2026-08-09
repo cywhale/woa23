@@ -1,0 +1,159 @@
+{
+  "boot_id": "7c674929-5bcd-42d4-9d9a-47d96d4dbd4d",
+  "collected_at": "2026-08-09T15:34:05+0800",
+  "collector_python": "3.11.4 (main, Jul 25 2023, 10:21:50) [GCC 9.4.0]",
+  "cwd": "/home/odbadmin/woa23-s2-c1b-work/candidate",
+  "dependencies": {
+    "distributions": [],
+    "distributions_sample": [
+      "Deprecated==1.3.1",
+      "GeoAlchemy2==0.15.2",
+      "Jinja2==3.1.6"
+    ],
+    "distributions_sha256": "60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a",
+    "interpreter_args": [
+      "-S"
+    ],
+    "interpreter_env": {
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONHOME": null,
+      "PYTHONNOUSERSITE": "1",
+      "PYTHONPATH": "/home/odbadmin/woa23-s2-package-clone/dist",
+      "VIRTUAL_ENV": null
+    },
+    "package_manifest": "/home/odbadmin/woa23-s2-package-clone/clone.manifest",
+    "package_manifest_sha256": "f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4",
+    "python_version": "3.11.4"
+  },
+  "env": {
+    "PYTHONHASHSEED": "0",
+    "PYTHONPATH": "/home/odbadmin/woa23-s2-package-clone/dist",
+    "WOA23_ZARR_STORE": "data/"
+  },
+  "env_python": "/home/odbadmin/.pyenv/versions/py311/bin/python3.11",
+  "env_python_source": "explicit",
+  "env_python_version": "3.11.4",
+  "env_whitelist": [
+    "PYTHONHASHSEED",
+    "VIRTUAL_ENV",
+    "WOA23_ZARR_STORE",
+    "DASK_SCHEDULER_ADDRESS",
+    "PYTHONPATH",
+    "OMP_NUM_THREADS",
+    "POLARS_SKIP_CPU_CHECK"
+  ],
+  "executable": "/home/odbadmin/.pyenv/versions/3.11.4/bin/python3.11",
+  "expect_argv_contains": [
+    "api.app:app"
+  ],
+  "host": "odb24",
+  "kernel": "6.8.0-124-generic",
+  "kind": "backend_meta",
+  "label": "candidate",
+  "launch_argv": [
+    "/home/odbadmin/.pyenv/versions/py311/bin/python3.11",
+    "-S",
+    "-m",
+    "gunicorn",
+    "api.app:app",
+    "-w",
+    "1",
+    "-k",
+    "uvicorn.workers.UvicornWorker",
+    "-b",
+    "127.0.0.1:18061",
+    "--timeout",
+    "120"
+  ],
+  "launch_command": "/home/odbadmin/.pyenv/versions/py311/bin/python3.11 -S -m gunicorn api.app:app -w 1 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:18061 --timeout 120",
+  "listener_pids": [
+    3613251,
+    3613253
+  ],
+  "manifest_patterns": [
+    "api/**/*.py"
+  ],
+  "master_pid": 3613251,
+  "port": 18061,
+  "port_verified": true,
+  "proc_starttime": 509332055,
+  "source_sha256": {
+    "api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "api/app.py": "5cdb68333c71a020ddfc2dd69f61ee93d89c43f2a07183bba9ff2799ad1c1eca",
+    "api/config.py": "93917a1bcd5c8d66736a0a9ccd9f33a7d76a0fd6cac39060835cb0d42182e994",
+    "api/query.py": "93b64fc08b8beb3fd0b83c6e67a66b040cb7ebf887c41b5e89b283ed1961c021"
+  },
+  "store_path": "/home/odbadmin/python/woa23/data",
+  "store_path_literal": "data/",
+  "store_source": "env",
+  "worker_pids": [
+    3613253
+  ],
+  "zmetadata_fingerprints": {
+    "025_degree/annual/TS/.zmetadata": {
+      "mtime_ns": 1718536236139225358,
+      "sha256": "d573e4c2eafc0823bf89cda382736c13b09ed3d8db184bf2decbe6093c6e238b",
+      "size": 11004
+    },
+    "025_degree/monthly/TS/.zmetadata": {
+      "mtime_ns": 1718546576322369113,
+      "sha256": "3f73090f0f13292912d9b0801a98c0ef8ee00220014c9f2898ec950b7e7aafb4",
+      "size": 11871
+    },
+    "025_degree/seasonal/TS/.zmetadata": {
+      "mtime_ns": 1718542926072713209,
+      "sha256": "b4896da482f143bcd28e2f6728360e29f155e7dca5510109d7f42f0d1daa2a8a",
+      "size": 11871
+    },
+    "1_degree/annual/Nutrients/.zmetadata": {
+      "mtime_ns": 1718557592716674965,
+      "sha256": "b62b4a215e135eea9bcaf1f99ff2ecc40a7f00d6fd9ce1c7e30254ce7a4efbb0",
+      "size": 10124
+    },
+    "1_degree/annual/Oxy/.zmetadata": {
+      "mtime_ns": 1718557477615236928,
+      "sha256": "aa46e4af8e746f7435e4d92cc716b7223c5fe31c862f9805561d779627cf92dd",
+      "size": 10992
+    },
+    "1_degree/annual/TS/.zmetadata": {
+      "mtime_ns": 1718557847731075635,
+      "sha256": "517f2946b7ac195aaaa6b6c39bab1e0b6799fff3c048435a69ce80207a959a5a",
+      "size": 10993
+    },
+    "1_degree/monthly/Nutrients/.zmetadata": {
+      "mtime_ns": 1718559157045872520,
+      "sha256": "0be8facae2b00a6661cfcf3759f1d230fc4488fed8edbbb856bae739043ceae8",
+      "size": 10990
+    },
+    "1_degree/monthly/Oxy/.zmetadata": {
+      "mtime_ns": 1718559228672499178,
+      "sha256": "d55349598dba290cde40e68465e1701de5b1ad3d7879e432b89f781bb21c4504",
+      "size": 10990
+    },
+    "1_degree/monthly/TS/.zmetadata": {
+      "mtime_ns": 1718559082167299362,
+      "sha256": "185f73cc6b792fdebec7e00ad510a952ab0c14df9c15538636357853083ae6f9",
+      "size": 11859
+    },
+    "1_degree/seasonal/Nutrients/.zmetadata": {
+      "mtime_ns": 1718558893414845914,
+      "sha256": "f5e888e36dffb19f75f0da4c96d124cd38851e84c9f742946a831b93acffde21",
+      "size": 10979
+    },
+    "1_degree/seasonal/Oxy/.zmetadata": {
+      "mtime_ns": 1718559042208056622,
+      "sha256": "09abad3be3f31a4d2df57360797748ce6bd236e88ee8a1b524544a702dd33d0c",
+      "size": 10979
+    },
+    "1_degree/seasonal/TS/.zmetadata": {
+      "mtime_ns": 1718558944417895713,
+      "sha256": "80a2d059e6666ed16c57f9c0509d198056e1f73c5d936bb1d41fcd2789892b1b",
+      "size": 11859
+    },
+    "test/.zmetadata": {
+      "mtime_ns": 1744957907452604169,
+      "sha256": "03d15f2c5f3758c7189e9510f8062bd736cff82944c3c4a24c978489187e5b98",
+      "size": 4927
+    }
+  }
+}

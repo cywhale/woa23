@@ -638,8 +638,19 @@ def verify_prior_contract(prior: dict | None, cand_meta: dict | None,
 
 # --- controlled two-arm comparison (spec 001 section 5.2A / D2b) --------------
 
-def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None
-                             ) -> list[str]:
+#: Digest pairs that must agree between the arms, by campaign. The anchor differs
+#: because the environments are built differently: D2b resolves a lockfile, S2 copies
+#: a package tree and anchors on that tree's manifest. Hard-coding `lockfile_sha256`
+#: here made every S2 run fail with "lockfile digest missing on candidate", which is
+#: true and irrelevant — there is no lockfile to be missing.
+ARM_MATCH_DIGESTS = (("distributions_sha256", "installed distribution set"),
+                     ("lockfile_sha256", "lockfile"))
+S2_ARM_MATCH_DIGESTS = (("distributions_sha256", "installed distribution set"),
+                        ("package_manifest_sha256", "package-tree clone manifest"))
+
+
+def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None,
+                             digests=ARM_MATCH_DIGESTS) -> list[str]:
     """Do both arms run the *same* interpreter and the *same* installed packages?
 
     Variant 5.2A exists to remove the variables 5.2B could not. The 2026-08-07
@@ -666,8 +677,7 @@ def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None
 
     ca = (cand_meta.get("dependencies") or {})
     ra = (ref_meta.get("dependencies") or {})
-    for field, note in (("distributions_sha256", "installed distribution set"),
-                        ("lockfile_sha256", "lockfile")):
+    for field, note in digests:
         a, b = ca.get(field), ra.get(field)
         if a is None or b is None:
             problems.append(f"{note} digest missing on "
@@ -795,3 +805,39 @@ def verify_environment_record(env_record: dict | None, meta: dict | None,
             problems.append(f"{label}: {note} is not the environment this run built "
                             f"({meta_path}={got!r}, record {env_key}={want!r})")
     return problems
+
+
+def compare_arms(cand_meta: dict | None, ref_meta: dict | None,
+                 env_record: dict | None, *, s2: bool) -> list[str]:
+    """Everything that must hold before the two arms may be compared at all.
+
+    This lives here, and not inline in the runner, because it was inline in the
+    runner. The S2 branch computed the right field list into a variable and then
+    called `verify_environment_record` without it — a dead assignment that reads
+    exactly like the working code — so every S2 run failed on the D2b field list
+    complaining about a lockfile the campaign does not have. Nothing offline caught
+    it: the pieces each had tests, and the composition had none because it was not a
+    function.
+
+    Now it is one, and the test drives it with the artefacts a real run produced.
+
+    The four questions, in order:
+
+    1. is each record internally well-formed (`validate_meta`);
+    2. do the two arms agree with each other (`verify_environment_match`);
+    3. is what they agree on the environment this run actually prepared
+       (`verify_environment_record`) — two arms sharing a stale venv, or a clone
+       nobody verified, agree perfectly and prove nothing;
+    4. do they build `zarr_group_paths` from the same string
+       (`verify_group_path_agreement`) — different strings hash differently, so the
+       set iterates in a different order for any query spanning more than one group,
+       which is exactly how C16 and C16-csv differed in the 2026-08-08 run.
+    """
+    fields = S2_ENVIRONMENT_RECORD_FIELDS if s2 else ENVIRONMENT_RECORD_FIELDS
+    digests = S2_ARM_MATCH_DIGESTS if s2 else ARM_MATCH_DIGESTS
+    return (validate_meta(cand_meta, "candidate")
+            + validate_meta(ref_meta, "reference")
+            + verify_environment_match(cand_meta, ref_meta, digests=digests)
+            + verify_environment_record(env_record, cand_meta, "candidate", fields)
+            + verify_environment_record(env_record, ref_meta, "reference", fields)
+            + verify_group_path_agreement(cand_meta, ref_meta))
