@@ -16,7 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bench.c2_summary import (  # noqa: E402
-    load_cycle, order_stability, seed_diversity, verdict,
+    OUTCOME_EXIT, load_cycle, order_stability, overall_outcome, seed_diversity,
+    verdict,
 )
 
 PASS = 0
@@ -204,6 +205,57 @@ with tempfile.TemporaryDirectory() as td:
 
 
 print()
+print("the two results combine into one named outcome, never into 'it passed'")
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+
+    cycles = build(root, c1={"seed": "a" * 64}, c2={"seed": "b" * 64},
+                   c3={"seed": "c" * 64})
+    out = overall_outcome(verdict(cycles), seed_diversity(cycles))
+    check("gates pass + seeds observed is PASS", "PASS", out["outcome"])
+    check("and exits 0", 0, out["exit_code"])
+
+    cycles = build(root, c1={"seed": "a" * 64}, c2={"seed": "a" * 64},
+                   c3={"seed": "a" * 64})
+    out = overall_outcome(verdict(cycles), seed_diversity(cycles))
+    check("gates pass + seeds identical is its own outcome",
+          "PASS_WITH_INSUFFICIENT_SEED_DIVERSITY", out["outcome"])
+    check("which is not the string PASS", False, out["outcome"] == "PASS")
+    # Not exit 0: a caller checking only the status would read it as a plain pass,
+    # which is the misreport this outcome exists to prevent. Not exit 1 either: the
+    # candidate did not fail.
+    check("and does not share PASS's exit code", 5, out["exit_code"])
+    check("nor FAIL's", False, out["exit_code"] == OUTCOME_EXIT["FAIL"])
+    check("it says it is not a plain PASS", True, "NOT a plain PASS" in out["because"])
+    check("nor a candidate failure", True, "NOT a candidate failure" in out["because"])
+    check("nor a reason for a fourth cycle", True, "fourth cycle" in out["because"])
+
+    # A broken precondition reaches the same outcome by the same route.
+    cycles = build(root, c1={"seed": "a" * 64, "hashseed_env": "0"},
+                   c2={"seed": "b" * 64}, c3={"seed": "c" * 64})
+    check("a pinned-seed cycle also yields the INSUFFICIENT outcome",
+          "PASS_WITH_INSUFFICIENT_SEED_DIVERSITY",
+          overall_outcome(verdict(cycles), seed_diversity(cycles))["outcome"])
+
+    cycles = build(root, c1={"seed": "a" * 64}, c2={"seed": "b" * 64, "gate": "FAIL"},
+                   c3={"seed": "c" * 64})
+    out = overall_outcome(verdict(cycles), seed_diversity(cycles))
+    check("any failing gate is FAIL", "FAIL", out["outcome"])
+    check("and exits 1", 1, out["exit_code"])
+    check("the seed observation is not consulted for a failing gate", True,
+          "not consulted" in out["because"])
+
+    # A failing gate with identical seeds is still FAIL, not the hybrid.
+    cycles = build(root, c1={"seed": "a" * 64}, c2={"seed": "a" * 64, "gate": "FAIL"},
+                   c3={"seed": "a" * 64})
+    check("a failing gate outranks INSUFFICIENT", "FAIL",
+          overall_outcome(verdict(cycles), seed_diversity(cycles))["outcome"])
+
+    check("the three outcomes have three distinct exit codes", 3,
+          len(set(OUTCOME_EXIT.values())))
+
+
+print()
 print("order stability is recorded per (case, arm) and never gates")
 with tempfile.TemporaryDirectory() as td:
     root = Path(td)
@@ -261,6 +313,9 @@ with tempfile.TemporaryDirectory() as td:
     r = cli(*LABELS, out=Path(td) / "sum.json")
     check("three passing cycles exit 0", 0, r.returncode)
     payload = json.loads((Path(td) / "sum.json").read_text())
+    check("the summary names the outcome at the top level", "PASS", payload["outcome"])
+    check("and records the exit code it returned", 0, payload["exit_code"])
+    check("the outcome is printed unmissably", True, "C2 OUTCOME: PASS" in r.stdout)
     check("the summary records the verdict", "PASS", payload["contract"]["gate"])
     check("and the observation separately", "OBSERVED",
           payload["seed_diversity"]["status"])
@@ -281,9 +336,15 @@ with tempfile.TemporaryDirectory() as td:
     # INSUFFICIENT diversity must not become a non-zero exit: that is exactly the
     # pressure that would push a run towards a fourth cycle.
     build(root, c1={"seed": "a" * 64}, c2={"seed": "a" * 64}, c3={"seed": "a" * 64})
-    r = cli(*LABELS)
-    check("identical seeds still exit 0 when the gate passed", 0, r.returncode)
-    check("while reporting INSUFFICIENT", True, "INSUFFICIENT" in r.stdout)
+    r = cli(*LABELS, out=Path(td) / "sum2.json")
+    check("identical seeds exit 5, not 0", 5, r.returncode)
+    check("and name the outcome in full", True,
+          "C2 OUTCOME: PASS_WITH_INSUFFICIENT_SEED_DIVERSITY" in r.stdout)
+    check("the outcome is in the record too",
+          "PASS_WITH_INSUFFICIENT_SEED_DIVERSITY",
+          json.loads((Path(td) / "sum2.json").read_text())["outcome"])
+    check("the semantic gate is still reported as having passed", "PASS",
+          json.loads((Path(td) / "sum2.json").read_text())["contract"]["gate"])
 
     build(root, c1={"seed": "a" * 64}, c2={"seed": "b" * 64, "gate": "FAIL"},
           c3={"seed": "c" * 64})

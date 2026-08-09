@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 10 | 2026-08-09 | **The clone manifest identified by content and verified** — §7a.3b. The directory holds two manifests; `clone.manifest` is the one, distinguished by the two excluded entries rather than by its name. All **33,565 files re-hashed from the tree: 0 mismatches** of digest, size or `mtime_ns`, 0 missing, 0 extra. Both digests recomputed under the current definition and reproduce `b8754d32…` / `a26ca6c3…`. **Discrepancy recorded, not reconciled:** `clone.provenance` carries the rev 1–5 name-keyed values, because it was written before the definition changed and the clone is immutable. **Read-only measured, not assumed:** `dist/` and the four artefacts are unwritable, **the parent directory is not**, so the artefacts could be replaced and `dist` renamed — the contents cannot. **C2 outcome semantics:** three named outcomes with three exit codes, `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` sharing neither `PASS`'s nor `FAIL`'s. **Process count derived** from the measured worker count with the arithmetic printed; 8 holds only for `-w 2`. |
 | 9 | 2026-08-09 | **No worker-level Python provenance is claimed.** The sibling probe establishes the *launch environment and import configuration*; `/proc/<pid>/maps` is stated as a **refuter** — a production path in it disproves isolation, its absence proves nothing correspondingly strong, because maps lists mapped files and not imports. No mechanism observes `sys.path`/`sys.modules` inside a gunicorn worker; the only external route (a gunicorn `-c` `post_fork` hook) changes the arms' launch line and is not part of the C1 request. Recorded as an explicit C1 limitation in §7a.3, in every interpreter record, in the C2 summary and on stdout. **C2 seed preconditions separated from evidence** — `PYTHONHASHSEED` unset and `hash_randomization=1` only mean the interpreter was *permitted* to choose; a cycle with a broken precondition is `INSUFFICIENT` even when the three digests differ, and the result is labelled **sibling / launch-environment seed diversity**. **§9: a C1 pass is explicitly not deployment readiness.** **D1 restated as open** with a standing summary. Runner: the three S2 artefacts are now checked with the arguments (exit 2) rather than behind the host gate, where they could not be exercised offline; `check_maps` was using the un-expanded forbidden roots and now uses the same expanded list as the path check. |
 | 8 | 2026-08-09 | **Process readiness and store readiness separated throughout** — §7 D2. A 200 on the OpenAPI document says the process is serving and nothing about the store; C1 may use it as a startup precondition and may not call the store ready. That the endpoint would answer 200 with an unreadable store is marked an **inference from D1, not a measurement**: no socket was bound. D1's fixtures restated as **six negative fixtures (N1–N6) and one real-store control (P1)**, with what each has at the store path. **§7a added: the runner as implemented** — the `--c1` / `--c2-cycle` modes, the separate `WOA23_S2_C1_GRANTED` / `WOA23_S2_C2_GRANTED` gates that no other grant implies in either direction, mandatory `--python-binary` / `--package-clone` / `--clone-manifest` with **no fallback to `dev2026/.venv`**, the interpreter probe plus `/proc/<pid>/maps` as two separate kinds of evidence, order fingerprints recorded outside the verdict, and the request ceilings. Offline only; nothing executed against VM24. |
 | 7 | 2026-08-09 | **`-S` means the smoke did not reproduce production's startup semantics** — site.py never ran, so no `.pth` was processed. C1 as evidenced is downgraded to *isolated package-tree import correctness*, with launcher and site semantics listed as a limitation, and a site-enabled sanitised variant designed in §4.3 for separate authorisation. D1 fixtures strengthened: a missing group path is **not** proof of a non-Zarr store, and the three failure stages are now distinguished — §7. The **`-E` run of 2026-08-09 is marked invalid** and may not be cited. "evidence of interrupted installation" softened to "consistent with". The filename audit no longer offers any judgement about the six non-Python hits. |
@@ -1035,6 +1036,79 @@ is refused because the clone must stay byte-identical.
 the environment record, in every interpreter record, in the C2 summary, and on stdout
 at the end of every S2 run.
 
+### 7a.3b The clone manifest, identified by content and verified — 2026-08-09
+
+`~/woa23-s2-package-clone/` holds **seven** artefacts, two of which are manifests.
+Choosing by name or by glob order would have been a coin toss, so they were read:
+
+| file | size | what it is |
+|---|---|---|
+| **`clone.manifest`** | 4,529,883 | **33,565 lines, one per file in `dist/`.** This is the clone manifest. |
+| `source.manifest` | 4,530,117 | 33,567 lines — production's site-packages, the *source* |
+| `SHA256SUMS` | 421 | digests of five artefacts; **not** a manifest |
+| `clone.provenance` | 1,234 | how the clone was built |
+| `{source,clone}.filename-audit` | 2,832 each | the filename audit of §4.1.5 |
+| `dist/` | — | the tree itself |
+
+The distinguishing evidence is not the names: `source.manifest`'s first two lines are
+`__editable__.src-1.0.pth` and `__editable___src_1_0_finder.py`, and `set` difference
+confirms those **two entries, and only those two**, are what `clone.manifest` lacks —
+which is exactly the exclusion `clone.provenance` records.
+
+```
+--clone-manifest /home/odbadmin/woa23-s2-package-clone/clone.manifest
+```
+
+| | |
+|---|---|
+| sha256 | `f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4` |
+| size / mode / owner | 4,529,883 B / `-r--r--r--` (444) / `odbadmin:odbadmin` |
+| mtime | 2026-08-09 01:31:13.567923779 +0800 |
+| agrees with | `SHA256SUMS` **and** `clone.provenance: clone_manifest_sha256` |
+
+**The manifest was verified against the tree, not assumed to match it.** All 33,565
+files were re-hashed from `dist/` (1,690,025,002 bytes, 6.9 s, `nice -n 19`):
+
+| check | result |
+|---|---|
+| manifest entries vs files on disk | 33,565 / 33,565 |
+| in the manifest, missing from disk | **0** |
+| on disk, absent from the manifest | **0** |
+| content digest mismatches | **0** |
+| size mismatches | **0** |
+| `mtime_ns` mismatches | **0** |
+| unreadable | **0** |
+
+Both digests were recomputed from inside the clone under §4.1.2b's current
+dist-info-keyed definition, and both reproduce §4.1's recorded values exactly: 240
+dist-info directories → `b8754d32…`, 236 with `METADATA` → `a26ca6c3…`.
+
+**One discrepancy, reported rather than reconciled.** `clone.provenance` records
+`package_tree_digest: a796…` and `runtime_distribution_digest: 60236d…` — the
+**name-keyed values superseded in revision 6**. The file was written when the clone
+was built, before the definition changed, and it has not been rewritten, which is
+correct: the clone and its provenance are immutable. So the artefact on disk carries
+the old definition's numbers, this spec carries the current ones, and `a796…` is
+**not** the package-tree digest. Both are recorded so earlier reports stay traceable.
+
+**Read-only status, as measured rather than as intended:**
+
+| path | mode | writable by `odbadmin` |
+|---|---|---|
+| `dist/` | `dr-xr-xr-x` (555) | **no** |
+| `clone.manifest`, `SHA256SUMS`, `clone.provenance` | `-r--r--r--` (444) | **no** |
+| `~/woa23-s2-package-clone/` (the parent) | `drwxrwxr-x` (775) | **YES** |
+
+The tree's *contents* are protected: nothing inside `dist/` can be added, removed or
+modified, and no `.pyc` has appeared since it was built (0 files newer than the build
+time). The **parent directory is writable**, which is a weaker position than it
+looks — unlinking a file needs write permission on its *directory*, not on the file —
+so the four mode-444 artefacts could be replaced, and `dist` could be renamed, by
+this user. Neither run does any of that, and the runner's own check (`[ -w
+"$PKG_CLONE" ]`, which tests `dist`) is the right test for what it guards. Recorded
+because "read-only" without saying read-only *against what* is the kind of claim
+that goes stale silently.
+
 ### 7a.4 C2: three cycles, and the three statements they support
 
 One `--c2-cycle` is one cycle and **never draws the conclusion** — one process has one
@@ -1044,6 +1118,21 @@ begins, and `bench/c2_summary.py` produces:
 
 1. **The 5.2B verdict.** PASS only if every cycle passed. Two passes and a failure is
    not two thirds of an answer, and the driver stops at the first failing cycle.
+
+   The verdict and the seed observation are then combined into **one named outcome**,
+   because reporting them side by side invites the summary "it passed":
+
+   | three semantic gates | seed diversity | outcome | exit |
+   |---|---|---|---|
+   | PASS | `OBSERVED` | `PASS` | 0 |
+   | PASS | `INSUFFICIENT` | **`PASS_WITH_INSUFFICIENT_SEED_DIVERSITY`** | **5** |
+   | any FAIL | not consulted | `FAIL` | 1 |
+
+   The middle row is not exit 0: a caller checking only the status would read that as
+   a plain pass, which is the misreport the outcome exists to prevent. It is not exit
+   1 either — the candidate did not fail — and it is **not a trigger for a fourth
+   cycle**. There is no fourth cycle and none may be added without a new
+   authorisation.
 2. **Seed diversity — an observation, never an escalation.**
 
    **`PYTHONHASHSEED` unset and `hash_randomization=1` are preconditions, not
@@ -1095,6 +1184,16 @@ begins, and `bench/c2_summary.py` produces:
 96 = 30 readiness (worst case; normally 1–3) + 2 data probe + 64 contract. Production
 is zero by construction: nothing in the script addresses port 8050, which is read from
 `/proc` and `ss` only.
+
+**The process count is derived, never written down.** Two Dask processes plus, per
+arm, a gunicorn arbiter and the workers it forks: `2 + 2 × (1 + workers)`. One worker
+gives 6, which is D2b's and C1's figure. Production's measured `-w 2` gives **8 — a
+consequence of that measurement and not a fact about the system**. A reconfiguration
+to four workers makes it twelve, and a count that did not move with it would be
+verifying last week's deployment. The runner prints the arithmetic with the number,
+and three ways in are closed: a worker count that cannot be read from production's
+argv aborts rather than being assumed, a count outside 1–16 aborts, and a `--workers N`
+supplied by the authorisation aborts the run if production disagrees with it.
 
 **Cleanup budget for C2**: three complete start/stop cycles, each stopping four
 services and verifying every process in its recorded tree, its ports, its boot ID and

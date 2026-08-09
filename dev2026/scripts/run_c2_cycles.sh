@@ -166,5 +166,24 @@ echo "======================================================================"
 echo "== C2 across $CYCLES cycles =="
 echo "======================================================================"
 cd "$HERE"
+set +e
 # shellcheck disable=SC2086
 uv run python -m bench.c2_summary --out results/c2_summary.json $labels
+summary_rc=$?
+set -e
+
+# Exit 5 is PASS_WITH_INSUFFICIENT_SEED_DIVERSITY: the semantic gate passed and the
+# seed question was not answered. It is propagated rather than flattened to 0,
+# because a caller checking only the status would otherwise read it as a plain pass —
+# and it is not treated as a cycle failure either, because nothing failed. It is
+# emphatically not a trigger for a fourth cycle: there is no fourth cycle.
+case "$summary_rc" in
+  0) echo "C2 complete: PASS" ;;
+  5) echo "C2 complete: PASS_WITH_INSUFFICIENT_SEED_DIVERSITY"
+     echo "  The three 5.2B gates passed. This run did not observe the seed varying,"
+     echo "  so it says nothing about unpinned behaviour. Reporting it as PASS would"
+     echo "  be a false report. No fourth cycle is run, and none may be added without"
+     echo "  a new authorisation." ;;
+  *) echo "C2 complete: FAIL (summary exit $summary_rc)" >&2 ;;
+esac
+exit "$summary_rc"

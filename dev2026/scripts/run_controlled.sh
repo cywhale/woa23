@@ -729,6 +729,21 @@ EOF
   echo "production's worker count, read from its argv: $ARM_WORKERS"
 fi
 
+# The authorised process count is DERIVED from the number just measured, never
+# written down. Two Dask processes plus, per arm, a gunicorn arbiter and the workers
+# it forks. With one worker that is 6, which is D2b's and C1's figure; with
+# production's two it is 8 — but 8 is a consequence of this measurement and not a
+# fact about the system. If production is reconfigured to four workers this run has
+# twelve processes, and the count it verifies against must move with it or the
+# verification is checking last week's deployment.
+#
+# Nothing here silently accommodates a surprise: --workers, when the authorisation
+# supplies it, has already aborted above on any disagreement, and a worker count that
+# could not be read aborted before that. This line only names the arithmetic.
+EXPECTED_TOTAL=$((1 + 1 + 2 * (1 + ARM_WORKERS)))
+echo "  processes this run will account for: 2 Dask + 2 x (1 arbiter + $ARM_WORKERS"
+echo "    worker(s)) = $EXPECTED_TOTAL, derived from the worker count above"
+
 # ================================================== tracked process handling ===
 CLEANUP_FAILED=0
 
@@ -1031,7 +1046,7 @@ expected_procs() {
     *)                          echo 0 ;;
   esac
 }
-AUTHORISED_TOTAL=$((1 + 1 + 2 * (1 + ARM_WORKERS)))
+AUTHORISED_TOTAL="$EXPECTED_TOTAL"     # derived where ARM_WORKERS was established
 n_procs=0
 seen_pids=""
 for svc in dask_scheduler dask_worker reference candidate; do

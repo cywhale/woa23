@@ -488,6 +488,40 @@ check "the refusal states it would start the arms three times" "yes" \
       "$(has_text "$(cycrun "" "${CYCARGS[@]}")" "THREE")"
 check "--help exits 0" "0" "$(cyc "" --help)"
 
+echo
+echo "the C2 process count is derived, never written down"
+# 8 is what production's measured -w 2 implies, not a fact about the system. A
+# reconfiguration to four workers makes it twelve, and a count that did not move
+# with it would be verifying last week's deployment.
+RUNSRC2="$(grep -v '^[[:space:]]*#' "$RUNNER")"
+check "the authorised total is derived from the measured worker count" "yes" \
+      "$(has_text "$RUNSRC2" 'EXPECTED_TOTAL=$((1 + 1 + 2 * (1 + ARM_WORKERS)))')"
+check "and the per-service expectation is too" "yes" \
+      "$(has_text "$RUNSRC2" 'echo $((1 + ARM_WORKERS))')"
+check "no literal 8 is assigned as the authorised total" "no" \
+      "$(has_text "$RUNSRC2" 'AUTHORISED_TOTAL=8')"
+check "and no literal 6 either" "no" "$(has_text "$RUNSRC2" 'AUTHORISED_TOTAL=6')"
+# Fail closed on the way in: an unreadable or implausible worker count stops the run
+# rather than being replaced by an assumption.
+check "an unreadable worker count refuses to assume one" "yes" \
+      "$(has_text "$RUNSRC2" 'Refusing to assume')"
+check "and says a guess would answer for a deployment that does not exist" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "deployment that does not exist")"
+check "an asserted --workers that disagrees with production aborts" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "was asserted but production is running")"
+
+echo
+echo "the driver propagates the three C2 outcomes distinctly"
+CYCSRC="$(cat "$CYCLER")"
+check "exit 5 is handled as its own case" "yes" \
+      "$(has_text "$CYCSRC" "PASS_WITH_INSUFFICIENT_SEED_DIVERSITY")"
+check "and is not flattened to a plain pass" "yes" \
+      "$(has_text "$CYCSRC" "be a false report")"
+check "and triggers no fourth cycle" "yes" \
+      "$(has_text "$CYCSRC" "there is no fourth cycle")"
+check "the summary status is propagated, not discarded" "yes" \
+      "$(has_text "$CYCSRC" 'exit "$summary_rc"')"
+
 chmod u+w "$S2FIX/clone" "$S2FIX/work-clone"
 rm -r "$S2FIX"
 

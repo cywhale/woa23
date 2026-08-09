@@ -6,6 +6,15 @@ statements it makes are easy to blur together and each has a different standing:
 **The verdict** is the 5.2B semantic gate, and it is PASS only if every cycle
 passed. Two passes and a failure is not a pass.
 
+The two are combined into one named outcome, because reporting them separately
+invites the summary "it passed":
+
+| all three semantic gates | seed diversity | outcome | exit |
+|---|---|---|---|
+| PASS | `OBSERVED` | `PASS` | 0 |
+| PASS | `INSUFFICIENT` | `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` | 5 |
+| any FAIL | (not consulted) | `FAIL` | 1 |
+
 **Seed diversity** is an *observation*, reported and never acted on. If the cycles
 did not produce distinct seeds the answer is INSUFFICIENT — which is not a failure
 of the candidate, and not a reason to run a fourth cycle. It means this run cannot
@@ -166,6 +175,47 @@ def seed_diversity(cycles: list[dict]) -> dict:
                 "order_stability below.")}
 
 
+#: The three outcomes a C2 run can have, and their exit codes.
+#:
+#: `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` exists because the alternative is to call
+#: it `PASS`, and that would be a false report: the semantic gate passed, and the
+#: question C2 was run to answer — what an unpinned seed does across independent
+#: starts — was not answered. Two different results must not share a name.
+#:
+#: It is deliberately **not** exit 0. A caller that checks only the exit status would
+#: otherwise read it as a plain pass, which is the misreport this outcome exists to
+#: prevent. It is equally deliberately **not** exit 1: the candidate did not fail, and
+#: nothing about this outcome licenses a fourth cycle — there is no mechanism for one
+#: and adding one is not a decision this code may take.
+OUTCOME_EXIT = {
+    "PASS": 0,
+    "FAIL": 1,
+    "PASS_WITH_INSUFFICIENT_SEED_DIVERSITY": 5,
+}
+
+
+def overall_outcome(v: dict, s: dict) -> dict:
+    """Combine the semantic verdict and the seed observation into one named result."""
+    if v.get("gate") != "PASS":
+        name = "FAIL"
+        because = ("at least one cycle's 5.2B semantic gate did not pass; the seed "
+                   "observation is not consulted, because a failing contract is the "
+                   "answer regardless of what the seeds did")
+    elif s.get("status") == "OBSERVED":
+        name = "PASS"
+        because = ("all three cycles passed the 5.2B semantic gate, and three "
+                   "independent starts were observed to hash differently")
+    else:
+        name = "PASS_WITH_INSUFFICIENT_SEED_DIVERSITY"
+        because = ("all three cycles passed the 5.2B semantic gate, but this run did "
+                   "not observe the seed varying, so it says nothing about unpinned "
+                   "behaviour. This is NOT a plain PASS and must not be reported as "
+                   "one. It is NOT a candidate failure. It is NOT a reason to run a "
+                   "fourth cycle.")
+    return {"outcome": name, "exit_code": OUTCOME_EXIT[name], "because": because,
+            "contract_gate": v.get("gate"), "seed_diversity": s.get("status")}
+
+
 def order_stability(cycles: list[dict]) -> dict:
     """Whether each arm ordered rows the same way in every cycle. Not a verdict.
 
@@ -261,7 +311,18 @@ def main() -> int:
         print(f"    varied: {name}")
     print(f"  {o['note']}")
 
+    outcome = overall_outcome(v, s)
+    print()
+    print("=" * 70)
+    print(f"C2 OUTCOME: {outcome['outcome']}   (exit {outcome['exit_code']})")
+    print(f"  {outcome['because']}")
+    print(f"  semantic gate {outcome['contract_gate']}, "
+          f"seed diversity {outcome['seed_diversity']}")
+    print("=" * 70)
+
     payload = {"kind": "c2_summary", "labels": args.labels,
+               "outcome": outcome["outcome"], "exit_code": outcome["exit_code"],
+               "outcome_detail": outcome,
                "contract": v, "seed_diversity": s, "order_stability": o,
                "site_limitation": (
                    "every cycle ran under -S: site.py did not run and no .pth in the "
@@ -277,13 +338,7 @@ def main() -> int:
         args.out.write_text(json.dumps(payload, indent=2))
         print(f"\nwrote {args.out}")
 
-    # The gate decides the exit status. INSUFFICIENT seed diversity does not: it is
-    # a statement about what this run could observe, and turning it into a failure
-    # would create exactly the pressure to keep running cycles that the fixed count
-    # exists to remove.
-    if v["gate"] != "PASS":
-        return 1
-    return 0
+    return outcome["exit_code"]
 
 
 if __name__ == "__main__":
