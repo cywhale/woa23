@@ -80,13 +80,43 @@ def verdict(cycles: list[dict]) -> dict:
 
 
 def seed_diversity(cycles: list[dict]) -> dict:
-    """Did independent starts hash differently? Observed, never forced."""
+    """Did independent starts hash differently? Observed, never forced.
+
+    **`PYTHONHASHSEED` being unset and `hash_randomization` being 1 are
+    preconditions, not evidence.** Together they say only that the interpreter was
+    *permitted* to choose a seed per process. They are equally true of three starts
+    that happened to choose the same one, and of a kernel or container configuration
+    that makes the choice degenerate. What distinguishes those cases is the measured
+    hash of a fixed string tuple, so the preconditions are checked and reported
+    separately from the digests, and only the digests decide the status.
+    """
     per_cycle = []
+    precondition_problems = []
     for c in cycles:
         entry = {"label": c["label"]}
         for arm in ("candidate", "reference"):
             rec = c.get(f"interp_{arm}")
             entry[arm] = rec.get("seed_digest") if isinstance(rec, dict) else None
+        # The preconditions, read from the same record as the digest.
+        rec = c.get("interp_candidate")
+        flags = (rec or {}).get("flags") or {}
+        entry["hashseed_env"] = (rec or {}).get("hashseed_env")
+        entry["hash_randomization"] = flags.get("hash_randomization")
+        entry["n_strings"] = len(((rec or {}).get("hash_probe") or {}).get("strings") or [])
+        if entry["hashseed_env"] is not None:
+            precondition_problems.append(
+                f"{c['label']}: PYTHONHASHSEED was set to {entry['hashseed_env']!r}. "
+                f"A pinned seed is C1's arrangement, not C2's — this cycle observed "
+                f"nothing about unpinned behaviour.")
+        if entry["hash_randomization"] != 1:
+            precondition_problems.append(
+                f"{c['label']}: sys.flags.hash_randomization is "
+                f"{entry['hash_randomization']!r}, not 1. The interpreter was not "
+                f"free to choose a seed, so identical digests would say nothing.")
+        if not entry["n_strings"]:
+            precondition_problems.append(
+                f"{c['label']}: the fixed hash probe recorded no strings, so its "
+                f"digest is not a measurement of anything.")
         per_cycle.append(entry)
 
     digests = [e["candidate"] for e in per_cycle if e.get("candidate")]
@@ -97,6 +127,14 @@ def seed_diversity(cycles: list[dict]) -> dict:
         status = "INSUFFICIENT"
         note = (f"no seed was recorded for {missing}; diversity cannot be observed "
                 f"from cycles that did not report one")
+    elif precondition_problems:
+        # Fail closed. Three distinct digests under a broken precondition would still
+        # be three distinct digests, and reporting OBSERVED from them would attribute
+        # the variation to something that was not actually in force.
+        status = "INSUFFICIENT"
+        note = (f"{distinct} distinct digest(s) across {len(digests)} starts, but the "
+                f"preconditions for reading them as unpinned-seed diversity did not "
+                f"hold. See precondition_problems.")
     elif distinct == len(digests):
         status = "OBSERVED"
         note = (f"{distinct} distinct seeds in {len(digests)} independent starts — "
@@ -109,11 +147,23 @@ def seed_diversity(cycles: list[dict]) -> dict:
                 f"cycle: three was what was authorised.")
     return {"status": status, "n_distinct": distinct, "n_cycles": len(cycles),
             "per_cycle": per_cycle, "note": note,
+            "precondition_problems": precondition_problems,
+            "preconditions_are_not_evidence": (
+                "PYTHONHASHSEED unset and hash_randomization=1 mean the interpreter "
+                "was PERMITTED to choose a seed per process. They are not evidence "
+                "that three starts chose different ones; three identical starts "
+                "satisfy both. Only the measured digests below distinguish them."),
+            "measurement": (
+                "per cycle, hash() over a fixed 11-string tuple, run by the same "
+                "binary with the same -S, PYTHONPATH, cwd and environment the arm "
+                "was launched with"),
             "limitation": (
-                "the recorded seed is that of a sibling interpreter launched by the "
-                "same procedure as the arm, not of the gunicorn worker that served "
-                "the requests. It is evidence about the launch procedure. The arms' "
-                "own ordering is in order_stability below.")}
+                "SIBLING / LAUNCH-ENVIRONMENT seed diversity. The recorded seed is "
+                "that of a sibling interpreter launched by the same procedure as the "
+                "arm, NOT of the gunicorn master or worker that served the requests. "
+                "Measuring it inside those would need a worker observation mechanism "
+                "this harness does not have. The arms' own behaviour is in "
+                "order_stability below.")}
 
 
 def order_stability(cycles: list[dict]) -> dict:
@@ -190,12 +240,18 @@ def main() -> int:
     print()
     print("seed diversity — an observation, not a gate")
     print(f"  status: {s['status']}  ({s['n_distinct']} distinct / {s['n_cycles']} cycles)")
+    print(f"  measured by: {s['measurement']}")
     print(f"  {s['note']}")
+    print(f"  NOT EVIDENCE {s['preconditions_are_not_evidence']}")
     print(f"  LIMITATION {s['limitation']}")
+    for p in s["precondition_problems"]:
+        print(f"    - {p}")
     for e in s["per_cycle"]:
         cand = (e.get("candidate") or "<none>")[:16]
         ref = (e.get("reference") or "<none>")[:16]
-        print(f"    {e['label']:12s} candidate {cand}  reference {ref}")
+        print(f"    {e['label']:12s} candidate {cand}  reference {ref}  "
+              f"PYTHONHASHSEED={e.get('hashseed_env')!r} "
+              f"hash_randomization={e.get('hash_randomization')!r}")
     print()
     print("order stability — recorded, deliberately not part of the verdict")
     print(f"  {o['n_comparable']} (case, arm) pairs comparable across cycles; "
@@ -210,7 +266,12 @@ def main() -> int:
                "site_limitation": (
                    "every cycle ran under -S: site.py did not run and no .pth in the "
                    "clone was processed. Isolated package-tree import correctness, "
-                   "not production's site/.pth startup semantics (spec 002 s4.3.1).")}
+                   "not production's site/.pth startup semantics (spec 002 s4.3.1)."),
+               "worker_provenance_limitation": (
+                   "no worker-level Python provenance was collected in any cycle. "
+                   "Import evidence comes from a sibling interpreter's launch "
+                   "configuration and from /proc/<pid>/maps, which can refute "
+                   "isolation but cannot establish what a gunicorn worker imported.")}
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2))

@@ -356,6 +356,31 @@ if [ "$S2_MODE" != none ]; then
       exit 2 ;;
   esac
   PKG_CLONE="$CLONE_ABS"
+
+  # The three artefacts are checked here — with the arguments, not with the host
+  # prerequisites — because each one describes something named on the command line
+  # and a wrong name is a configuration error. Putting them after the host gate had
+  # a second cost: on any machine that is not VM24 the wrong-host exit came first,
+  # so none of these refusals could be exercised offline at all. They are read-only
+  # stats; nothing is created and nothing is started.
+  [ -e "$PY_BINARY" ] || {
+    echo "--python-binary $PY_BINARY does not exist" >&2; exit 2; }
+  [ -x "$PY_BINARY" ] && [ -f "$PY_BINARY" ] || {
+    echo "--python-binary $PY_BINARY is not an executable file" >&2; exit 2; }
+  [ -e "$PKG_CLONE" ] || {
+    echo "--package-clone $PKG_CLONE does not exist" >&2; exit 2; }
+  [ -d "$PKG_CLONE" ] || {
+    echo "--package-clone $PKG_CLONE is not a directory" >&2; exit 2; }
+  [ -f "$CLONE_MANIFEST" ] || {
+    echo "--clone-manifest $CLONE_MANIFEST is not a readable file" >&2; exit 2; }
+  # The clone is immutable by construction. If this run can write to it, it is not
+  # the artefact that was built and verified — and a stray .pyc would change it.
+  if [ -w "$PKG_CLONE" ]; then
+    echo "--package-clone $PKG_CLONE is writable by this user. The clone is meant to" >&2
+    echo "  be read-only; a writable one may already have been modified, and this run" >&2
+    echo "  could modify it further." >&2
+    exit 2
+  fi
 fi
 
 # The repository this script lives in — the source of the candidate's api/, the venv,
@@ -482,21 +507,6 @@ if [ "$(hostname -s)" != "$EXPECT_HOST" ]; then
 fi
 [ -d "$STORE" ] || { echo "store $STORE not found" >&2; exit 4; }
 env -C / true 2>/dev/null || { echo "env -C is required (coreutils >= 8.28)" >&2; exit 4; }
-if [ "$S2_MODE" != none ]; then
-  [ -x "$PY_BINARY" ] || {
-    echo "--python-binary $PY_BINARY is not an executable file" >&2; exit 4; }
-  [ -d "$PKG_CLONE" ] || {
-    echo "--package-clone $PKG_CLONE is not a directory" >&2; exit 4; }
-  [ -f "$CLONE_MANIFEST" ] || {
-    echo "--clone-manifest $CLONE_MANIFEST is not a file" >&2; exit 4; }
-  # The clone is immutable by construction. If this run can write to it, it is not
-  # the artefact that was built and verified, and a stray .pyc would change it.
-  if [ -w "$PKG_CLONE" ]; then
-    echo "--package-clone $PKG_CLONE is writable by this user. The clone is meant to" >&2
-    echo "  be read-only; a writable one may already have been modified." >&2
-    exit 4
-  fi
-fi
 
 cd "$HERE"
 mkdir -p "$RUN" results

@@ -187,6 +187,19 @@ check "and the refusal lists what it got" "yes" \
 
 echo
 echo "the S2 arguments are required by the S2 modes and refused outside them"
+# Real artefacts, because --python-binary, --package-clone and --clone-manifest are
+# now checked with the arguments rather than behind the host gate. A case that is
+# meant to reach the grant or the mode announcement must therefore name things that
+# exist; placeholder paths remain only where the refusal happens earlier still, at
+# argument shape.
+S2FIX="$(mktemp -d)"
+mkdir -p "$S2FIX/clone" "$S2FIX/work-clone"
+: > "$S2FIX/manifest"
+cp /bin/echo "$S2FIX/binary" 2>/dev/null || printf '#!/bin/sh\ntrue\n' > "$S2FIX/binary"
+chmod +x "$S2FIX/binary"
+chmod a-w "$S2FIX/clone" "$S2FIX/work-clone"
+S2OK=(--python-binary "$S2FIX/binary" --package-clone "$S2FIX/clone"
+      --clone-manifest "$S2FIX/manifest")
 # The whole point: there is no fallback to dev2026/.venv. A missing flag must stop
 # the run, never silently select the campaign's own environment.
 check "--c1 without --python-binary is refused" "2" "$(code --c1)"
@@ -214,14 +227,11 @@ check "--package-clone outside an S2 mode is refused" "2" "$(code --package-clon
 check "--clone-manifest outside an S2 mode is refused" "2" "$(code --clone-manifest /tmp/m)"
 check "--workers outside an S2 mode is refused" "2" "$(code --workers 2)"
 check "--workers is refused under --c1" "2" \
-      "$(code --c1 --python-binary /usr/bin/python3 --package-clone /tmp/c \
-              --clone-manifest /tmp/m --workers 2)"
+      "$(code --c1 "${S2OK[@]}" --workers 2)"
 check "and says C1 pins one worker per arm" "yes" \
-      "$(has_text "$(run --c1 --python-binary /usr/bin/python3 --package-clone /tmp/c \
-                        --clone-manifest /tmp/m --workers 2)" "C1 pins one worker")"
+      "$(has_text "$(run --c1 "${S2OK[@]}" --workers 2)" "C1 pins one worker")"
 
-S2ARGS_C2=(--c2-cycle --python-binary /usr/bin/python3 --package-clone /tmp/clone
-           --clone-manifest /tmp/manifest)
+S2ARGS_C2=(--c2-cycle "${S2OK[@]}")
 check "a non-numeric --workers is refused" "2" "$(code "${S2ARGS_C2[@]}" --workers two)"
 check "--workers 0 is refused" "2" "$(code "${S2ARGS_C2[@]}" --workers 0)"
 check "--workers 99 is refused" "2" "$(code "${S2ARGS_C2[@]}" --workers 99)"
@@ -235,7 +245,7 @@ check "an ordinary label is accepted" "4" "$(code --label c2_cycle1)"
 
 echo
 echo "the clone is subject to the production boundary too"
-S2ARGS_C1=(--c1 --python-binary /usr/bin/python3 --clone-manifest /tmp/manifest)
+S2ARGS_C1=(--c1 --python-binary "$S2FIX/binary" --clone-manifest "$S2FIX/manifest")
 check "a clone inside production is refused" "2" \
       "$(code "${S2ARGS_C1[@]}" --package-clone "$HOME/python/woa23/site-packages")"
 check "and explains it would import the live tree" "yes" \
@@ -245,19 +255,112 @@ check "production's own site-packages as the clone is refused" "2" \
       "$(code "${S2ARGS_C1[@]}" \
               --package-clone "$HOME/.pyenv/versions/py311/lib/python3.11/site-packages")"
 check "a clone inside the workdir is refused" "2" \
-      "$(code "${S2ARGS_C1[@]}" --workdir "$HOME/woa23-s2-c1-work" \
-              --package-clone "$HOME/woa23-s2-c1-work/clone")"
+      "$(code "${S2ARGS_C1[@]}" --workdir "$S2FIX/work" \
+              --package-clone "$S2FIX/work/clone")"
 check "and says the workdir is written to" "yes" \
-      "$(has_text "$(run "${S2ARGS_C1[@]}" --workdir "$HOME/woa23-s2-c1-work" \
-                        --package-clone "$HOME/woa23-s2-c1-work/clone")" "must be immutable")"
-check "a clone merely sharing the workdir's prefix is allowed" "3" \
-      "$(code "${S2ARGS_C1[@]}" --workdir "$HOME/woa23-s2-c1-work" \
-              --package-clone "$HOME/woa23-s2-c1-work-clone")"
+      "$(has_text "$(run "${S2ARGS_C1[@]}" --workdir "$S2FIX/work" \
+                        --package-clone "$S2FIX/work/clone")" "must be immutable")"
+check "a clone merely sharing the workdir's prefix reaches the grant" "3" \
+      "$(code "${S2ARGS_C1[@]}" --workdir "$S2FIX/work" \
+              --package-clone "$S2FIX/work-clone")"
+
+echo
+echo "the three named artefacts must exist, and the clone must be read-only"
+# Checked with the arguments rather than with the host prerequisites: each names
+# something given on the command line, so a wrong name is a configuration error —
+# and behind the host gate none of these refusals could be exercised off VM24 at all.
+S2D="$(mktemp -d)"
+mkdir -p "$S2D/clone" "$S2D/rwclone"
+: > "$S2D/manifest"
+: > "$S2D/notabinary"
+cp /bin/echo "$S2D/binary" 2>/dev/null || printf '#!/bin/sh\ntrue\n' > "$S2D/binary"
+chmod +x "$S2D/binary"
+chmod a-w "$S2D/clone"
+
+ok_c1() { code --c1 --python-binary "$1" --package-clone "$2" --clone-manifest "$3" \
+               "${@:4}"; }
+ok_c1_run() { run --c1 --python-binary "$1" --package-clone "$2" --clone-manifest "$3"; }
+
+check "a nonexistent --python-binary is refused" "2" \
+      "$(ok_c1 "$S2D/no-such-python" "$S2D/clone" "$S2D/manifest")"
+check "and says it does not exist" "yes" \
+      "$(has_text "$(ok_c1_run "$S2D/no-such-python" "$S2D/clone" "$S2D/manifest")" \
+         "does not exist")"
+check "a --python-binary that is not executable is refused" "2" \
+      "$(ok_c1 "$S2D/notabinary" "$S2D/clone" "$S2D/manifest")"
+check "and says it is not an executable file" "yes" \
+      "$(has_text "$(ok_c1_run "$S2D/notabinary" "$S2D/clone" "$S2D/manifest")" \
+         "is not an executable file")"
+check "a directory given as --python-binary is refused" "2" \
+      "$(ok_c1 "$S2D/clone" "$S2D/clone" "$S2D/manifest")"
+
+check "a nonexistent --package-clone is refused" "2" \
+      "$(ok_c1 "$S2D/binary" "$S2D/no-such-clone" "$S2D/manifest")"
+check "and says it does not exist" "yes" \
+      "$(has_text "$(ok_c1_run "$S2D/binary" "$S2D/no-such-clone" "$S2D/manifest")" \
+         "does not exist")"
+check "a file given as --package-clone is refused" "2" \
+      "$(ok_c1 "$S2D/binary" "$S2D/manifest" "$S2D/manifest")"
+check "and says it is not a directory" "yes" \
+      "$(has_text "$(ok_c1_run "$S2D/binary" "$S2D/manifest" "$S2D/manifest")" \
+         "is not a directory")"
+
+check "a nonexistent --clone-manifest is refused" "2" \
+      "$(ok_c1 "$S2D/binary" "$S2D/clone" "$S2D/no-such-manifest")"
+check "a directory given as --clone-manifest is refused" "2" \
+      "$(ok_c1 "$S2D/binary" "$S2D/clone" "$S2D/clone")"
+
+# The clone must be the immutable artefact. A writable one may already have been
+# modified, and this run could modify it further.
+check "a writable clone is refused" "2" \
+      "$(ok_c1 "$S2D/binary" "$S2D/rwclone" "$S2D/manifest")"
+check "and says it could be modified further" "yes" \
+      "$(has_text "$(ok_c1_run "$S2D/binary" "$S2D/rwclone" "$S2D/manifest")" \
+         "could modify it further")"
+
+# All three good: the next thing that stops it is the missing grant, not the paths.
+check "three valid artefacts get as far as the grant" "3" \
+      "$(env -u WOA23_D2B_GRANTED -u WOA23_S2_C1_GRANTED -u WOA23_S2_C2_GRANTED \
+           "$RUNNER" --c1 --python-binary "$S2D/binary" --package-clone "$S2D/clone" \
+           --clone-manifest "$S2D/manifest" >/dev/null 2>&1; echo $?)"
+check "and with the grant, as far as the host check" "4" \
+      "$(env -u WOA23_D2B_GRANTED -u WOA23_S2_C2_GRANTED WOA23_S2_C1_GRANTED=yes \
+           "$RUNNER" --c1 --python-binary "$S2D/binary" --package-clone "$S2D/clone" \
+           --clone-manifest "$S2D/manifest" >/dev/null 2>&1; echo $?)"
+
+chmod u+w "$S2D/clone"
+rm -rf "$S2D"
+
+echo
+echo "the arms never fall back to dev2026/.venv — structurally, not just by message"
+# The refusals above cover a missing flag. This covers the other half: that no S2
+# launch line can reach the campaign's own venv even if one were added by accident.
+RUNSRC="$(cat "$RUNNER")"
+s2_launch="$(awk '/^elif \[ "\$S2_MODE" = c1 \]; then$/,/^fi$/' "$RUNNER")"
+check "the C1 and C2 arm launches never mention \$VENV" "no" \
+      "$(has_text "$s2_launch" 'VENV')"
+check "they use the production binary" "yes" "$(has_text "$s2_launch" '"$PY_BINARY" -S -m gunicorn')"
+check "with the clone as the only package source" "yes" \
+      "$(has_text "$s2_launch" 'PYTHONPATH="$PKG_CLONE"')"
+check "and VIRTUAL_ENV unset rather than overridden" "yes" \
+      "$(has_text "$s2_launch" '-u VIRTUAL_ENV -u PYTHONHOME')"
+check "C1 pins the seed" "yes" "$(has_text "$s2_launch" 'PYTHONHASHSEED=0 PYTHONPATH')"
+# CPython rejects PYTHONHASHSEED="", so an empty value would stop the interpreter
+# starting rather than unpin it — the arm would fail for the wrong reason.
+check "C2 unsets the seed rather than emptying it" "yes" \
+      "$(has_text "$s2_launch" '-u PYTHONHASHSEED')"
+# Comment lines are stripped first: the runner explains this very rule in a comment
+# that quotes the string being searched for, so a naive grep matches the warning
+# against the mistake and then reports the mistake.
+check "no S2 launch sets PYTHONHASHSEED to an empty value" "no" \
+      "$(has_text "$(grep -v '^[[:space:]]*#' "$RUNNER")" 'PYTHONHASHSEED=""')"
+check "bytecode writing is disabled on every S2 launch" "yes" \
+      "$(has_text "$s2_launch" 'PYTHONDONTWRITEBYTECODE=1')"
+check "user site-packages too" "yes" "$(has_text "$s2_launch" 'PYTHONNOUSERSITE=1')"
 
 echo
 echo "each experiment has its own grant, and none implies another"
-S2ARGS_OK=(--python-binary /usr/bin/python3 --package-clone "$HOME/woa23-s2-package-clone/dist"
-           --clone-manifest "$HOME/woa23-s2-package-clone/SHA256SUMS")
+S2ARGS_OK=("${S2OK[@]}")
 # The first argument is the grant environment, as a space-separated string of
 # VAR=value assignments; everything after it is the runner's own arguments. They
 # have to be kept apart: `env` reads anything before the command name as its own
@@ -315,9 +418,13 @@ s2out="$(s2run "WOA23_S2_C1_GRANTED=yes" --c1 "${S2ARGS_OK[@]}" \
                  --candidate-port 18061 --reference-port 18062 --scheduler-port 18798)"
 check "the mode names the experiment" "yes" \
       "$(has_text "$s2out" "mode      : C1 (S2: production binary + package clone, 5.2A byte-exact)")"
-check "the binary is printed" "yes" "$(has_text "$s2out" "binary    : /usr/bin/python3")"
-check "the clone is printed" "yes" \
-      "$(has_text "$s2out" "clone     : $HOME/woa23-s2-package-clone/dist")"
+check "the binary is printed" "yes" "$(has_text "$s2out" "binary    : $S2FIX/binary")"
+# Resolved, not as typed. The boundary check follows symlinks before comparing, and
+# the announcement has to show what was actually checked — otherwise a symlinked
+# clone would be announced as one path and validated as another.
+S2FIX_PHYS="$(cd "$S2FIX" && pwd -P)"
+check "the clone is printed, physically resolved" "yes" \
+      "$(has_text "$s2out" "clone     : $S2FIX_PHYS/clone")"
 check "the manifest is printed" "yes" "$(has_text "$s2out" "manifest  : ")"
 check "the pinned seed is stated" "yes" \
       "$(has_text "$s2out" "seed      : PYTHONHASHSEED=0 (pinned)")"
@@ -380,6 +487,9 @@ check "and it says C1 is one cycle with a pinned seed" "yes" \
 check "the refusal states it would start the arms three times" "yes" \
       "$(has_text "$(cycrun "" "${CYCARGS[@]}")" "THREE")"
 check "--help exits 0" "0" "$(cyc "" --help)"
+
+chmod u+w "$S2FIX/clone" "$S2FIX/work-clone"
+rm -r "$S2FIX"
 
 echo
 echo "nothing above started a process or bound a port"

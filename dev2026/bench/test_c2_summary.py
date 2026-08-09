@@ -43,7 +43,8 @@ def case(cid, ref_order, cand_order, verdict_="MATCH"):
 
 
 def write_cycle(root, label, *, gate="PASS", variant="5.2B", seed=None,
-                cases=None, skip=()):
+                cases=None, skip=(), hashseed_env=None, randomization=1,
+                n_strings=11):
     root.mkdir(parents=True, exist_ok=True)
     if "contract" not in skip:
         (root / f"{label}_contract.json").write_text(json.dumps({
@@ -53,7 +54,12 @@ def write_cycle(root, label, *, gate="PASS", variant="5.2B", seed=None,
         if f"interp_{arm}" in skip:
             continue
         (root / f"{label}_interp_{arm}.json").write_text(json.dumps({
-            "label": arm, "seed_digest": seed, "problems": []}))
+            "label": arm, "seed_digest": seed, "problems": [],
+            "hashseed_env": hashseed_env,
+            "flags": {"no_site": 1, "ignore_environment": 0,
+                      "hash_randomization": randomization},
+            "hash_probe": {"strings": ["s"] * n_strings,
+                           "hashes": [1] * n_strings}}))
     if "environment" not in skip:
         (root / f"{label}_environment.json").write_text(json.dumps(
             {"kind": "s2_package_clone_environment"}))
@@ -132,7 +138,69 @@ with tempfile.TemporaryDirectory() as td:
           "c2_cycle2" in s["note"])
 
     check("the sibling-interpreter limitation travels with the observation", True,
-          "not of the gunicorn worker" in s["limitation"])
+          "NOT of the gunicorn master or worker" in s["limitation"])
+    check("and it is labelled sibling/launch-environment diversity", True,
+          "SIBLING / LAUNCH-ENVIRONMENT" in s["limitation"])
+    check("the measurement method is recorded with the number", True,
+          "fixed 11-string tuple" in s["measurement"])
+
+
+print()
+print("the preconditions are checked, and are not themselves the evidence")
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    cycles = build(root, c1={"seed": "a" * 64}, c2={"seed": "b" * 64},
+                   c3={"seed": "c" * 64})
+    s = seed_diversity(cycles)
+    check("clean preconditions raise no problem", [], s["precondition_problems"])
+    check("and the statement that they are not evidence is carried", True,
+          "not evidence" in s["preconditions_are_not_evidence"].lower())
+    check("it names both preconditions", True,
+          "PYTHONHASHSEED unset" in s["preconditions_are_not_evidence"]
+          and "hash_randomization=1" in s["preconditions_are_not_evidence"])
+
+    # Three DISTINCT digests, but the seed was pinned. Reporting OBSERVED here would
+    # attribute variation to an arrangement that was not in force.
+    cycles = build(root, c1={"seed": "a" * 64, "hashseed_env": "0"},
+                   c2={"seed": "b" * 64}, c3={"seed": "c" * 64})
+    s = seed_diversity(cycles)
+    check("a pinned seed makes distinct digests INSUFFICIENT", "INSUFFICIENT",
+          s["status"])
+    check("and says the cycle observed nothing about unpinned behaviour", True,
+          any("nothing about unpinned" in p for p in s["precondition_problems"]))
+    check("the digests are still counted and reported", 3, s["n_distinct"])
+
+    cycles = build(root, c1={"seed": "a" * 64, "randomization": 0},
+                   c2={"seed": "b" * 64}, c3={"seed": "c" * 64})
+    s = seed_diversity(cycles)
+    check("hash_randomization=0 makes it INSUFFICIENT", "INSUFFICIENT", s["status"])
+    check("and says identical digests would say nothing", True,
+          any("would say nothing" in p for p in s["precondition_problems"]))
+
+    cycles = build(root, c1={"seed": "a" * 64, "n_strings": 0},
+                   c2={"seed": "b" * 64}, c3={"seed": "c" * 64})
+    s = seed_diversity(cycles)
+    check("an empty probe string set is INSUFFICIENT", "INSUFFICIENT", s["status"])
+    check("and says the digest measures nothing", True,
+          any("not a measurement" in p for p in s["precondition_problems"]))
+
+    # The preconditions holding is not, on its own, diversity.
+    cycles = build(root, c1={"seed": "a" * 64}, c2={"seed": "a" * 64},
+                   c3={"seed": "a" * 64})
+    s = seed_diversity(cycles)
+    check("clean preconditions with identical digests are still INSUFFICIENT",
+          "INSUFFICIENT", s["status"])
+    check("and raise no precondition problem, because none is wrong", [],
+          s["precondition_problems"])
+
+    # The preconditions as observed are recorded per cycle, for reading later.
+    cycles = build(root, c1={"seed": "a" * 64}, c2={"seed": "b" * 64},
+                   c3={"seed": "c" * 64})
+    s = seed_diversity(cycles)
+    check("each cycle records the seed variable as observed", [None, None, None],
+          [e["hashseed_env"] for e in s["per_cycle"]])
+    check("and the randomization flag as observed", [1, 1, 1],
+          [e["hash_randomization"] for e in s["per_cycle"]])
 
 
 print()

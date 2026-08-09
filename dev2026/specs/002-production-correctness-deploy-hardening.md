@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 9 | 2026-08-09 | **No worker-level Python provenance is claimed.** The sibling probe establishes the *launch environment and import configuration*; `/proc/<pid>/maps` is stated as a **refuter** — a production path in it disproves isolation, its absence proves nothing correspondingly strong, because maps lists mapped files and not imports. No mechanism observes `sys.path`/`sys.modules` inside a gunicorn worker; the only external route (a gunicorn `-c` `post_fork` hook) changes the arms' launch line and is not part of the C1 request. Recorded as an explicit C1 limitation in §7a.3, in every interpreter record, in the C2 summary and on stdout. **C2 seed preconditions separated from evidence** — `PYTHONHASHSEED` unset and `hash_randomization=1` only mean the interpreter was *permitted* to choose; a cycle with a broken precondition is `INSUFFICIENT` even when the three digests differ, and the result is labelled **sibling / launch-environment seed diversity**. **§9: a C1 pass is explicitly not deployment readiness.** **D1 restated as open** with a standing summary. Runner: the three S2 artefacts are now checked with the arguments (exit 2) rather than behind the host gate, where they could not be exercised offline; `check_maps` was using the un-expanded forbidden roots and now uses the same expanded list as the path check. |
 | 8 | 2026-08-09 | **Process readiness and store readiness separated throughout** — §7 D2. A 200 on the OpenAPI document says the process is serving and nothing about the store; C1 may use it as a startup precondition and may not call the store ready. That the endpoint would answer 200 with an unreadable store is marked an **inference from D1, not a measurement**: no socket was bound. D1's fixtures restated as **six negative fixtures (N1–N6) and one real-store control (P1)**, with what each has at the store path. **§7a added: the runner as implemented** — the `--c1` / `--c2-cycle` modes, the separate `WOA23_S2_C1_GRANTED` / `WOA23_S2_C2_GRANTED` gates that no other grant implies in either direction, mandatory `--python-binary` / `--package-clone` / `--clone-manifest` with **no fallback to `dev2026/.venv`**, the interpreter probe plus `/proc/<pid>/maps` as two separate kinds of evidence, order fingerprints recorded outside the verdict, and the request ceilings. Offline only; nothing executed against VM24. |
 | 7 | 2026-08-09 | **`-S` means the smoke did not reproduce production's startup semantics** — site.py never ran, so no `.pth` was processed. C1 as evidenced is downgraded to *isolated package-tree import correctness*, with launcher and site semantics listed as a limitation, and a site-enabled sanitised variant designed in §4.3 for separate authorisation. D1 fixtures strengthened: a missing group path is **not** proof of a non-Zarr store, and the three failure stages are now distinguished — §7. The **`-E` run of 2026-08-09 is marked invalid** and may not be cited. "evidence of interrupted installation" softened to "consistent with". The filename audit no longer offers any judgement about the six non-Python hits. |
 | 6 | 2026-08-09 | Digests **recomputed keyed on the dist-info directory**, not the package name, so `h5py` and `netCDF4` at two versions each survive as distinct entries — §4.1.2b. The name-keyed values of rev 1–5 are superseded and marked as such, including `a796…`, which cannot be the package-tree digest under the new definition. The filename audit no longer calls its 68 hits false positives: contents were never read, so the paths are described and the judgement is withheld — §4.1.5. Provenance re-collected without `-E`, with the full `sys.flags` and the exact command recorded — §4.2. **§7 D1 replaced with measured behaviour**: of the three candidate failure modes only the unset variable fails at startup; a wrong or non-store path starts cleanly and fails per request. |
@@ -792,6 +793,19 @@ change requiring its own spec and approval**. S2's obligation is to establish th
 behaviour; changing it is not S2's to decide, and the behaviour is stated above so the
 decision can be made on evidence.
 
+#### D1 stays open, and this is its standing summary
+
+| | established |
+|---|---|
+| a **missing** `WOA23_ZARR_STORE` | fails at **import**, and again at startup — exit 1, before anything serves |
+| an **invalid or non-Zarr** store (N2–N6) | **starts successfully** and fails on the **first data request** |
+| **readiness** under those conditions | **not established** — needs a listening server, which nothing authorises |
+
+Nothing in C1 or C2 changes any of this, and neither run is permitted to. The
+candidate is unmodified — `api/` is byte-identical to `origin/main` — and any
+startup-time validation remains a separate candidate-change decision. D1 is recorded
+as **open**, not closed by the S2 runs.
+
 #### D1a — the reference behaves differently, and the difference is structural
 
 | | reference | candidate |
@@ -957,18 +971,51 @@ Two changes were needed to make the first two honest under S2:
   lockfile; `S2_ENVIRONMENT_RECORD_FIELDS` puts `package_manifest_sha256` in exactly
   the position `lockfile_sha256` holds under D2b, compared with the same strictness.
 
-**The interpreter probe and `/proc/<pid>/maps` are separate evidence and neither is
-sufficient.**
+**The interpreter probe and `/proc/<pid>/maps` are separate evidence, they establish
+different kinds of thing, and neither is worker-level import provenance.**
 
 - The probe is an **identically-launched sibling interpreter**: same binary, flags,
   `PYTHONPATH`, cwd and environment, reporting `sys.executable`, `sys.prefix`,
   `sys.base_prefix`, the full `sys.flags`, the whole ordered `sys.path` with empty
-  entries expanded against the cwd, and `__file__` for fourteen named modules. It is
-  exact about the **launch procedure** and it is **not the gunicorn worker**.
-- `/proc/<pid>/maps`, read for every process in each arm's tracked tree, is **the arm
-  itself**: every file it actually mapped, which is where polars, numpy, zarr's
-  codecs, h5py and netCDF4 would appear if they had come from production. It is
-  blind to a pure-Python module imported from the wrong place.
+  entries expanded against the cwd, and `__file__` for fourteen named modules.
+
+  **What it establishes is the launch environment and import configuration**: that a
+  process started this way resolves these modules to these files. It is a sibling
+  process, not the gunicorn worker, and it cannot say what the worker imported.
+
+- `/proc/<pid>/maps`, read for every process in each arm's tracked tree, is **a
+  refuter, not a verifier**. A production path appearing in it is direct evidence
+  that the running process loaded a file from production, and that refutes isolation
+  outright. Its *absence* proves nothing correspondingly strong: `maps` lists mapped
+  files, not imports. No entry in it names a module, a `sys.path` or an import, and
+  a pure-Python module read from the wrong directory leaves no trace at all.
+
+#### The C1 limitation this leaves, stated rather than papered over
+
+**Neither source observes `sys.path` or `sys.modules` inside a gunicorn worker, and
+no such mechanism exists in this harness.** The candidate may not be modified, and
+the only external route — a gunicorn `-c` config with a `post_fork` hook reporting
+from inside each worker — **changes the arms' launch line** and therefore needs its
+own decision before it is used. It is not part of the C1 request, and nothing here
+should be read as if it were already in place.
+
+So the honest statement of what a C1 pass establishes about imports is:
+
+> Processes launched by this procedure resolve the fourteen named modules to files
+> inside the read-only clone; every `sys.path` entry of such a process is inside the
+> clone, the staging tree or the interpreter's own stdlib, in both its absolute and
+> its resolved form; and no process in either arm's tracked tree mapped a single file
+> from production.
+
+and what it does **not** establish:
+
+> that the gunicorn workers which actually served the 64 contract responses imported
+> those modules from the clone. That is an inference from the launch configuration
+> plus the absence of production paths in `maps` — a strong one, and an inference.
+
+This limitation is carried in the output, not only here: every interpreter record
+and the C2 summary contain a `worker_provenance_limitation` field saying it, and it
+is printed at the end of every S2 run.
 
 Both fail closed. Every `sys.path` entry and every module file is checked in **both**
 its absolute and its resolved form — a clone path that is a symlink into production
@@ -997,15 +1044,36 @@ begins, and `bench/c2_summary.py` produces:
 
 1. **The 5.2B verdict.** PASS only if every cycle passed. Two passes and a failure is
    not two thirds of an answer, and the driver stops at the first failing cycle.
-2. **Seed diversity — an observation, never an escalation.** Each cycle records the
-   probe interpreter's hashes of a fixed eleven-string set. Three distinct digests is
-   `OBSERVED`; anything less is **`INSUFFICIENT`**, which is *not* a failure of the
-   candidate and *not* a reason to run a fourth cycle. There is no `--cycles` flag,
-   and passing one is an error naming the reason: a run that could choose its own
-   number could keep going until the observation came out a particular way.
-   `INSUFFICIENT` does not affect the exit status, so nothing pushes towards a fourth.
-   **Limitation, carried with the number:** this is a sibling interpreter's seed, not
-   the gunicorn worker's.
+2. **Seed diversity — an observation, never an escalation.**
+
+   **`PYTHONHASHSEED` unset and `hash_randomization=1` are preconditions, not
+   evidence.** Together they say only that the interpreter was *permitted* to choose
+   a seed per process. They are exactly as true of three starts that happened to
+   choose the same seed, and of a configuration in which the choice is degenerate.
+   Reporting diversity from them would be reporting the arrangement instead of the
+   result.
+
+   The measurement is therefore separate: **each cycle runs `hash()` over a fixed
+   eleven-string tuple, using the same binary with the same `-S`, `PYTHONPATH`, cwd
+   and environment the arm was launched with**, and the digest of those values is
+   what is compared across cycles. The preconditions are checked as well — a cycle
+   that reports a set `PYTHONHASHSEED`, `hash_randomization != 1`, or an empty probe
+   tuple makes the result `INSUFFICIENT` *even if the three digests differ*, because
+   variation under a broken precondition cannot be attributed to the arrangement
+   being tested.
+
+   Three distinct digests with clean preconditions is `OBSERVED`; anything else is
+   **`INSUFFICIENT`**, which is *not* a failure of the candidate and *not* a reason
+   to run a fourth cycle. There is no `--cycles` flag, and passing one is an error
+   naming the reason: a run that could choose its own number could keep going until
+   the observation came out a particular way. `INSUFFICIENT` does not affect the exit
+   status, so nothing pushes towards a fourth.
+
+   **Limitation, carried with the number and labelled on it:** this is
+   **sibling / launch-environment seed diversity**. The seed measured is that of a
+   sibling interpreter launched by the same procedure, **not** of the gunicorn master
+   or of any worker that served a request. Measuring it inside those needs the same
+   worker observation mechanism §7a.3 says does not exist.
 3. **Order stability — recorded, and deliberately not part of pass/fail.** Every case
    now carries an order fingerprint per arm: the raw body digest, a **row-order
    digest over the row keys only with values excluded**, and the column sequence. The
@@ -1064,6 +1132,17 @@ seed.
 - anything about latency, throughput or resource use;
 - anything about nginx, TLS or the public path;
 - anything about behaviour under concurrent load beyond what C2 examines;
+- **that the workers which served those responses imported from the clone.** That is
+  an inference from the launch configuration and the absence of production paths in
+  `maps`; no worker-level Python provenance mechanism exists — §7a.3;
+- **that the deployment is ready.** A contract gate compares two processes this
+  harness started, in a staging directory, under `-S`, with a store symlink, launched
+  by a shell script. It is not a deployment and a pass is not readiness. Readiness in
+  the operational sense — that a health check turns green only when the service can
+  serve, and does not turn green when the store is unreadable — is **D2's fourth
+  stage and is not established** (§7 D2); the launcher is not production's PM2 path
+  (§5); and the site/`.pth` startup semantics were never exercised (§4.3.1). **"C1
+  PASS" must never be written as "ready to deploy" or "deployment validated."**
 - that deployment is safe. That is the observation and rollback spec's question, and
   it needs a canary, not a contract gate.
 

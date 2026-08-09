@@ -243,8 +243,18 @@ with tempfile.TemporaryDirectory() as td:
     check("the empty sys.path entry is expanded to the cwd", True,
           any(e["raw"] == "" and os.path.realpath(e["real"]) == os.path.realpath(str(armdir))
               for e in f["sys_path"]))
-    check("the limitation travels with the record", True,
+    check("the site limitation travels with the record", True,
           "site.py did not run" in f["site_limitation"])
+    # The claim this record must never be read as making.
+    wl = f["worker_provenance_limitation"]
+    check("the record says it is a sibling, not a worker", True, "SIBLING" in wl)
+    check("and that what it establishes is the launch environment", True,
+          "launch environment and import" in wl)
+    check("and that no worker-level mechanism exists here", True,
+          "No worker-level Python provenance mechanism exists" in wl)
+    check("and names what such a mechanism would take", True, "post_fork" in wl)
+    check("and that maps refutes rather than establishes", True,
+          "REFUTE" in wl and "not proof of" in wl)
     check("the launch is recorded", "0", f["launch"]["pythonhashseed"])
     check("no .pyc was written into the clone", 0,
           len(list(clone.rglob("__pycache__"))))
@@ -319,7 +329,11 @@ with tempfile.TemporaryDirectory() as td:
           any(p.endswith("/lib") for p in rec["allowed_roots"]))
     check("the -S limitation is in the record", True,
           "site.py did not run" in rec["site_limitation"])
-    check("the -S limitation is printed too", True, "LIMITATION" in r.stdout)
+    check("the worker-provenance limitation is in the record too", True,
+          "SIBLING" in rec["worker_provenance_limitation"])
+    check("the -S limitation is printed", True, "LIMITATION (site)" in r.stdout)
+    check("and so is the worker-provenance one", True,
+          "LIMITATION (worker)" in r.stdout)
 
     r2 = subprocess.run(
         [sys.executable, "-m", "bench.s2_provenance",
@@ -342,6 +356,53 @@ with tempfile.TemporaryDirectory() as td:
     check("a missing interpreter is a failure, not an empty pass", 1, r3.returncode)
 
     # An unreadable PID must fail closed rather than be skipped silently.
+    # maps is checked against the EXPANDED forbidden roots, like sys.path is. On a
+    # host where production's site-packages is reached as .../versions/py311/... and
+    # IS .../versions/3.11.4/envs/py311/..., a root recorded in one form would never
+    # match a mapped file resolved in the other, and the refutation test would
+    # quietly refute nothing.
+    real_sp = "/home/odbadmin/.pyenv/versions/3.11.4/envs/py311/lib/python3.11/site-packages"
+    mapped = [f"{real_sp}/numpy/core/_multiarray_umath.cpython-311-x86_64-linux-gnu.so"]
+    check("a symlinked forbidden root misses the resolved path unexpanded", [],
+          check_maps(mapped, forbidden=["/home/odbadmin/.pyenv/versions/py311"]))
+    check("and catches it once the root is expanded", 1,
+          len(check_maps(mapped, forbidden=expand_roots(
+              ["/home/odbadmin/.pyenv/versions/3.11.4/envs/py311"]))))
+    # The wiring, since the pure check cannot see which list it was handed.
+    src = (Path(__file__).resolve().parent / "s2_provenance.py").read_text()
+    check("the CLI hands check_maps the expanded roots", True,
+          "check_maps(paths, forbidden=forbidden)" in src)
+    check("and not the raw argument", False,
+          "check_maps(paths, forbidden=args.forbid)" in src)
+
+    # The live-PID path needs /proc, which exists on the host this runs against and
+    # not on the machine these tests are written on. Skipped rather than faked: a
+    # stub /proc would test the stub.
+    if Path("/proc/self/maps").exists():
+        r_self = subprocess.run(
+            [sys.executable, "-m", "bench.s2_provenance",
+             "--python-binary", sys.executable, "--package-clone", str(clone),
+             "--cwd", td, "--label", "x", "--hashseed", "0", "--module", "json",
+             "--allow", str(clone), "--allow", td,
+             "--forbid", "/nonexistent-production", "--pid", str(os.getpid()),
+             "--out", str(Path(td) / "maps.json")],
+            cwd=str(Path(__file__).resolve().parent.parent),
+            capture_output=True, text=True)
+        check("a readable PID passes when nothing production is mapped", 0,
+              r_self.returncode)
+        rec_m = json.loads((Path(td) / "maps.json").read_text())["maps"][str(os.getpid())]
+        check("the mapped-file count is recorded", True, rec_m["n_mapped_files"] > 0)
+        check("no production hit", [], rec_m["production_hits"])
+        check("the record states what an empty result establishes", True,
+              "no mapped file of this process came from production" in rec_m["establishes"])
+        check("and states what it does not", True,
+              "not imports" in rec_m["does_not_establish"])
+        check("the printed line says it is a refutation test", True,
+              "refutation test only" in r_self.stdout)
+    else:
+        print("       (no /proc on this machine: the live-PID maps read is not "
+              "exercised here; the parsing and the checks above are)")
+
     r4 = subprocess.run(
         [sys.executable, "-m", "bench.s2_provenance",
          "--python-binary", sys.executable, "--package-clone", str(clone),

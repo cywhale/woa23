@@ -9,20 +9,34 @@ process actually loaded, so it is checked against two kinds of evidence, not one
 1. **An identically-launched interpreter.** Same binary, same flags, same
    `PYTHONPATH`, same cwd, same environment — asked to report `sys.executable`,
    `sys.prefix`, `sys.base_prefix`, `sys.flags`, the full ordered `sys.path`, and
-   `__file__` for every module that matters. This is exact about the launch
-   procedure and is **not** the gunicorn worker: it is a sibling process started
-   the same way. It cannot prove what the worker imported.
+   `__file__` for every module that matters.
 
-2. **The running arm's own `/proc/<pid>/maps`.** Every file the process has
-   actually mapped, which for this stack is every native extension it loaded —
-   polars, numpy, zarr's codecs, h5py, netCDF4. If one of those came from
-   production's site-packages, it appears here and nowhere else. This *is* the
-   arm, and it is the stronger of the two, but it only sees files with native
-   code: a pure-Python module imported from the wrong place leaves no trace in
-   `maps`.
+   What this establishes is the **launch environment and import configuration**:
+   that a process started this way resolves these modules to these files. It is a
+   sibling process. It is **not** the gunicorn worker and it cannot say what the
+   worker imported.
 
-Neither alone is sufficient and the pair is not equivalent to a proof. What can
-be said is what each one establishes, which is why they are recorded separately.
+2. **The running arm's own `/proc/<pid>/maps`.** Every file the process has mapped,
+   which for this stack includes the native extensions it loaded.
+
+   **This is a refuter, not a verifier, and the asymmetry is the whole of its
+   value.** A production path appearing here would be direct evidence that the
+   running process loaded a file from production — that refutes isolation outright.
+   Its *absence* proves nothing correspondingly strong: `maps` records mapped files,
+   not Python imports. A pure-Python module imported from the wrong directory leaves
+   no trace in it at all, and no entry in it names a module, a `sys.path` or an
+   import.
+
+**There is no worker-level Python provenance here, and nothing below should be read
+as if there were.** Neither source observes `sys.path` or `sys.modules` inside a
+gunicorn worker, because doing so would need a mechanism that does not exist: the
+candidate may not be modified, and the only external route — a gunicorn `-c` config
+with a `post_fork` hook reporting from inside each worker — would change the arms'
+launch line and therefore needs its own decision before it is used. Until such a
+mechanism is authorised and added, **"the workers imported from the clone" is an
+inference from the launch configuration plus the absence of production paths in
+`maps`, not an observation.** That is recorded as an explicit C1 limitation, in this
+module's output and in spec 002 section 4.3.1.
 
 The `-S` limitation applies to everything here and is carried in the output:
 `site.py` never runs, so no `.pth` file is processed. See spec 002 section 4.3.
@@ -184,6 +198,16 @@ def interpreter_facts(binary: str, clone: str, cwd: str, *,
         "present in the clone and did not execute. This is import correctness "
         "for the package tree, not production's site/.pth startup semantics."
     )
+    facts["worker_provenance_limitation"] = (
+        "This record is from a SIBLING interpreter launched by the same procedure "
+        "as the arm. It establishes the launch environment and import "
+        "configuration, not what any gunicorn worker imported. No worker-level "
+        "Python provenance mechanism exists in this harness: observing sys.path or "
+        "sys.modules inside a worker would need a gunicorn -c post_fork hook, which "
+        "changes the arms' launch line and is not authorised. /proc/<pid>/maps can "
+        "REFUTE isolation by showing a production path; its absence is not proof of "
+        "worker imports, because maps lists mapped files rather than imports."
+    )
     return facts
 
 
@@ -332,12 +356,17 @@ def parse_maps(text: str) -> list[str]:
 
 
 def check_maps(paths: list[str], *, forbidden: list[str]) -> list[str]:
-    """Mapped files that came from production.
+    """Mapped files that came from production. A refutation test, not a proof.
 
     Only the forbidden half is checked here, deliberately. A process maps plenty
     of legitimate things this harness has no list for — the C library, locale
     archives, the store's own files — so requiring an allow-list would produce
-    noise, not safety. What matters is that nothing came from production.
+    noise, not safety.
+
+    An empty result means **no mapped file came from production**. It does not mean
+    the process imported only from the clone: `maps` lists mapped files, not Python
+    imports, and a pure-Python module read from the wrong directory appears nowhere
+    in it. Callers must not report an empty result as worker-level import provenance.
     """
     problems = []
     for p in paths:
@@ -419,9 +448,16 @@ def main() -> int:
                             f"process's loaded files cannot be checked")
             maps_record[str(pid)] = {"error": err}
             continue
-        hits = check_maps(paths, forbidden=args.forbid)
-        maps_record[str(pid)] = {"n_mapped_files": len(paths),
-                                 "production_hits": hits}
+        hits = check_maps(paths, forbidden=forbidden)
+        maps_record[str(pid)] = {
+            "n_mapped_files": len(paths),
+            "production_hits": hits,
+            "establishes": ("no mapped file of this process came from production"
+                            if not hits else
+                            "this process mapped a file from production"),
+            "does_not_establish": ("which Python modules this process imported; "
+                                   "maps lists mapped files, not imports"),
+        }
         problems.extend(hits)
     facts["maps"] = maps_record
     facts["problems"] = problems
@@ -441,8 +477,10 @@ def main() -> int:
         print(f"    {name:12s} {info.get('real') or info.get('error')}")
     for pid, rec in sorted(maps_record.items()):
         print(f"    /proc/{pid}/maps: {rec.get('n_mapped_files', '?')} mapped files, "
-              f"{len(rec.get('production_hits') or [])} in production")
-    print(f"    LIMITATION {facts.get('site_limitation')}")
+              f"{len(rec.get('production_hits') or [])} in production "
+              f"(refutation test only)")
+    print(f"    LIMITATION (site) {facts.get('site_limitation')}")
+    print(f"    LIMITATION (worker) {facts.get('worker_provenance_limitation')}")
 
     if problems:
         print(f"{args.label}: import isolation is not established:", file=sys.stderr)
