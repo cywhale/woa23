@@ -4,13 +4,14 @@
   "collector_python": "3.11.4 (main, Jul 25 2023, 10:21:50) [GCC 9.4.0]",
   "cwd": "/home/odbadmin/woa23-s2-c1b-work/candidate",
   "dependencies": {
+    "clone_manifest": "/home/odbadmin/woa23-s2-package-clone/clone.manifest",
+    "clone_manifest_sha256": "f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4",
     "distributions": [],
     "distributions_sample": [
       "Deprecated==1.3.1",
       "GeoAlchemy2==0.15.2",
       "Jinja2==3.1.6"
     ],
-    "distributions_sha256": "60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a",
     "interpreter_args": [
       "-S"
     ],
@@ -21,9 +22,12 @@
       "PYTHONPATH": "/home/odbadmin/woa23-s2-package-clone/dist",
       "VIRTUAL_ENV": null
     },
-    "package_manifest": "/home/odbadmin/woa23-s2-package-clone/clone.manifest",
-    "package_manifest_sha256": "f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4",
-    "python_version": "3.11.4"
+    "n_dist_info_directories": 240,
+    "n_runtime_distributions": 236,
+    "name_version_set_sha256": "60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a",
+    "package_tree_digest": "b8754d32c8aaec6d2049de5d67d3f81aeff4f19effd1525d76b62955447c9b4b",
+    "python_version": "3.11.4",
+    "runtime_distribution_digest": "a26ca6c3cfe20ea643c30075d910bb03dbbc01eb3f9d2b4fd224b5d76701447b"
   },
   "env": {
     "PYTHONHASHSEED": "0",

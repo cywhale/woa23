@@ -285,7 +285,7 @@ def test_dependencies_lists_the_pinned_versions() -> None:
                        ("zarr", "2.18.6")):
         check(f"{name} is the pinned {want}", got.get(name) == want,
               f"got {got.get(name)}")
-    check("a distributions digest is produced", len(d.get("distributions_sha256", "")) == 64)
+    check("a distributions digest is produced", len(d.get("name_version_set_sha256", "")) == 64)
     check("the lockfile digest is recorded", len(d.get("lockfile_sha256", "")) == 64)
     # The two arms of a 5.2A run must agree on the interpreter version, so the probe
     # reports it from inside the environment rather than leaving it to be inferred.

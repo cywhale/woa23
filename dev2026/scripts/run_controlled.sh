@@ -596,7 +596,7 @@ json.dump({
     "env_python": os.environ["VENV_PY"],
     "python_version": deps["python_version"],
     "lockfile_sha256": deps["lockfile_sha256"],
-    "distributions_sha256": deps["distributions_sha256"],
+    "name_version_set_sha256": deps["name_version_set_sha256"],
     "n_distributions": len(deps["distributions"]),
     "distributions": deps["distributions"],
 }, open(f"results/{label}_harness_bootstrap.json", "w"), indent=2)
@@ -631,13 +631,15 @@ json.dump({"kind": "controlled_environment",
            "python_version": deps["python_version"],
            "env_python": venv_py,
            "lockfile_sha256": deps["lockfile_sha256"],
-           "distributions_sha256": deps["distributions_sha256"],
+           "name_version_set_sha256": deps["name_version_set_sha256"],
+           "name_version_set_canonicalization": deps["name_version_set_canonicalization"],
            "n_distributions": len(deps["distributions"]),
            "distributions": deps["distributions"]},
           open(f"results/{label}_environment.json", "w"), indent=2)
 print(f"  python {deps['python_version']}  "
       f"{len(deps['distributions'])} distributions  "
-      f"lock {deps['lockfile_sha256'][:16]}  dists {deps['distributions_sha256'][:16]}")
+      f"lock {deps['lockfile_sha256'][:16]}  "
+      f"name==version set {deps['name_version_set_sha256'][:16]}")
 PYEOF
 else
 # The S2 environment record describes the *clone*, not the venv, and it is produced
@@ -652,6 +654,7 @@ import json, os, sys
 from pathlib import Path
 sys.path.insert(0, ".")
 from bench.collect_backend_meta import dependencies
+from bench.dist_digests import CANONICALIZATION
 from bench.s2_provenance import launch_env
 
 binary = os.environ["PY_BINARY"]
@@ -664,13 +667,16 @@ label = os.environ["LABEL"]
 # answer does not depend on the hash seed, and pinning it would suggest it did.
 env = launch_env(clone, hashseed=None)
 deps = dependencies(binary, None, interp_args=("-S",), env=env,
-                    package_manifest=manifest)
+                    clone_manifest=manifest, clone_root=clone)
 if "distributions_error" in deps:
     print(f"cannot list the clone's distributions: {deps['distributions_error']}",
           file=sys.stderr)
     raise SystemExit(1)
-if "package_manifest_error" in deps:
-    print(f"clone manifest: {deps['package_manifest_error']}", file=sys.stderr)
+if "clone_manifest_error" in deps:
+    print(f"clone manifest: {deps['clone_manifest_error']}", file=sys.stderr)
+    raise SystemExit(1)
+if "clone_digest_error" in deps:
+    print(f"clone dist-info digests: {deps['clone_digest_error']}", file=sys.stderr)
     raise SystemExit(1)
 if deps["python_version"] != want_py:
     print(f"the clone's interpreter reports {deps['python_version']}, expected "
@@ -687,9 +693,18 @@ json.dump({"kind": "s2_package_clone_environment",
            "python_version": deps["python_version"],
            "env_python": binary,
            "package_clone": clone,
-           "package_manifest": deps["package_manifest"],
-           "package_manifest_sha256": deps["package_manifest_sha256"],
-           "distributions_sha256": deps["distributions_sha256"],
+           # All three digests over the same tree, each with what it hashes, so
+           # none can be read as another. name_version_set_sha256 is the SUPERSEDED
+           # rev 1-5 canonicalization and is kept because it is the only one an
+           # arm's own interpreter can compute.
+           "clone_manifest": deps["clone_manifest"],
+           "clone_manifest_sha256": deps["clone_manifest_sha256"],
+           "package_tree_digest": deps["package_tree_digest"],
+           "runtime_distribution_digest": deps["runtime_distribution_digest"],
+           "n_dist_info_directories": deps["n_dist_info_directories"],
+           "n_runtime_distributions": deps["n_runtime_distributions"],
+           "name_version_set_sha256": deps["name_version_set_sha256"],
+           "digest_canonicalization": dict(CANONICALIZATION),
            "n_distributions": len(deps["distributions"]),
            "distributions": deps["distributions"],
            "interpreter_args": deps["interpreter_args"],
@@ -700,9 +715,14 @@ json.dump({"kind": "s2_package_clone_environment",
                "site/.pth startup semantics (spec 002 section 4.3.1).")},
           open(f"results/{label}_environment.json", "w"), indent=2)
 print(f"  clone python {deps['python_version']}  "
-      f"{len(deps['distributions'])} distributions  "
-      f"manifest {deps['package_manifest_sha256'][:16]}  "
-      f"dists {deps['distributions_sha256'][:16]}")
+      f"{len(deps['distributions'])} distributions")
+print(f"    clone_manifest_sha256       {deps['clone_manifest_sha256']}")
+print(f"    package_tree_digest         {deps['package_tree_digest']} "
+      f"({deps['n_dist_info_directories']} dist-info dirs)")
+print(f"    runtime_distribution_digest {deps['runtime_distribution_digest']} "
+      f"({deps['n_runtime_distributions']} with METADATA)")
+print(f"    name_version_set_sha256     {deps['name_version_set_sha256']} "
+      f"(SUPERSEDED rev 1-5 canonicalization; not the runtime digest)")
 print(f"  LIMITATION -S: site.py does not run; no .pth in the clone is processed.")
 PYEOF
 
@@ -1256,7 +1276,7 @@ else
       --expect-argv-contains "$expect" \
       --env-python "$PY_BINARY" --env-python-arg=-S \
       --env-python-pythonpath "$PKG_CLONE" \
-      --package-manifest "$CLONE_MANIFEST" \
+      --clone-manifest "$CLONE_MANIFEST" --clone-root "$PKG_CLONE" \
       --out "results/${LABEL}_meta_${arm}.json"
   done
 
@@ -1313,7 +1333,7 @@ if problems:
     raise SystemExit(1)
 print(f"both arms: python {cand['env_python_version']}, "
       f"{len(cand['dependencies']['distributions'])} distributions, "
-      f"digest {cand['dependencies']['distributions_sha256'][:16]}")
+      f"name==version set {cand['dependencies']['name_version_set_sha256'][:16]}")
 print(f"both arms build group paths from {cand['store_path_literal']!r}")
 PYEOF
 

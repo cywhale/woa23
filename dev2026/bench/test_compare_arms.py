@@ -84,7 +84,7 @@ check("complaining about a missing lockfile digest", True,
 check("which is true and irrelevant: S2 has no lockfile", None,
       cand["dependencies"].get("lockfile_sha256"))
 check("the anchor it does have is the clone manifest", 64,
-      len(cand["dependencies"]["package_manifest_sha256"]))
+      len(cand["dependencies"]["clone_manifest_sha256"]))
 
 print()
 print("the fixtures record what the run established about the arms")
@@ -95,14 +95,14 @@ check("the reference too", cand["env_python"], ref["env_python"])
 check("both at 3.11.4", ("3.11.4", "3.11.4"),
       (cand["env_python_version"], ref["env_python_version"]))
 check("both saw the same distribution set",
-      cand["dependencies"]["distributions_sha256"],
-      ref["dependencies"]["distributions_sha256"])
+      cand["dependencies"]["name_version_set_sha256"],
+      ref["dependencies"]["name_version_set_sha256"])
 check("both anchored on the same clone manifest",
-      cand["dependencies"]["package_manifest_sha256"],
-      ref["dependencies"]["package_manifest_sha256"])
+      cand["dependencies"]["clone_manifest_sha256"],
+      ref["dependencies"]["clone_manifest_sha256"])
 check("and it is the manifest verified on the host",
       "f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4",
-      cand["dependencies"]["package_manifest_sha256"])
+      cand["dependencies"]["clone_manifest_sha256"])
 check("both build group paths from the same literal", ("data/", "data/"),
       (cand["store_path_literal"], ref["store_path_literal"]))
 check("PYTHONHASHSEED was pinned on the candidate", "0",
@@ -115,12 +115,12 @@ print()
 print("every check the gate composes is still reachable")
 cand, ref, env = load()
 bad = copy.deepcopy(cand)
-bad["dependencies"]["distributions_sha256"] = "z" * 64
+bad["dependencies"]["name_version_set_sha256"] = "z" * 64
 check("a differing distribution set between arms is caught", True,
-      any_mentions(offhost(compare_arms(bad, ref, env, s2=True)), "installed distribution set"))
+      any_mentions(offhost(compare_arms(bad, ref, env, s2=True)), "installed name==version set"))
 
 bad = copy.deepcopy(cand)
-bad["dependencies"]["package_manifest_sha256"] = "z" * 64
+bad["dependencies"]["clone_manifest_sha256"] = "z" * 64
 p = offhost(compare_arms(bad, ref, env, s2=True))
 check("a differing clone manifest between arms is caught", True,
       any_mentions(p, "package-tree clone manifest"))
@@ -128,7 +128,7 @@ check("and it is also caught against the environment record", True,
       any_mentions(p, "clone manifest digest is not the environment"))
 
 bad = copy.deepcopy(cand)
-del bad["dependencies"]["package_manifest_sha256"]
+del bad["dependencies"]["clone_manifest_sha256"]
 check("a missing clone manifest digest is caught, not skipped", True,
       bool(offhost(compare_arms(bad, ref, env, s2=True))))
 
@@ -143,10 +143,10 @@ check("arms building group paths from different strings are caught", True,
       bool(offhost(compare_arms(bad, ref, env, s2=True))))
 
 stale = copy.deepcopy(env)
-stale["distributions_sha256"] = "z" * 64
+stale["name_version_set_sha256"] = "z" * 64
 check("an environment record that is not what the arms ran is caught", True,
       any_mentions(offhost(compare_arms(cand, ref, stale, s2=True)),
-                   "installed distribution set digest is not the environment"))
+                   "installed name==version set digest is not the environment"))
 
 check("a missing environment record fails closed", True,
       bool(offhost(compare_arms(cand, ref, None, s2=True))))
@@ -160,10 +160,13 @@ print("the digest sets differ by campaign, and neither is empty")
 check("D2b anchors on the lockfile", True,
       any(f == "lockfile_sha256" for f, _ in ARM_MATCH_DIGESTS))
 check("S2 anchors on the clone manifest", True,
-      any(f == "package_manifest_sha256" for f, _ in S2_ARM_MATCH_DIGESTS))
-check("both compare the distribution set", True,
-      all(any(f == "distributions_sha256" for f, _ in d)
+      any(f == "clone_manifest_sha256" for f, _ in S2_ARM_MATCH_DIGESTS))
+check("both compare the name==version set", True,
+      all(any(f == "name_version_set_sha256" for f, _ in d)
           for d in (ARM_MATCH_DIGESTS, S2_ARM_MATCH_DIGESTS)))
+check("and S2 also compares both dist-info-keyed digests", True,
+      {"package_tree_digest", "runtime_distribution_digest"}.issubset(
+          {f for f, _ in S2_ARM_MATCH_DIGESTS}))
 check("the default is unchanged for D2b callers", ARM_MATCH_DIGESTS,
       verify_environment_match.__defaults__[0])
 

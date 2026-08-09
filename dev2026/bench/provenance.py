@@ -298,8 +298,8 @@ def validate_meta(meta: dict | None, label: str,
         if deps.get("distributions_error"):
             problems.append(f"{label}: dependencies could not be listed "
                             f"({deps['distributions_error']})")
-        elif not deps.get("distributions_sha256"):
-            problems.append(f"{label}: dependencies record no distribution digest")
+        elif not deps.get("name_version_set_sha256"):
+            problems.append(f"{label}: dependencies record no name==version set digest")
     if meta.get("env_python_source") == "unresolved":
         problems.append(f"{label}: the package environment could not be resolved, so "
                         f"the dependency record describes no known interpreter")
@@ -643,10 +643,12 @@ def verify_prior_contract(prior: dict | None, cand_meta: dict | None,
 #: a package tree and anchors on that tree's manifest. Hard-coding `lockfile_sha256`
 #: here made every S2 run fail with "lockfile digest missing on candidate", which is
 #: true and irrelevant — there is no lockfile to be missing.
-ARM_MATCH_DIGESTS = (("distributions_sha256", "installed distribution set"),
+ARM_MATCH_DIGESTS = (("name_version_set_sha256", "installed name==version set"),
                      ("lockfile_sha256", "lockfile"))
-S2_ARM_MATCH_DIGESTS = (("distributions_sha256", "installed distribution set"),
-                        ("package_manifest_sha256", "package-tree clone manifest"))
+S2_ARM_MATCH_DIGESTS = (("name_version_set_sha256", "installed name==version set"),
+                        ("clone_manifest_sha256", "package-tree clone manifest"),
+                        ("package_tree_digest", "package-tree digest"),
+                        ("runtime_distribution_digest", "runtime distribution digest"))
 
 
 def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None,
@@ -688,7 +690,7 @@ def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None,
     # When the digests disagree, name the packages. "The sets differ" is not
     # actionable; "fsspec 2026.7.0 vs 2025.10.0" is.
     if ca.get("distributions") and ra.get("distributions") and \
-            ca.get("distributions_sha256") != ra.get("distributions_sha256"):
+            ca.get("name_version_set_sha256") != ra.get("name_version_set_sha256"):
         am = {x.split("==")[0]: x.split("==")[1] for x in ca["distributions"] if "==" in x}
         bm = {x.split("==")[0]: x.split("==")[1] for x in ra["distributions"] if "==" in x}
         for name in sorted(set(am) | set(bm)):
@@ -747,8 +749,8 @@ ENVIRONMENT_RECORD_FIELDS = (
     ("env_python", "env_python", "package environment path"),
     ("python_version", "env_python_version", "interpreter version"),
     ("lockfile_sha256", "dependencies.lockfile_sha256", "lockfile digest"),
-    ("distributions_sha256", "dependencies.distributions_sha256",
-     "installed distribution set digest"),
+    ("name_version_set_sha256", "dependencies.name_version_set_sha256",
+     "installed name==version set digest"),
 )
 
 # The S2 modes have no lockfile: the arms do not run an environment this campaign
@@ -762,10 +764,14 @@ ENVIRONMENT_RECORD_FIELDS = (
 S2_ENVIRONMENT_RECORD_FIELDS = (
     ("env_python", "env_python", "package environment interpreter"),
     ("python_version", "env_python_version", "interpreter version"),
-    ("package_manifest_sha256", "dependencies.package_manifest_sha256",
+    ("clone_manifest_sha256", "dependencies.clone_manifest_sha256",
      "package-tree clone manifest digest"),
-    ("distributions_sha256", "dependencies.distributions_sha256",
-     "installed distribution set digest"),
+    ("name_version_set_sha256", "dependencies.name_version_set_sha256",
+     "installed name==version set digest"),
+    ("package_tree_digest", "dependencies.package_tree_digest",
+     "package-tree digest (240 dist-info directories, s4.1.2b)"),
+    ("runtime_distribution_digest", "dependencies.runtime_distribution_digest",
+     "runtime distribution digest (236 with METADATA, s4.1.2b)"),
 )
 
 

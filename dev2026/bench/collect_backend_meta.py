@@ -452,7 +452,8 @@ def resolve_env_python(cwd: Path, argv: list[str], env: dict,
 def dependencies(env_python: str | None, lockfile: Path | None,
                  *, interp_args: tuple[str, ...] = (),
                  env: dict | None = None,
-                 package_manifest: Path | None = None) -> dict:
+                 clone_manifest: Path | None = None,
+                 clone_root: str | None = None) -> dict:
     """Installed distributions of the environment actually in use.
 
     `importlib.metadata` rather than `pip freeze`: a uv-created venv has no pip, so
@@ -467,17 +468,30 @@ def dependencies(env_python: str | None, lockfile: Path | None,
     answer cannot be read without the question it answers.
     """
     out: dict = {}
-    if package_manifest is not None:
+    if clone_manifest is not None:
         # The S2 anchor. There is no lockfile to point at, so what stands in its
         # place is the manifest produced when the clone was built and verified
         # against production — the artefact that distinguishes *this* clone from a
         # directory that merely has the right name.
-        if not package_manifest.exists():
-            out["package_manifest_error"] = f"{package_manifest} does not exist"
+        if not clone_manifest.exists():
+            out["clone_manifest_error"] = f"{clone_manifest} does not exist"
         else:
-            out["package_manifest"] = str(package_manifest)
-            out["package_manifest_sha256"] = hashlib.sha256(
-                package_manifest.read_bytes()).hexdigest()
+            out["clone_manifest"] = str(clone_manifest)
+            out["clone_manifest_sha256"] = hashlib.sha256(
+                clone_manifest.read_bytes()).hexdigest()
+    if clone_root is not None:
+        # The two dist-info-keyed digests of spec 002 s4.1.2b, read from the tree
+        # itself. Recorded alongside the name-keyed one so all three appear together
+        # with their canonicalizations and none can stand in for another.
+        try:
+            from bench.dist_digests import digests as _dd
+            d = _dd(clone_root)
+            out["package_tree_digest"] = d["package_tree_digest"]
+            out["runtime_distribution_digest"] = d["runtime_distribution_digest"]
+            out["n_dist_info_directories"] = d["n_dist_info_directories"]
+            out["n_runtime_distributions"] = d["n_runtime_distributions"]
+        except Exception as exc:
+            out["clone_digest_error"] = repr(exc)
     if interp_args:
         out["interpreter_args"] = list(interp_args)
     if env is not None:
@@ -516,7 +530,18 @@ def dependencies(env_python: str | None, lockfile: Path | None,
         payload = json.loads(r.stdout)
         listed = "\n".join(payload["dists"])
         out["python_version"] = payload["version"]
-        out["distributions_sha256"] = hashlib.sha256(listed.encode()).hexdigest()
+        # Named for what it hashes. It was `distributions_sha256`, which says
+        # nothing about the canonicalization, and its value for the package clone
+        # is byte-identical to the SUPERSEDED rev 1-5 "runtime distribution
+        # digest" — because it is that digest, recomputed live. Two different
+        # digests over the same tree must not share a name that fits both.
+        out["name_version_set_sha256"] = hashlib.sha256(listed.encode()).hexdigest()
+        out["name_version_set_canonicalization"] = (
+            "sorted set of '<Name>==<Version>' over "
+            "importlib.metadata.distributions() with a usable Name, joined with "
+            "newlines, UTF-8, SHA-256. Keyed on name and version, NOT on dist-info "
+            "directory. This is the superseded rev 1-5 canonicalization and is not "
+            "the runtime_distribution_digest (spec 002 s4.1.2b).")
         out["distributions"] = payload["dists"]
     except Exception as exc:
         out["distributions_error"] = repr(exc)
@@ -579,11 +604,12 @@ def build_meta(*, manifest: str, port: int, pid: int, listeners: list[int],
                env_python_override: str | None = None,
                interp_args: tuple[str, ...] = (),
                interp_env: dict | None = None,
-               package_manifest: Path | None = None) -> dict:
+               clone_manifest: Path | None = None,
+               clone_root: str | None = None) -> dict:
     env_py = resolve_env_python(cwd, argv, env, override=env_python_override)
     deps = dependencies(env_py["env_python"], lockfile,
                         interp_args=interp_args, env=interp_env,
-                        package_manifest=package_manifest)
+                        clone_manifest=clone_manifest, clone_root=clone_root)
     """Assemble the provenance record.
 
     Split out of `main()` so a test can build one without a live process and assert
@@ -672,12 +698,16 @@ def main() -> int:
                     help="PYTHONPATH for the distribution listing. Must be the same "
                          "value the arm was started with, or the record answers for "
                          "an environment no arm ran under.")
-    ap.add_argument("--package-manifest", type=Path, default=None,
+    ap.add_argument("--clone-manifest", type=Path, default=None,
                     help="the manifest produced when the package-tree clone was "
                          "built and verified against production. Its digest is the "
                          "S2 anchor, in the position --lockfile holds under D2b: "
                          "without it, nothing distinguishes the verified clone from "
                          "a directory with the right name.")
+    ap.add_argument("--clone-root", default=None,
+                    help="the package tree itself, so the two dist-info-keyed "
+                         "digests of spec 002 s4.1.2b are recorded beside the "
+                         "name-keyed one rather than inferred from it.")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -764,7 +794,8 @@ def main() -> int:
                       env_python_override=args.env_python,
                       interp_args=tuple(args.env_python_arg),
                       interp_env=interp_env,
-                      package_manifest=args.package_manifest)
+                      clone_manifest=args.clone_manifest,
+                      clone_root=args.clone_root)
 
     seed = meta["env"].get("PYTHONHASHSEED")
     print(f"pid {pid} on port {args.port}  cwd {cwd}")
