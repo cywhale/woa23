@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 15 | 2026-08-09 | **C1 executed and PASSED — `C1 PASS — isolated package-tree contract correctness`** — §7a.5a. Commit `c1166bfa`, archive verified against its authorised digest before shipping, 75/75 files. **5.2A byte-exact, 64/64 MATCH, 0 DIFFER, RC/CR 32/32**, 24,440,431 bytes per arm, **15 error-status cases byte-exact as well**. Both arms on production's interpreter with `PYTHONHASHSEED=0` and `'data/'`; `clone_manifest_sha256` `f3b66c49…`, `package_tree_digest` `b8754d32…`, `runtime_distribution_digest` `a26ca6c3…`, with `60236d72…` recorded only as the deprecated `name_version_set_sha256`. Clone integrity **three MATCHes**; import isolation clean with 0 production-mapped files; **cleanup PASS**; **production 8050 = 0 requests**; 67–96 requests per arm, 134–192 total. C16 and C16-csv, the two cases that differed under D2b, now match with identical row-order digests. Limitations retained in full and unchanged: `-S` did not run `site.py` or any `.pth`, the launcher is not PM2, there is **no worker-level import provenance**, `/home/odbadmin` remains writable so the manifest checks are **bounded detection and not immutability**, **D1 is not fixed**, **C2 has not run**, and **no latency, throughput or deployment-readiness conclusion exists**. |
 | 14 | 2026-08-09 | **The third C1 attempt is `INVALID_PRE_START`** — §7a.3h. It failed earlier than either predecessor: nothing was started, no port bound, no workdir created, zero requests of every kind. `ModuleNotFoundError: bench.dist_digests` — the module existed and its tests passed **in the working tree**, but `.gitignore`'s `**/dist_*` matched it, `git add -A` skipped it silently, `git status` did not list it, and the commit shipped without it. The per-file sync verified 72 of 72 files correctly; the commit was what was incomplete. Module renamed **`bench/package_digests.py`**, and `scripts/test_tracked.sh` added: every harness source must be tracked and unignored, every `bench.*` module imported anywhere must exist and be tracked, no harness module may be named `dist_*`, and **the committed tree is exported and checked to contain every imported module** — the check that would have failed before the run rather than during it. |
 | 13 | 2026-08-09 | **`60236d72…` identified: it is the superseded rev 1–5 digest, recomputed live** — §7a.3f. `dependencies()` hashes a sorted `Name==Version` set, which is that canonicalization, so the field named `distributions_sha256` was silently reproducing the digest revision 6 replaced. Renamed **`name_version_set_sha256`**, kept because it is the only one of the three an arm's own interpreter can compute, and every record now carries `clone_manifest_sha256` `f3b66c49…`, `package_tree_digest` `b8754d32…`, `runtime_distribution_digest` `a26ca6c3…` and the name-keyed digest **each beside its canonicalization**; the S2 field and digest lists check all three clone digests, not one. New `bench/package_digests.py`. **§7a.3g: the offline S2 integration test** — real artefacts, materialised source trees with recomputed digests so `validate_meta` re-hashes for real and **nothing is filtered**, `compare_arms(s2=True)` at zero problems, and the 64 cases served over loopback through the gate **invoked with the argument list read out of the runner**, reaching PASS 64/64 and FAIL naming the one altered case. |
 | 12 | 2026-08-09 | **The first C1 attempt is `INVALID_PRECONTRACT_HARNESS`, not a C1 FAIL** — §7a.3d. The contract gate was never reached: contract, latency, noise and production-8050 requests were all 0, while the process tree, store probe, three clone-integrity verifications and cleanup all completed. No C1 contract result may be written or cited from it. Two harness defects fixed (`--env-python-arg=-S`; all embedded-Python heredocs quoted), and a third found while fixing them: the worker-count scan flattened NUL-separated argv to newline-delimited text, so an argument containing a newline would shift every later position and make the wrong token the worker count — now parsed from the bytes and crossing into the shell as one integer, with regression tests over argv containing quotes, backticks, newlines, semicolons and `$(…)`. **§7a.3e added: harness bootstrap vs environment under test.** `uv sync --locked` is authorised for `dev2026/.venv` **only**; it is recorded in its own artefact with its scope stated, and the package clone and production site-packages stay immutable — enforced by mode bits, the ancestor check and three manifest re-verifications per run, not by uv's good behaviour. |
@@ -1317,6 +1318,115 @@ that is there. `scripts/test_tracked.sh` asks git instead:
   during one, and it was red against the offending commit.
 
 The module is now `bench/package_digests.py`.
+
+### 7a.5a C1, executed 2026-08-09
+
+
+**Result: C1 PASS — isolated package-tree contract correctness.**
+
+Read the name in full. It is not "C1 PASS", and §"What this is not" below is part of
+the result rather than a caveat attached to it.
+
+| | |
+|---|---|
+| commit | **`c1166bfa7110ad7687360cab06e74fa35a2ac119`** |
+| archive verified before shipping | `cc960eb760eef6927f8ddabaf3c6a75f3f70727e785179ac64222d4c8ad21490`, 75 files, file-list `4ee0d631…baac5b74` |
+| staging | `~/woa23-s2-c1d/`, workdir `~/woa23-s2-c1d-work/`, both new |
+| gate | **5.2A byte-exact**, 64 cases per arm |
+| verdict | **64/64 MATCH, 0 DIFFER** |
+| request order | **RC 32 / CR 32**, counterbalanced |
+| bytes compared | reference 24,440,431 / candidate **24,440,431** |
+| error-status cases | **15** (400 and 404) — **byte-exact MATCH as well**, not excluded |
+| captured | 2026-08-09T19:01:40+0800 on odb24 |
+
+#### The environment both arms ran in
+
+Production's own interpreter, against the read-only clone of production's package
+tree. Identical on both arms, field for field:
+
+| | |
+|---|---|
+| interpreter | `/home/odbadmin/.pyenv/versions/py311/bin/python3.11`, named explicitly, not derived |
+| `PYTHONHASHSEED` | **0**, both arms |
+| `store_path_literal` | `'data/'`, both arms |
+| `clone_manifest_sha256` | `f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4` |
+| `package_tree_digest` | `b8754d32c8aaec6d2049de5d67d3f81aeff4f19effd1525d76b62955447c9b4b` (240 dist-info directories) |
+| `runtime_distribution_digest` | `a26ca6c3cfe20ea643c30075d910bb03dbbc01eb3f9d2b4fd224b5d76701447b` (236 with `METADATA`) |
+| `name_version_set_sha256` | `60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a` — the **deprecated** name-keyed canonicalization (spec 002 §7a.3f). **It is not the runtime-distribution digest.** |
+
+The **harness bootstrap is a separate record**: `dev2026/.venv`, 58 distributions,
+lockfile `0d2980a5…`. It runs the comparator and is on no arm's import path. `uv`
+was authorised for that directory and nothing else; the clone and production
+site-packages were never written.
+
+#### Clone integrity — three full verifications, all MATCH
+
+| stage | problems | entries / files | bytes | seconds |
+|---|---|---|---|---|
+| preflight | 0 | 33,565 / 33,565 | 1,690,025,002 | 29.59 |
+| before-reference | 0 | 33,565 / 33,565 | 1,690,025,002 | 6.89 |
+| before-candidate | 0 | 33,565 / 33,565 | 1,690,025,002 | 6.85 |
+
+Clone parent mode **555**; ancestor chain checked; every file re-hashed each time,
+not sampled.
+
+#### Import isolation
+
+Both arms: no problems, `no_site=1`, `ignore_environment=0`. Two tracked processes
+each; 342 and 343 mapped files respectively, **0 from production**.
+
+#### The two cases that differed in the D2b run of 2026-08-08
+
+C16 (37,083 bytes, 204 rows) and C16-csv (10,843 bytes) — **both MATCH**, with
+identical row-order digests (`56ccfd33…`) and identical column sequences on the two
+arms. That difference was the benchmark handing the arms different store strings; here
+both build group paths from `'data/'`.
+
+#### Traffic, processes and cleanup
+
+- **6 OS processes**, derived from the measured worker count and verified against it.
+- **Requests: 64 contract + 2 data probe + 1–30 readiness per arm = 67–96 per arm,
+  134–192 total.** Ceilings were 96 and 192.
+- **Production 8050: 0 requests.** 8786 and 8787 were never connected to.
+- **Cleanup PASS.** All four services stopped, every process in every recorded tree
+  exited, 18061/18062/18798 confirmed free, boot id matched, production unchanged
+  (master 3960, start time 1874, listeners 3960/4334/4366). No `.pid`, `.tree`,
+  `.uncertain` or `.diag` left behind.
+- Afterwards: clone 33,565 files, **0 writable, 0 new `.pyc`**, manifest digest
+  unchanged; production site-packages 33,567 files at mtime 2026-02-12;
+  `~/python/woa23` at mtime 2026-08-05.
+
+#### What this result is
+
+The candidate and the unmodified reference return **byte-identical responses across
+all 64 contract cases** — including every error-status case — when both run on
+production's interpreter and a read-only copy of production's package tree, with a
+pinned hash seed, one worker each, in isolated staging.
+
+#### What this result is **not**
+
+Each of these is a limitation of the run, not a hedge about it.
+
+- **Not deployment validated, and not ready to deploy.** A contract gate compares two
+  processes this harness started, in a staging directory, under `-S`, with a store
+  symlink, launched by a shell script.
+- **`-S` means `site.py` never ran**, so no `.pth` in the clone was processed —
+  `distutils-precedence.pth` and the basemap nspkg `.pth` are present and did not
+  execute. Production's site/`.pth` startup semantics were not exercised.
+- **The launcher is not production's PM2 path.**
+- **No worker-level Python import provenance exists.** The probe is a sibling
+  interpreter launched by the same procedure; `/proc/<pid>/maps` can *refute*
+  isolation but its silence proves nothing, because it lists mapped files and not
+  imports. "The workers imported from the clone" is an inference.
+- **`/home/odbadmin` is writable**, so this account can still re-point the clone's
+  path. The three manifest verifications are **bounded detection, not immutability**.
+- **D1 is not fixed.** A missing `WOA23_ZARR_STORE` fails at import and startup; an
+  invalid or non-Zarr store still starts cleanly and fails on the first data request.
+  No candidate change is proposed or made.
+- **C2 has not been run.** Multi-worker behaviour and unpinned-seed ordering are
+  unexamined.
+- **No latency, throughput or resource conclusion of any kind.** None was measured;
+  the latency gate and the noise pilot did not run.
 
 ### 7a.4 C2: three cycles, and the three statements they support
 

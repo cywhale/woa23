@@ -281,3 +281,121 @@ first if the rung or the case set changes.
 
 Rung 60 and rung 150 were **not** run. `next_rung: 60` in the artefact is the
 ladder's suggestion, not an authorisation.
+
+---
+
+# Non-performance contract evidence
+
+**Nothing in this section is a performance baseline.** It records contract
+correctness only. No timing was collected, no latency or throughput claim may be
+drawn from any of it, and none of it belongs in the measurement record above.
+It lives in this file so the contract evidence and the measurement evidence can be
+found together, and it is fenced off so they cannot be confused.
+
+## C1 controlled run, 2026-08-09 — isolated package-tree contract correctness
+
+**Result: C1 PASS — isolated package-tree contract correctness.**
+
+Read the name in full. It is not "C1 PASS", and §"What this is not" below is part of
+the result rather than a caveat attached to it.
+
+| | |
+|---|---|
+| commit | **`c1166bfa7110ad7687360cab06e74fa35a2ac119`** |
+| archive verified before shipping | `cc960eb760eef6927f8ddabaf3c6a75f3f70727e785179ac64222d4c8ad21490`, 75 files, file-list `4ee0d631…baac5b74` |
+| staging | `~/woa23-s2-c1d/`, workdir `~/woa23-s2-c1d-work/`, both new |
+| gate | **5.2A byte-exact**, 64 cases per arm |
+| verdict | **64/64 MATCH, 0 DIFFER** |
+| request order | **RC 32 / CR 32**, counterbalanced |
+| bytes compared | reference 24,440,431 / candidate **24,440,431** |
+| error-status cases | **15** (400 and 404) — **byte-exact MATCH as well**, not excluded |
+| captured | 2026-08-09T19:01:40+0800 on odb24 |
+
+### The environment both arms ran in
+
+Production's own interpreter, against the read-only clone of production's package
+tree. Identical on both arms, field for field:
+
+| | |
+|---|---|
+| interpreter | `/home/odbadmin/.pyenv/versions/py311/bin/python3.11`, named explicitly, not derived |
+| `PYTHONHASHSEED` | **0**, both arms |
+| `store_path_literal` | `'data/'`, both arms |
+| `clone_manifest_sha256` | `f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4` |
+| `package_tree_digest` | `b8754d32c8aaec6d2049de5d67d3f81aeff4f19effd1525d76b62955447c9b4b` (240 dist-info directories) |
+| `runtime_distribution_digest` | `a26ca6c3cfe20ea643c30075d910bb03dbbc01eb3f9d2b4fd224b5d76701447b` (236 with `METADATA`) |
+| `name_version_set_sha256` | `60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a` — the **deprecated** name-keyed canonicalization (spec 002 §7a.3f). **It is not the runtime-distribution digest.** |
+
+The **harness bootstrap is a separate record**: `dev2026/.venv`, 58 distributions,
+lockfile `0d2980a5…`. It runs the comparator and is on no arm's import path. `uv`
+was authorised for that directory and nothing else; the clone and production
+site-packages were never written.
+
+### Clone integrity — three full verifications, all MATCH
+
+| stage | problems | entries / files | bytes | seconds |
+|---|---|---|---|---|
+| preflight | 0 | 33,565 / 33,565 | 1,690,025,002 | 29.59 |
+| before-reference | 0 | 33,565 / 33,565 | 1,690,025,002 | 6.89 |
+| before-candidate | 0 | 33,565 / 33,565 | 1,690,025,002 | 6.85 |
+
+Clone parent mode **555**; ancestor chain checked; every file re-hashed each time,
+not sampled.
+
+### Import isolation
+
+Both arms: no problems, `no_site=1`, `ignore_environment=0`. Two tracked processes
+each; 342 and 343 mapped files respectively, **0 from production**.
+
+### The two cases that differed in the D2b run of 2026-08-08
+
+C16 (37,083 bytes, 204 rows) and C16-csv (10,843 bytes) — **both MATCH**, with
+identical row-order digests (`56ccfd33…`) and identical column sequences on the two
+arms. That difference was the benchmark handing the arms different store strings; here
+both build group paths from `'data/'`.
+
+### Traffic, processes and cleanup
+
+- **6 OS processes**, derived from the measured worker count and verified against it.
+- **Requests: 64 contract + 2 data probe + 1–30 readiness per arm = 67–96 per arm,
+  134–192 total.** Ceilings were 96 and 192.
+- **Production 8050: 0 requests.** 8786 and 8787 were never connected to.
+- **Cleanup PASS.** All four services stopped, every process in every recorded tree
+  exited, 18061/18062/18798 confirmed free, boot id matched, production unchanged
+  (master 3960, start time 1874, listeners 3960/4334/4366). No `.pid`, `.tree`,
+  `.uncertain` or `.diag` left behind.
+- Afterwards: clone 33,565 files, **0 writable, 0 new `.pyc`**, manifest digest
+  unchanged; production site-packages 33,567 files at mtime 2026-02-12;
+  `~/python/woa23` at mtime 2026-08-05.
+
+### What this result is
+
+The candidate and the unmodified reference return **byte-identical responses across
+all 64 contract cases** — including every error-status case — when both run on
+production's interpreter and a read-only copy of production's package tree, with a
+pinned hash seed, one worker each, in isolated staging.
+
+### What this result is **not**
+
+Each of these is a limitation of the run, not a hedge about it.
+
+- **Not deployment validated, and not ready to deploy.** A contract gate compares two
+  processes this harness started, in a staging directory, under `-S`, with a store
+  symlink, launched by a shell script.
+- **`-S` means `site.py` never ran**, so no `.pth` in the clone was processed —
+  `distutils-precedence.pth` and the basemap nspkg `.pth` are present and did not
+  execute. Production's site/`.pth` startup semantics were not exercised.
+- **The launcher is not production's PM2 path.**
+- **No worker-level Python import provenance exists.** The probe is a sibling
+  interpreter launched by the same procedure; `/proc/<pid>/maps` can *refute*
+  isolation but its silence proves nothing, because it lists mapped files and not
+  imports. "The workers imported from the clone" is an inference.
+- **`/home/odbadmin` is writable**, so this account can still re-point the clone's
+  path. The three manifest verifications are **bounded detection, not immutability**.
+- **D1 is not fixed.** A missing `WOA23_ZARR_STORE` fails at import and startup; an
+  invalid or non-Zarr store still starts cleanly and fails on the first data request.
+  No candidate change is proposed or made.
+- **C2 has not been run.** Multi-worker behaviour and unpinned-seed ordering are
+  unexamined.
+- **No latency, throughput or resource conclusion of any kind.** None was measured;
+  the latency gate and the noise pilot did not run.
