@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 11 | 2026-08-09 | **The immutability claim was too strong and is withdrawn** — §7a.3c. `dist/` at 555 protects its contents; the 775 parent leaves the *path* replaceable, because unlinking needs write on the directory rather than the file, and the runner's `[ -w ]` check would not have noticed. The ancestor chain is now inspected and classified — a writable immediate parent is a **refusal** (so C1 would refuse to start today), a writable `/home/odbadmin` is **residual exposure** that cannot be fixed and is recorded — and the **full manifest is re-verified three times per run**, at preflight and immediately before each arm starts. What this gives is **detection with a bounded window, not immutability**, and that sentence travels in every record. `chmod a-w` on the parent is named as a **staging write action** needing its own authorisation; it was not performed. New `bench/clone_integrity.py` (63 offline assertions, including the real VM24 chain as a fixture) and `scripts/test_c2_driver.sh` (41 end-to-end assertions on the C2 driver). |
 | 10 | 2026-08-09 | **The clone manifest identified by content and verified** — §7a.3b. The directory holds two manifests; `clone.manifest` is the one, distinguished by the two excluded entries rather than by its name. All **33,565 files re-hashed from the tree: 0 mismatches** of digest, size or `mtime_ns`, 0 missing, 0 extra. Both digests recomputed under the current definition and reproduce `b8754d32…` / `a26ca6c3…`. **Discrepancy recorded, not reconciled:** `clone.provenance` carries the rev 1–5 name-keyed values, because it was written before the definition changed and the clone is immutable. **Read-only measured, not assumed:** `dist/` and the four artefacts are unwritable, **the parent directory is not**, so the artefacts could be replaced and `dist` renamed — the contents cannot. **C2 outcome semantics:** three named outcomes with three exit codes, `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` sharing neither `PASS`'s nor `FAIL`'s. **Process count derived** from the measured worker count with the arithmetic printed; 8 holds only for `-w 2`. |
 | 9 | 2026-08-09 | **No worker-level Python provenance is claimed.** The sibling probe establishes the *launch environment and import configuration*; `/proc/<pid>/maps` is stated as a **refuter** — a production path in it disproves isolation, its absence proves nothing correspondingly strong, because maps lists mapped files and not imports. No mechanism observes `sys.path`/`sys.modules` inside a gunicorn worker; the only external route (a gunicorn `-c` `post_fork` hook) changes the arms' launch line and is not part of the C1 request. Recorded as an explicit C1 limitation in §7a.3, in every interpreter record, in the C2 summary and on stdout. **C2 seed preconditions separated from evidence** — `PYTHONHASHSEED` unset and `hash_randomization=1` only mean the interpreter was *permitted* to choose; a cycle with a broken precondition is `INSUFFICIENT` even when the three digests differ, and the result is labelled **sibling / launch-environment seed diversity**. **§9: a C1 pass is explicitly not deployment readiness.** **D1 restated as open** with a standing summary. Runner: the three S2 artefacts are now checked with the arguments (exit 2) rather than behind the host gate, where they could not be exercised offline; `check_maps` was using the un-expanded forbidden roots and now uses the same expanded list as the path check. |
 | 8 | 2026-08-09 | **Process readiness and store readiness separated throughout** — §7 D2. A 200 on the OpenAPI document says the process is serving and nothing about the store; C1 may use it as a startup precondition and may not call the store ready. That the endpoint would answer 200 with an unreadable store is marked an **inference from D1, not a measurement**: no socket was bound. D1's fixtures restated as **six negative fixtures (N1–N6) and one real-store control (P1)**, with what each has at the store path. **§7a added: the runner as implemented** — the `--c1` / `--c2-cycle` modes, the separate `WOA23_S2_C1_GRANTED` / `WOA23_S2_C2_GRANTED` gates that no other grant implies in either direction, mandatory `--python-binary` / `--package-clone` / `--clone-manifest` with **no fallback to `dev2026/.venv`**, the interpreter probe plus `/proc/<pid>/maps` as two separate kinds of evidence, order fingerprints recorded outside the verdict, and the request ceilings. Offline only; nothing executed against VM24. |
@@ -1108,6 +1109,59 @@ this user. Neither run does any of that, and the runner's own check (`[ -w
 "$PKG_CLONE" ]`, which tests `dist`) is the right test for what it guards. Recorded
 because "read-only" without saying read-only *against what* is the kind of claim
 that goes stale silently.
+
+### 7a.3c Immutability was over-claimed, and what replaces the claim
+
+§7a.3b reported `dist/` at 555 and the artefacts at 444 and called the clone
+read-only. That was too strong. **Unlinking a file needs write permission on its
+directory, not on the file.** The parent is 775, so the entire tree can be renamed
+and a different one put in its place — under the same path, with every mode inside it
+still 555 and 444, passing the runner's `[ -w "$PKG_CLONE" ]` check unchanged. The
+*contents* of `dist/` are protected. The *binding of the path to those contents* was
+not, and "immutable clone" described the first while being relied on for the second.
+
+The chain, read on 2026-08-09 as uid 1000:
+
+| mode | octal | uid | writable by us | path |
+|---|---|---|---|---|
+| `dr-xr-xr-x` | 555 | 1000 | no | `…/woa23-s2-package-clone/dist` |
+| `drwxrwxr-x` | **775** | 1000 | **YES** | `…/woa23-s2-package-clone` |
+| `drwxr-xr-x` | 755 | 1000 | **YES** | `/home/odbadmin` |
+| `drwxr-xr-x` | 755 | 0 | no | `/home` |
+| `drwxr-xr-x` | 755 | 0 | no | `/` |
+
+Two links are writable and they are not the same kind of problem:
+
+- **The parent is a refusal.** One `chmod a-w` fixes it, and until it is fixed the
+  immutability claim is simply false. `bench/clone_integrity.py` treats it as a
+  problem and the runner stops. **As things stand today, C1 would refuse to start.**
+- **`/home/odbadmin` is residual exposure, recorded and lived with.** The account
+  needs a writable home; a rule that refused on it could never be satisfied, and an
+  unsatisfiable check gets disabled rather than passed. It means this account can
+  still re-point the clone's path even after the parent is fixed.
+
+So path-level immutability **against this account is not achievable**, and the spec
+stops claiming it. What replaces it:
+
+1. **The ancestor chain is inspected, resolved through symlinks**, with modes, owners
+   and writability recorded in the run's artefacts. A world-writable non-sticky
+   ancestor, or a group-writable one owned by someone else, is a refusal at any
+   depth.
+2. **The full manifest is re-verified three times per run** — at preflight, then
+   again immediately before the reference starts and again immediately before the
+   candidate starts. All 33,565 files, every time; not a sample, because the thing
+   guarded against is a substituted tree and a substituted tree matches a sample as
+   easily as it matches nothing. ~7 s per pass.
+3. **The remaining window is stated, not glossed.** Between the last verification and
+   the moment a worker opens a file, the path can still be re-pointed by anyone who
+   can write to an ancestor. This is **detection with a bounded window, not
+   immutability**, and `clone_integrity.py` carries that sentence in every record it
+   writes.
+
+**The fix to the parent directory is a write action on VM24.** It is `chmod a-w
+~/woa23-s2-package-clone`, it changes nothing inside `dist/` and nothing in
+production, and it must be authorised as a staging write — it is not part of any
+read-only check and was not performed.
 
 ### 7a.4 C2: three cycles, and the three statements they support
 

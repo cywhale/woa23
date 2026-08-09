@@ -373,8 +373,15 @@ if [ "$S2_MODE" != none ]; then
     echo "--package-clone $PKG_CLONE is not a directory" >&2; exit 2; }
   [ -f "$CLONE_MANIFEST" ] || {
     echo "--clone-manifest $CLONE_MANIFEST is not a readable file" >&2; exit 2; }
-  # The clone is immutable by construction. If this run can write to it, it is not
-  # the artefact that was built and verified — and a stray .pyc would change it.
+  # The clone is meant to be immutable. If this run can write to it, it is not the
+  # artefact that was built and verified — and a stray .pyc would change it.
+  #
+  # This tests the clone's own inode and that is all it tests. It is NOT sufficient
+  # for the immutability claim: unlinking a file needs write permission on its
+  # DIRECTORY, so a writable parent lets the whole tree be renamed and replaced under
+  # the same path while every mode inside it stays 555/444. The ancestor chain and
+  # the manifest are checked by bench.clone_integrity, below and again before each
+  # arm starts.
   if [ -w "$PKG_CLONE" ]; then
     echo "--package-clone $PKG_CLONE is writable by this user. The clone is meant to" >&2
     echo "  be read-only; a writable one may already have been modified, and this run" >&2
@@ -638,6 +645,19 @@ print(f"  clone python {deps['python_version']}  "
       f"dists {deps['distributions_sha256'][:16]}")
 print(f"  LIMITATION -S: site.py does not run; no .pth in the clone is processed.")
 PYEOF
+
+# ------------------------------------------------ is the clone still the clone? ---
+# Mode bits answer "could this be replaced?". Only re-hashing answers "is this still
+# the tree that was verified?". Both are asked, here and again immediately before
+# each arm is started, and a failure at either point stops the run.
+clone_integrity() {         # clone_integrity <stage>
+  uv run python -m bench.clone_integrity \
+    --clone "$PKG_CLONE" --manifest "$CLONE_MANIFEST" --stage "$1" \
+    --out "results/${LABEL}_clone_integrity_$1.json" \
+    || { echo "clone integrity failed at stage '$1'; stopping" >&2; return 1; }
+}
+echo "== clone integrity: ancestors and full manifest =="
+clone_integrity preflight || exit 1
 fi
 
 # ================================================================ preflight ===
@@ -960,6 +980,12 @@ if [ "$S2_MODE" = none ]; then
       "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
       -b "127.0.0.1:${CAND_PORT}" --timeout 120
 elif [ "$S2_MODE" = c1 ]; then
+  # Re-verified here rather than trusted from preflight. Between the two checks this
+  # run created a staging tree, started a Dask scheduler and a worker, and waited for
+  # a port — time in which a writable ancestor could have had the clone swapped. The
+  # window is narrowed to the gap between this line and the arm's own imports; it is
+  # not closed, and bench/clone_integrity.py says so in the record.
+  clone_integrity before-reference || exit 1
   start_tracked reference "$REF_PORT" \
     env -C "$REF_DIR" -u VIRTUAL_ENV -u PYTHONHOME \
       PYTHONHASHSEED=0 PYTHONPATH="$PKG_CLONE" \
@@ -968,6 +994,7 @@ elif [ "$S2_MODE" = c1 ]; then
       "$PY_BINARY" -S -m gunicorn woa23_app:app -w 1 \
       -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${REF_PORT}" --timeout 120
 
+  clone_integrity before-candidate || exit 1
   start_tracked candidate "$CAND_PORT" \
     env -C "$CAND_DIR" -u VIRTUAL_ENV -u PYTHONHOME \
       PYTHONHASHSEED=0 PYTHONPATH="$PKG_CLONE" \
@@ -980,6 +1007,7 @@ else
   # PYTHONHASHSEED="" outright, so setting it empty would not mean "unset", it would
   # mean the interpreter refuses to start — and the arm would fail for a reason that
   # looks nothing like the one it actually had.
+  clone_integrity before-reference || exit 1
   start_tracked reference "$REF_PORT" \
     env -C "$REF_DIR" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
       PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
@@ -987,6 +1015,7 @@ else
       "$PY_BINARY" -S -m gunicorn woa23_app:app -w "$ARM_WORKERS" \
       -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${REF_PORT}" --timeout 120
 
+  clone_integrity before-candidate || exit 1
   start_tracked candidate "$CAND_PORT" \
     env -C "$CAND_DIR" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
       PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
