@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 7 | 2026-08-09 | **`-S` means the smoke did not reproduce production's startup semantics** — site.py never ran, so no `.pth` was processed. C1 as evidenced is downgraded to *isolated package-tree import correctness*, with launcher and site semantics listed as a limitation, and a site-enabled sanitised variant designed in §4.3 for separate authorisation. D1 fixtures strengthened: a missing group path is **not** proof of a non-Zarr store, and the three failure stages are now distinguished — §7. The **`-E` run of 2026-08-09 is marked invalid** and may not be cited. "evidence of interrupted installation" softened to "consistent with". The filename audit no longer offers any judgement about the six non-Python hits. |
 | 6 | 2026-08-09 | Digests **recomputed keyed on the dist-info directory**, not the package name, so `h5py` and `netCDF4` at two versions each survive as distinct entries — §4.1.2b. The name-keyed values of rev 1–5 are superseded and marked as such, including `a796…`, which cannot be the package-tree digest under the new definition. The filename audit no longer calls its 68 hits false positives: contents were never read, so the paths are described and the judgement is withheld — §4.1.5. Provenance re-collected without `-E`, with the full `sys.flags` and the exact command recorded — §4.2. **§7 D1 replaced with measured behaviour**: of the three candidate failure modes only the unset variable fails at startup; a wrong or non-store path starts cleanly and fails per request. |
 | 5 | 2026-08-09 | **Terminology corrected.** Rev 4 called 240 `dist-info` directories "240 distributions"; they are not the same thing and the spec now counts them separately — 240 directories, **236 runtime distributions** with usable `METADATA`, 4 stub directories, 234 distinct names. Two digests named for what they cover: **package-tree** (240 dist-info entries) and **runtime distribution** (236). §4.1.3 states which evidence the clone does *not* carry — binary, stdlib, kernel — and that each stays separate. §4.2: `sys.path` empty entries are expanded against the process's cwd before checking, the allowed stdlib paths are enumerated rather than described, and every named module's `__file__` is verified, not a sample. §4.1.5 renamed a **filename audit**, which is all it is. |
 | 4 | 2026-08-08 | The 240/236 "discrepancy" resolved, and it was **mine**: my digest script filtered on `metadata["Name"]`, silently dropping four distributions whose `METADATA` does not exist. Production has 240 dist-info directories and 240 distributions, no orphans. Two real findings surfaced instead — four abandoned install stubs and two double-installed packages — recorded in §4.1.2. The recorded digest is corrected. §4.2 added: provenance for C1 must prove, from inside each arm, that nothing resolves to production's `site-packages` or `src`, with `PYTHONDONTWRITEBYTECODE=1`. §4.1.7 added: the clone's file scope, exclusions and manifest acceptance. |
@@ -205,8 +206,9 @@ netcdf4-1.7.3.dist-info        netCDF4  1.7.3         netcdf4  METADATA=1 RECORD
 ```
 
 The four stubs carry empty `Name` and `Version` and are the only entries with
-`METADATA=0`; **they are also the only four with `RECORD=0`**, which is consistent
-with an interrupted install and is recorded as evidence rather than inferred.
+`METADATA=0`; **they are also the only four with `RECORD=0`**. That is **consistent with an
+incomplete or interrupted installation**; it is not proof of one, and no cause is
+asserted here. What is recorded is the observation.
 
 A third digest, the **package-tree manifest digest**, is over the file-level manifest
 of §4.1.7 and is the strongest: the two above describe metadata, that one describes
@@ -276,9 +278,11 @@ clone. 62 are `.py`, `.pyc` or `.pyi`. The remaining 6, named individually:
 | `jeepney/tests/secrets_introspect.xml` | 4,575 | a test fixture for a D-Bus secrets interface | **not inspected** |
 
 Rev 3–5 called all 68 false positives. That was a claim about content, reached
-without reading any content. **Withdrawn.** What can be said is what the table says:
-these paths sit inside library test directories and vendored CA bundles, which is
-where files with those names normally live — and no file was opened to confirm it.
+without reading any content. **Withdrawn, and not replaced by a softer version of the
+same claim.** The table records the path, the size and what the *path* suggests.
+Whether any of these six is harmless is **not established** — no file was opened, so
+the audit has nothing to say about it either way. "It sits in a test directory" is
+where such a file would normally live; it is not a finding about the file.
 
 **Acceptance:** the audit is re-run against the clone and any hit not on this recorded
 list stops the run. Reading contents would need its own authorisation and has not been
@@ -429,6 +433,19 @@ is `''` and expanded to `/home/odbadmin/woa23-s2-staging/candidate`, read from
 After both runs the clone still held 33,565 files, zero of them newly written, and
 zero `.pyc` newer than the clone's creation.
 
+##### 4.2.0a The `-E` run of 2026-08-09 is invalid and may not be cited
+
+The first provenance attempt passed `-E`. That makes the interpreter ignore every
+`PYTHON*` variable while they remain visible in `os.environ`, so `PYTHONPATH`,
+`PYTHONNOUSERSITE`, `PYTHONDONTWRITEBYTECODE` and `PYTHONHASHSEED` were all set and
+none was honoured — and the check, reading the environment, would have reported them
+satisfied.
+
+**That run is void.** Nothing from it appears in this spec and nothing from it may be
+quoted. The evidence in §4.2.0 comes from the re-run, whose `sys.flags` records
+`ignore_environment=0`. Any future provenance run that reports a non-zero
+`ignore_environment` is void on the same grounds, automatically.
+
 ##### 4.2.1 `sys.path`: empty entries, and the allowed set
 
 **An empty string in `sys.path` means the current working directory.** Checking it as
@@ -483,6 +500,78 @@ comparison of production with itself.
 
 If any module resolves outside the allowed set, the run stops and reports which
 module and which path. **It is not corrected by changing anything in production.**
+
+### 4.3 `-S`: what the smoke did not reproduce
+
+The smoke ran with `-S`, recorded as `sys.flags.no_site=1`. That was deliberate — the
+invoked interpreter is the venv's, and without `-S` `site.py` would add production's
+own `site-packages`, which is the one path this whole exercise exists to keep off
+`sys.path`. But it has a consequence that must not be left implicit.
+
+**`site.py` never ran, so no `.pth` file was processed.** Production runs with site
+enabled and processes all four. Three survive in the clone (the editable one is
+excluded, §4.1.4), and two of them execute code at startup:
+
+| `.pth` in the clone | what it does under production | under `-S` |
+|---|---|---|
+| `easy-install.pth` | empty | nothing |
+| `distutils-precedence.pth` | imports `_distutils_hack` and installs a shim that decides whether `distutils` resolves to setuptools' copy or the stdlib's | **did not run** |
+| `basemap_data_hires-…-nspkg.pth` | builds the `mpl_toolkits` / `mpl_toolkits.basemap_data` namespace packages | **did not run** |
+
+`distutils-precedence.pth` is the one that could matter: which `distutils` a later
+import resolves to is decided by whether that shim installed.
+
+#### 4.3.1 C1 as evidenced today is downgraded
+
+What §4.2.0 establishes is **isolated package-tree import correctness**: with the
+clone on `sys.path` and site disabled, every module in §4.2.2 imports from the clone
+and nothing resolves to production. That is a real result and it is what closed the
+editable-`.pth` question.
+
+It is **not** "the candidate under production's environment". These are limitations,
+not caveats:
+
+- **site and `.pth` semantics were not exercised** — the two active `.pth` files above
+  did not run;
+- **the launcher was not production's.** Production reaches gunicorn through PM2 →
+  `conf/start_app.sh`; the smoke invoked the interpreter directly with a controlled
+  environment;
+- **`sys.prefix` differed.** Under `-S` it is `…/versions/3.11.4`; production's
+  process reports `…/versions/py311`. The venv was not active in the sense production
+  has it active.
+
+#### 4.3.2 The site-enabled sanitised variant, for separate authorisation
+
+To reproduce site semantics without ever putting production's `site-packages` on
+`sys.path`, the clone is made the *only* site directory of a purpose-built venv:
+
+```
+~/woa23-s2-sitevenv/
+  pyvenv.cfg                       home = …/versions/3.11.4/bin
+                                   include-system-site-packages = false
+  bin/python3.11                   symlink to production's interpreter
+  lib/python3.11/site-packages     -> the read-only clone
+```
+
+Run **without** `-S`, `site.py` then processes exactly the clone's `.pth` files and
+adds exactly the clone.
+
+**Acceptance, and every item is a stop:**
+
+1. `sys.flags.no_site == 0` — site actually ran, or the variant proves nothing;
+2. `sys.prefix` is the new venv, `sys.base_prefix` is `…/3.11.4`;
+3. every `sys.path` entry is in the venv, the clone, the arm's staging or the
+   enumerated stdlib — production's `site-packages` appearing is a hard failure;
+4. **every `.pth` in the clone is audited before the run**: its content recorded, and
+   every path it adds or module it imports resolved and checked against the same
+   allowed set. A `.pth` that adds an unauditable path stops the variant;
+5. `_distutils_hack` is recorded as installed or not, and `distutils.__file__` is
+   captured, since that is the observable difference it makes;
+6. the clone stays read-only. The symlink is *into* it; nothing is written through it.
+
+This needs its own authorisation. It is not covered by anything granted so far, and
+it is **not** requested in the C1/C2 submission that follows — C1 is submitted as the
+downgraded, `-S` form, with §4.3.1's limitations attached.
 
 ### C2 — multiple workers, unpinned seed, semantic
 
@@ -628,31 +717,62 @@ Recording it costs nothing and answers a question no gate currently asks.
 Only the two that can be established in isolation. Everything requiring a live
 service moved to the observation spec.
 
-### D1 — startup failure modes, measured
+### D1 — startup failure modes, measured across three stages
 
-Rev 1–5 asserted that the candidate "fails loudly". Measured on 2026-08-09 in the
-isolated staging, against the package clone, with no socket bound and no request
-sent, that is true of **one** of the three cases and false of the other two.
+Rev 1–5 asserted the candidate "fails loudly". Measured 2026-08-09 in the isolated
+staging against the package clone, with no socket bound and no request sent, that is
+true of **one** of six fixtures.
 
-| case | `import api.app` | `gunicorn --check-config` | at request time |
+Three stages are distinguished, because a failure at each has a different operational
+meaning:
+
+| stage | what it means | how it was exercised |
+|---|---|---|
+| **import** | the module cannot load; nothing can start | `python -S -c "import api.app"` |
+| **startup** | the app object cannot be built; the server exits before serving | `gunicorn api.app:app --check-config` — loads the app, binds nothing |
+| **first data request** | the server is up and answers with an error | the query coroutine called in-process, no socket, no HTTP |
+
+**Readiness** is a fourth stage and is **not established**: it needs a server to be
+listening, which no authorisation covers. Whether the OpenAPI endpoint would answer
+200 while the store is unreadable is therefore an open question, not a finding.
+
+| fixture | import | startup | first data request |
 |---|---|---|---|
-| `WOA23_ZARR_STORE` **unset** | **fails**: `KeyError: 'WOA23_ZARR_STORE'` at `api/config.py:31` | **exit 1** | never reached |
-| set to a path that **does not exist** | succeeds | **exit 0** | `FileNotFoundError: No such file or directory: '/no/such/store/1_degree/annual/TS'` |
-| set to a directory that is **not a Zarr store** | succeeds | **exit 0** | `FileNotFoundError: …/not_a_store/1_degree/annual/TS'` |
+| `WOA23_ZARR_STORE` **unset** | **exit 1** `KeyError` | **exit 1** | not reached |
+| path does not exist | exit 0 | exit 0 | `FileNotFoundError` on the group path |
+| **existing but empty** directory | exit 0 | exit 0 | `FileNotFoundError` on the group path |
+| a **regular file** where the store should be | exit 0 | exit 0 | `FileNotFoundError` on the group path |
+| group path present, `.zgroup` **not JSON** | exit 0 | exit 0 | **`JSONDecodeError`**: `Expecting value: line 1 column 1 (char 0)` |
+| group path present, `.zgroup` valid JSON, `zarr_format: 99` | exit 0 | exit 0 | **`MetadataError`**: `unsupported zarr format: 99` |
+| the real store (control) | exit 0 | exit 0 | returns data |
 
-**Only the unset case is a startup failure.** The other two produce a process that
-starts cleanly, passes any check that only asks "did it come up", and then fails on
-every data request with an unhandled `FileNotFoundError` — which FastAPI renders as a
-500, and which a proxy in front of it may render as a 502. That is precisely the
-outcome D1 exists to rule out, and it is not currently ruled out.
+#### What the errors do and do not distinguish
 
-The `FileNotFoundError` names the resolved group path, so it is not silent in the log.
-What it is not is a *startup* failure: a deployment that checks only whether the
-process is running will call this healthy.
+**A missing group path is not proof that the target is not a Zarr store.** Rev 6 said
+it was, from a fixture that was simply an unrelated directory. Three different
+conditions — a path that does not exist, a directory that is empty, and a *regular
+file* — all produce the identical `FileNotFoundError` naming
+`<store>/1_degree/annual/TS`. The error reports that the expected subpath is absent.
+It says nothing about what, if anything, is at the store root.
 
-**No fix is proposed here.** Whether the candidate should validate the store at import
-or at readiness — and whether that validation belongs in the application at all — is a
-design decision, and S2's job is to establish the behaviour, not change it.
+A target that genuinely **is** malformed Zarr produces a different class of error
+entirely, and neither is caught:
+
+- `JSONDecodeError: Expecting value: line 1 column 1 (char 0)` — **names no file and
+  no path.** From a log, this does not identify the store, the group, or even that
+  the failure is store-related;
+- `MetadataError: unsupported zarr format: 99` — names the problem but not the file.
+
+**Only the unset variable fails before serving.** Every other misconfiguration
+produces a process that imports, starts, passes a check that asks only whether it came
+up, and then fails on every data request — one of them with a message that does not
+mention the store at all.
+
+**No change to the candidate is proposed here.** A startup-time store validation would
+be a change to `api/config.py` or `api/app.py`, and that is a **separate candidate
+change requiring its own spec and approval**. S2's obligation is to establish the
+behaviour; changing it is not S2's to decide, and the behaviour is stated above so the
+decision can be made on evidence.
 
 #### D1a — the reference behaves differently, and the difference is structural
 
@@ -747,8 +867,10 @@ the run **stops and reports**, and the report carries:
   to production's behaviour. It would need its own name, its own acceptance, and its
   own authorisation.
 
-No such failure has occurred. Both arms imported every module in §4.2.2 from the
-clone on 2026-08-09.
+**`uv` is not used unless a real import or dependency failure occurs.** No such
+failure has occurred: both arms imported every module in §4.2.2 from the clone on
+2026-08-09. Nothing is installed into the clone or into production under any
+circumstances — if the clone is wrong it is rebuilt from the source, never patched.
 
 ## 10. Open questions for the PI
 
