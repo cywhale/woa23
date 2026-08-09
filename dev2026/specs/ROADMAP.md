@@ -81,8 +81,15 @@ validation still **open**
 |---|---|---|
 | **C1** | isolated package-tree contract correctness, 5.2A byte-exact | **PASS 2026-08-09** — see below |
 | **C2** | multi-worker, unpinned seed, 5.2B semantic, seed diversity | **PASS 2026-08-09** — three cycles, 64/64 each, seed diversity OBSERVED; see below |
-| **D1** | startup failure modes | **measured, open** — only a missing env var fails before serving; an invalid or non-Zarr store starts and fails per request. No candidate change proposed. |
-| **PM2 deployment validation** | production's real launcher, site/`.pth` semantics, readiness | **open** — C1's launcher is a shell script and ran under `-S` |
+| **D1 — store startup validation** | startup failure modes | **open**, spec `004-store-startup-validation.md` — only a missing env var fails before serving; an invalid or non-Zarr store starts and fails per request. No candidate change made. |
+| **Row-order contract** | whether row order is part of the API contract | **open**, decision memo `003-row-order-contract-decision.md` — C2 observed it varying per process on **both** arms under an unpinned seed |
+| **PM2 / formal deployment validation** | production's real launcher, site/`.pth` semantics, readiness, nginx, TLS | **open** — C1 and C2 ran under `-S` from a shell script |
+| **S2 performance validation** | latency, throughput, resource use for S2 | **open, not started** — C1 and C2 measured none of it |
+
+**Four open tracks**, and none of them is blocked on another: D1 store startup
+validation, the row-order contract decision, PM2 / formal deployment validation, and
+S2 performance validation. C1 and C2 closed the correctness question they were
+scoped to and nothing else.
 
 C1's and C2's results are recorded below and in `specs/docs/BASELINE.md` under
 *non-performance contract evidence*. **Neither carries any performance meaning and
@@ -552,10 +559,13 @@ on the reference.
 
 **Order fingerprints** — each `c2_cycle{1,2,3}_contract.json` records, per case and
 per arm, `reference_order` and `candidate_order` with `body_sha256`,
-`row_order_sha256`, `columns` and `n_rows`. Across the three cycles that is 128
-(case, arm) entries, of which 94 carry a row-order digest and 34 are responses with
-no row structure. Recomputing the varied set from those artefacts gives exactly the
-four `c2_summary.json` reports.
+`row_order_sha256`, `columns` and `n_rows`. There are **128 distinct (case, arm)
+pairs** — 64 cases on two arms — and **each pair was observed three times, once per
+cycle**, so the artefacts hold 384 observations in total. Of the 128 pairs, **94
+carry a row-order digest** and 34 are responses with no row structure (those 34
+account for the 102 orderless responses `c2_summary.json` counts: 34 pairs x 3
+cycles). Recomputing the varied set from those artefacts gives exactly the four
+`c2_summary.json` reports.
 
 Case by case, the row-order digest per cycle:
 

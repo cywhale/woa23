@@ -538,10 +538,13 @@ on the reference.
 
 **Order fingerprints** — each `c2_cycle{1,2,3}_contract.json` records, per case and
 per arm, `reference_order` and `candidate_order` with `body_sha256`,
-`row_order_sha256`, `columns` and `n_rows`. Across the three cycles that is 128
-(case, arm) entries, of which 94 carry a row-order digest and 34 are responses with
-no row structure. Recomputing the varied set from those artefacts gives exactly the
-four `c2_summary.json` reports.
+`row_order_sha256`, `columns` and `n_rows`. There are **128 distinct (case, arm)
+pairs** — 64 cases on two arms — and **each pair was observed three times, once per
+cycle**, so the artefacts hold 384 observations in total. Of the 128 pairs, **94
+carry a row-order digest** and 34 are responses with no row structure (those 34
+account for the 102 orderless responses `c2_summary.json` counts: 34 pairs x 3
+cycles). Recomputing the varied set from those artefacts gives exactly the four
+`c2_summary.json` reports.
 
 Case by case, the row-order digest per cycle:
 
