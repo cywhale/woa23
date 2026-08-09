@@ -549,7 +549,62 @@ prod_py_version="$("$PROD_PY" --version 2>&1 | awk '{print $2}')"
 # HTTP and compares bytes, so its own package set cannot change what an arm returns.
 # It is still built and pinned, because a harness that cannot run is a run that
 # produces nothing.
+#
+# **Two environments, recorded separately and never merged.** The authorisation to
+# run `uv sync` covers this one directory and nothing else:
+#
+#   harness bootstrap   dev2026/.venv, created or synced here by uv from uv.lock.
+#                       Runs contract_diff, the collectors and the checks. NOT on
+#                       any arm's import path.
+#   arm environment     under S2 the read-only package clone; under D2b the same
+#                       venv. This is what is under test, and uv never touches it —
+#                       the clone stays immutable and production is never written.
+#
+# They go to different artefacts, `<label>_harness_bootstrap.json` and
+# `<label>_environment.json`, so the digest of one cannot be read as the other's.
+echo "== harness bootstrap: dev2026/.venv — NOT the environment under test =="
 uv sync --locked --python "$PROD_PY" >&2
+
+if [ "$S2_MODE" = none ]; then
+  ARM_ENV_KIND="dev2026/.venv (the same environment as the harness)"
+else
+  ARM_ENV_KIND="the read-only production package clone at $PKG_CLONE"
+fi
+VENV_PY="$VENV/bin/python" LABEL="$LABEL" ARM_ENV_KIND="$ARM_ENV_KIND" \
+uv run python - <<'PYEOF' || exit 1
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, ".")
+from bench.collect_backend_meta import dependencies
+
+label = os.environ["LABEL"]
+deps = dependencies(os.environ["VENV_PY"], Path("uv.lock"))
+if "distributions_error" in deps:
+    print(f"the harness venv is unusable: {deps['distributions_error']}",
+          file=sys.stderr)
+    raise SystemExit(1)
+json.dump({
+    "kind": "harness_bootstrap",
+    "what_this_is": ("the environment the measuring harness runs in, created by "
+                     "'uv sync --locked'. NOT the environment under test, and "
+                     "not "
+                     "on any arm's import path."),
+    "arm_environment_is": os.environ["ARM_ENV_KIND"],
+    "uv_authorisation_scope": ("uv may create or sync dev2026/.venv only. It never "
+                               "installs into the package clone or into production "
+                               "site-packages; both remain immutable."),
+    "env_python": os.environ["VENV_PY"],
+    "python_version": deps["python_version"],
+    "lockfile_sha256": deps["lockfile_sha256"],
+    "distributions_sha256": deps["distributions_sha256"],
+    "n_distributions": len(deps["distributions"]),
+    "distributions": deps["distributions"],
+}, open(f"results/{label}_harness_bootstrap.json", "w"), indent=2)
+print(f"  harness venv: python {deps['python_version']}, "
+      f"{len(deps['distributions'])} distributions, "
+      f"lock {deps['lockfile_sha256'][:16]}")
+print(f"  environment under test (separate): {os.environ['ARM_ENV_KIND']}")
+PYEOF
 
 if [ "$S2_MODE" = none ]; then
 VENV_PY="$VENV/bin/python" WANT_PY="$EXPECT_PY" LABEL="$LABEL" \
@@ -720,24 +775,42 @@ echo "production master $PROD_MASTER_BEFORE (start $PROD_START_BEFORE), listener
 # deployment it was written against, not the one it is running beside.
 ARM_WORKERS=1
 if [ "$S2_MODE" = c2 ]; then
-  prod_argv="$(tr '\0' '\n' < "/proc/$PROD_MASTER_BEFORE/cmdline" 2>/dev/null)" || {
-    echo "cannot read production's argv from /proc/$PROD_MASTER_BEFORE/cmdline" >&2
+  # Parsed from the NUL-separated bytes, in Python, behind a quoted heredoc — never
+  # by turning argv into newline-delimited text and reading it line by line.
+  #
+  # Two separate reasons, and the first is the one that bites without looking like a
+  # security problem. An argument may contain anything but NUL, so `tr '\0' '\n'`
+  # turns a single argument containing a newline into two, and every position after
+  # it shifts — which for a scan that pairs `-w` with the following token means the
+  # WRONG token becomes the worker count, and the run then verifies itself against a
+  # process set it was never authorised for. The second is that production's command
+  # line is external data: embedding it in a shell or Python source text at all is a
+  # quoting problem waiting for an argument with a quote in it. It crosses this
+  # boundary as one integer on stdout.
+  measured="$(PROD_MASTER="$PROD_MASTER_BEFORE" uv run python - <<'PYEOF'
+import os, sys
+sys.path.insert(0, ".")
+from bench.collect_backend_meta import argv_of, worker_count
+
+pid = int(os.environ["PROD_MASTER"])
+argv, err = argv_of(pid)
+if err:
+    print(err, file=sys.stderr)
+    raise SystemExit(1)
+n, err = worker_count(argv)
+if err:
+    print(f"{err}; argv has {len(argv)} arguments", file=sys.stderr)
+    raise SystemExit(1)
+print(n)
+PYEOF
+  )" || {
+    echo "cannot read a worker count from production's argv. Refusing to assume" >&2
+    echo "  one: C2's whole question is what production's concurrency does, and a" >&2
+    echo "  guessed number would answer it for a deployment that does not exist." >&2
     exit 1; }
-  measured=""
-  prev=""
-  while IFS= read -r a; do
-    case "$prev" in -w|--workers) measured="$a" ;; esac
-    case "$a" in --workers=*) measured="${a#--workers=}" ;; esac
-    prev="$a"
-  done <<EOF
-$prod_argv
-EOF
   case "$measured" in
     ''|*[!0-9]*)
-      echo "cannot read a worker count from production's argv. Refusing to assume" >&2
-      echo "  one: C2's whole question is what production's concurrency does, and a" >&2
-      echo "  guessed number would answer it for a deployment that does not exist." >&2
-      printf '  argv: %s\n' "$prod_argv" >&2
+      echo "the worker count came back as '$measured', which is not a number" >&2
       exit 1 ;;
   esac
   if [ "$measured" -lt 1 ] || [ "$measured" -gt 16 ]; then

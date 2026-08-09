@@ -158,6 +158,103 @@ def test_dash_valued_options_reach_the_parser() -> None:
           "expected one argument" in err, err[-200:])
 
 
+def test_worker_count_survives_hostile_argv() -> None:
+    """argv is NUL-separated because an argument may hold anything but NUL.
+
+    The version this replaces did `tr '\\0' '\\n'` and read the result line by line.
+    That is wrong twice over. An argument containing a newline becomes two, so every
+    position after it shifts and the token *after* the real worker count gets read
+    as the worker count — a wrong number that decides how many processes the run
+    believes it is authorised to start. And embedding a live process's command line
+    in shell or Python source text is a quoting problem waiting for an argument with
+    a quote in it.
+    """
+    from bench.collect_backend_meta import worker_count
+
+    def n(argv):
+        return worker_count(argv)[0]
+
+    def why(argv):
+        return worker_count(argv)[1] or ""
+
+    # The three spellings gunicorn accepts.
+    base = ["gunicorn", "woa23_app:app", "-k", "uvicorn.workers.UvicornWorker"]
+    check("-w N is read", n(base + ["-w", "2"]) == 2)
+    check("--workers N is read", n(base + ["--workers", "4"]) == 4)
+    check("--workers=N is read", n(base + ["--workers=8"]) == 8)
+    check("production's actual shape gives 2",
+          n(["/home/odbadmin/.pyenv/versions/py311/bin/python3.11",
+             "/home/odbadmin/.pyenv/versions/py311/bin/gunicorn", "woa23_app:app",
+             "-w", "2", "-b", "127.0.0.1:8050", "--timeout", "120"]) == 2)
+
+    # The whole point: these are single arguments, not separators.
+    check("an argument containing a newline does not split",
+          n(["gunicorn", "--access-logformat", "line1\nline2", "-w", "3"]) == 3)
+    check("a newline BEFORE the flag does not shift the pairing",
+          n(["gunicorn", "--name", "a\n-w\n99", "-w", "3"]) == 3)
+    check("a newline-embedded '-w 99' is not mistaken for the flag",
+          n(["gunicorn", "--name", "x\n-w\n99"]) is None)
+    check("an argument containing a quote is one argument",
+          n(["gunicorn", "--name", "it's \"quoted\"", "-w", "5"]) == 5)
+    check("an argument containing backticks is inert",
+          n(["gunicorn", "--name", "`touch /tmp/pwned`", "-w", "6"]) == 6)
+    check("so is one containing a command substitution",
+          n(["gunicorn", "--name", "$(touch /tmp/pwned)", "-w", "7"]) == 7)
+    check("and one containing a NUL-looking escape",
+          n(["gunicorn", "--name", "\\0-w\\0 99", "-w", "1"]) == 1)
+    check("a semicolon does not terminate anything",
+          n(["gunicorn", "--name", "; rm -rf /", "-w", "2"]) == 2)
+    check("a value that merely contains -w is not the flag",
+          n(["gunicorn", "--log-file", "/var/log/-w-2.log"]) is None)
+
+    # Fail closed rather than guess.
+    check("no flag at all is an error, not a default", n(base) is None)
+    check("and says so", "no -w/--workers" in why(base))
+    check("a trailing -w with no value is an error",
+          n(base + ["-w"]) is None)
+    check("and says the value is missing", "no value after it" in why(base + ["-w"]))
+    check("a non-numeric worker count is an error",
+          n(base + ["-w", "two"]) is None)
+    check("a negative worker count is an error", n(base + ["-w", "-2"]) is None)
+    check("an empty worker count is an error", n(base + ["-w", ""]) is None)
+    check("conflicting counts are an error, not a precedence guess",
+          n(base + ["-w", "2", "--workers", "4"]) is None)
+    check("and the conflict is spelled out",
+          "more than once" in why(base + ["-w", "2", "--workers=4"]))
+    check("but a repeat of the SAME value is fine",
+          n(base + ["-w", "2", "--workers=2"]) == 2)
+    check("an empty argv is an error", n([]) is None)
+
+
+def test_argv_of_splits_on_nul_only() -> None:
+    """Read back from a real file, in the exact /proc/<pid>/cmdline format."""
+    from bench.collect_backend_meta import argv_of, worker_count
+
+    hostile = ["gunicorn", "woa23_app:app", "--name", "a\nb`c`\"d'e; f",
+               "-w", "2", "-b", "127.0.0.1:8050"]
+    with tempfile.TemporaryDirectory() as d:
+        fake = Path(d) / "cmdline"
+        fake.write_bytes(b"\0".join(a.encode() for a in hostile) + b"\0")
+        raw = fake.read_bytes()
+        parts = raw.split(b"\0")
+        if parts and parts[-1] == b"":
+            parts.pop()
+        argv = [p.decode("utf-8", "surrogateescape") for p in parts]
+    check("every argument round-trips intact", argv == hostile, str(argv))
+    check("including the one with a newline, backticks and quotes",
+          argv[3] == "a\nb`c`\"d'e; f", repr(argv[3]))
+    check("and the worker count is still right", worker_count(argv)[0] == 2)
+    # What the old newline-based reader would have seen: one argument became three,
+    # so the token after "-w" is no longer at the position the pairing expects.
+    naive = "\n".join(hostile).split("\n")
+    check("the newline-based reader sees a different argv", len(naive) != len(argv),
+          f"{len(naive)} vs {len(argv)}")
+
+    argv, err = argv_of(999999999)
+    check("an unreadable pid is an error, not an empty argv",
+          argv is None and err is not None, str(err))
+
+
 def test_resolve_never_follows_the_symlink() -> None:
     """The whole point: the venv python and its target are different environments."""
     if not VENV_PY.exists():
@@ -224,6 +321,8 @@ def main() -> int:
                test_resolve_override_outranks_both_heuristics,
                test_dependencies_answers_for_the_launch_not_the_binary,
                test_dash_valued_options_reach_the_parser,
+               test_worker_count_survives_hostile_argv,
+               test_argv_of_splits_on_nul_only,
                test_resolve_never_follows_the_symlink,
                test_dependencies_lists_the_pinned_versions,
                test_dependencies_fails_loudly,

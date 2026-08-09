@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 12 | 2026-08-09 | **The first C1 attempt is `INVALID_PRECONTRACT_HARNESS`, not a C1 FAIL** — §7a.3d. The contract gate was never reached: contract, latency, noise and production-8050 requests were all 0, while the process tree, store probe, three clone-integrity verifications and cleanup all completed. No C1 contract result may be written or cited from it. Two harness defects fixed (`--env-python-arg=-S`; all embedded-Python heredocs quoted), and a third found while fixing them: the worker-count scan flattened NUL-separated argv to newline-delimited text, so an argument containing a newline would shift every later position and make the wrong token the worker count — now parsed from the bytes and crossing into the shell as one integer, with regression tests over argv containing quotes, backticks, newlines, semicolons and `$(…)`. **§7a.3e added: harness bootstrap vs environment under test.** `uv sync --locked` is authorised for `dev2026/.venv` **only**; it is recorded in its own artefact with its scope stated, and the package clone and production site-packages stay immutable — enforced by mode bits, the ancestor check and three manifest re-verifications per run, not by uv's good behaviour. |
 | 11 | 2026-08-09 | **The immutability claim was too strong and is withdrawn** — §7a.3c. `dist/` at 555 protects its contents; the 775 parent leaves the *path* replaceable, because unlinking needs write on the directory rather than the file, and the runner's `[ -w ]` check would not have noticed. The ancestor chain is now inspected and classified — a writable immediate parent is a **refusal** (so C1 would refuse to start today), a writable `/home/odbadmin` is **residual exposure** that cannot be fixed and is recorded — and the **full manifest is re-verified three times per run**, at preflight and immediately before each arm starts. What this gives is **detection with a bounded window, not immutability**, and that sentence travels in every record. `chmod a-w` on the parent is named as a **staging write action** needing its own authorisation; it was not performed. New `bench/clone_integrity.py` (63 offline assertions, including the real VM24 chain as a fixture) and `scripts/test_c2_driver.sh` (41 end-to-end assertions on the C2 driver). |
 | 10 | 2026-08-09 | **The clone manifest identified by content and verified** — §7a.3b. The directory holds two manifests; `clone.manifest` is the one, distinguished by the two excluded entries rather than by its name. All **33,565 files re-hashed from the tree: 0 mismatches** of digest, size or `mtime_ns`, 0 missing, 0 extra. Both digests recomputed under the current definition and reproduce `b8754d32…` / `a26ca6c3…`. **Discrepancy recorded, not reconciled:** `clone.provenance` carries the rev 1–5 name-keyed values, because it was written before the definition changed and the clone is immutable. **Read-only measured, not assumed:** `dist/` and the four artefacts are unwritable, **the parent directory is not**, so the artefacts could be replaced and `dist` renamed — the contents cannot. **C2 outcome semantics:** three named outcomes with three exit codes, `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` sharing neither `PASS`'s nor `FAIL`'s. **Process count derived** from the measured worker count with the arithmetic printed; 8 holds only for `-w 2`. |
 | 9 | 2026-08-09 | **No worker-level Python provenance is claimed.** The sibling probe establishes the *launch environment and import configuration*; `/proc/<pid>/maps` is stated as a **refuter** — a production path in it disproves isolation, its absence proves nothing correspondingly strong, because maps lists mapped files and not imports. No mechanism observes `sys.path`/`sys.modules` inside a gunicorn worker; the only external route (a gunicorn `-c` `post_fork` hook) changes the arms' launch line and is not part of the C1 request. Recorded as an explicit C1 limitation in §7a.3, in every interpreter record, in the C2 summary and on stdout. **C2 seed preconditions separated from evidence** — `PYTHONHASHSEED` unset and `hash_randomization=1` only mean the interpreter was *permitted* to choose; a cycle with a broken precondition is `INSUFFICIENT` even when the three digests differ, and the result is labelled **sibling / launch-environment seed diversity**. **§9: a C1 pass is explicitly not deployment readiness.** **D1 restated as open** with a standing summary. Runner: the three S2 artefacts are now checked with the arguments (exit 2) rather than behind the host gate, where they could not be exercised offline; `check_maps` was using the un-expanded forbidden roots and now uses the same expanded list as the path check. |
@@ -1162,6 +1163,67 @@ stops claiming it. What replaces it:
 ~/woa23-s2-package-clone`, it changes nothing inside `dist/` and nothing in
 production, and it must be authorised as a staging write — it is not part of any
 read-only check and was not performed.
+
+### 7a.3d The 2026-08-09 C1 attempt: `INVALID_PRECONTRACT_HARNESS`
+
+The first authorised C1 attempt did not produce a C1 result of any kind. It is
+classified **`INVALID_PRECONTRACT_HARNESS`** and this classification is load-bearing:
+
+- **It is not a C1 contract FAIL** and must never be cited as one. The contract gate
+  was never reached.
+- **No C1 contract result may be written from it.** Contract requests: **0**. Latency
+  and noise: **0**, as for every C1 run. Production 8050: **0**.
+- The failure was in the harness, after the environment under test had been brought
+  up correctly.
+
+What *did* complete, and stands as evidence about the harness rather than about the
+candidate: the six-process tree verified against the authorised set; process
+readiness on both arms; the symmetric store probe (2 requests per arm, both orders);
+all three clone-integrity checks — 33,565 entries against 33,565 files,
+1,690,025,002 bytes, `ok=True`, at preflight and before each arm; and a clean
+cleanup — every process in every recorded tree exited, 18061/18062/18798 confirmed
+free, boot id matched, production unchanged at master 3960 with listeners
+3960/4334/4366, and no `.pid`, `.tree`, `.uncertain` or `.diag` left behind.
+
+Two harness defects, neither reachable by any offline test that existed:
+
+| defect | what happened | why nothing caught it |
+|---|---|---|
+| `--env-python-arg -S` | argparse reads a dash-leading value as the next *option* and exits 2, "expected one argument" | every CLI test stops at argument validation, so none ever invoked `collect_backend_meta`; a grep for the right spelling only checks spelling |
+| unquoted `<<PYEOF` | the shell expanded the body before Python saw it; backticks in a *comment* ran as a command and Python received the line with the name deleted | it landed in a comment, so the run continued with one stray line on stderr — the same fault in an expression would have been silent and wrong |
+
+A third, found while fixing the second and never triggered: the worker-count scan
+converted production's argv to newline-delimited text with `tr '\0' '\n'`. argv is
+NUL-separated *because an argument may contain anything but NUL*, so a single
+argument holding a newline becomes two and every position after it shifts — making
+the token *after* the real worker count read as the worker count, and the run then
+verifies itself against a process set it was never authorised for. It is now parsed
+from the NUL-separated bytes and crosses into the shell as one integer. Every
+heredoc in the runner is quoted, and the guards assert that none is unquoted and
+that no backtick survives inside embedded Python.
+
+### 7a.3e Harness bootstrap and the environment under test are different things
+
+`uv sync --locked --python <production python>` is authorised, and its scope is
+exactly `dev2026/.venv`.
+
+| | **harness bootstrap** | **environment under test** |
+|---|---|---|
+| what | `dev2026/.venv`, from `uv.lock` | S2: the read-only package clone. D2b: the same venv. |
+| built by | `uv sync --locked` | nothing — the clone is copied once and never written |
+| on an arm's import path | **no** | **yes, exclusively** |
+| what it can affect | which HTTP client and comparator the harness uses | what the arms return |
+| artefact | `<label>_harness_bootstrap.json` | `<label>_environment.json` |
+
+They are written to **separate files** so one digest cannot be read as the other's,
+and the bootstrap record carries its own scope statement: *uv may create or sync
+`dev2026/.venv` only; it never installs into the package clone or into production
+site-packages, and both remain immutable.* Under D2b the two rows describe the same
+venv, and the record says so rather than leaving the coincidence to be inferred.
+
+The clone's immutability is not a matter of uv's good behaviour: it is enforced by
+the mode bits, by the ancestor check, and by the full manifest re-verification at
+three points in every run (§7a.3c).
 
 ### 7a.4 C2: three cycles, and the three statements they support
 

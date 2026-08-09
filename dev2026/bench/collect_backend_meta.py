@@ -171,6 +171,70 @@ def cmdline(pid: int) -> tuple[list[str] | None, str | None]:
     return argv, " ".join(argv)
 
 
+def argv_of(pid: int) -> tuple[list[str] | None, str | None]:
+    """argv as a list, split on NUL and nothing else.
+
+    `/proc/<pid>/cmdline` is NUL-separated because an argument may contain anything
+    except NUL — spaces, quotes, backticks, newlines. Converting it to
+    newline-delimited text and reading it line by line, which is what this used to
+    do, silently turns one argument containing a newline into two, and every
+    position after it shifts. For a scan that pairs `-w` with the token following
+    it, a shift is not a cosmetic problem: it makes the *next* argument look like
+    the worker count.
+
+    Returns (argv, error). Never raises, never guesses.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError as exc:
+        return None, f"cannot read /proc/{pid}/cmdline: {exc!r}"
+    if not raw:
+        return None, f"/proc/{pid}/cmdline is empty"
+    # A trailing NUL is conventional and would otherwise yield a final empty item.
+    parts = raw.split(b"\0")
+    if parts and parts[-1] == b"":
+        parts.pop()
+    return [p.decode("utf-8", "surrogateescape") for p in parts], None
+
+
+def worker_count(argv: list[str]) -> tuple[int | None, str | None]:
+    """gunicorn's worker count from its argv: `-w N`, `--workers N`, `--workers=N`.
+
+    Pure, so the parsing can be tested against argv shapes a live process would be
+    tedious to produce — an argument containing a newline, a quote, a backtick, or
+    the literal text `-w` inside an unrelated value.
+
+    Returns (count, error). Ambiguity is an error, not a choice: if the flag appears
+    twice with different values, gunicorn's own precedence is not something to
+    reimplement from memory when the answer decides how many processes this run is
+    authorised to start.
+    """
+    found: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-w", "--workers"):
+            if i + 1 >= len(argv):
+                return None, f"{a} is the last argument, with no value after it"
+            found.append(argv[i + 1])
+            i += 2
+            continue
+        if a.startswith("--workers="):
+            found.append(a[len("--workers="):])
+        i += 1
+
+    if not found:
+        return None, "no -w/--workers in argv"
+    distinct = set(found)
+    if len(distinct) > 1:
+        return None, (f"argv specifies the worker count more than once, with "
+                      f"different values: {sorted(distinct)}")
+    value = found[0]
+    if not value.isdigit():
+        return None, f"worker count {value!r} is not a decimal integer"
+    return int(value), None
+
+
 def whitelisted_env(pid: int) -> dict:
     raw = proc_field(pid, "environ")
     if not raw:

@@ -497,10 +497,33 @@ echo "the embedded Python is fed to a quoted heredoc"
 # the only sign was one stray line on stderr. Quoting every heredoc removes the class
 # rather than that instance; the values they used to interpolate now arrive as
 # environment variables.
-check "every embedded-python heredoc is quoted" "3" \
+check "every embedded-python heredoc is quoted" "5" \
       "$(grep -c "uv run python - <<'PYEOF'" "$RUNNER")"
 check "and none is left unquoted" "0" \
       "$(grep -c 'uv run python - <<PYEOF' "$RUNNER" || true)"
+# Nothing in the runner may take an unquoted heredoc at all. The last one fed
+# production's argv, converted to newline-delimited text, into a shell loop — which
+# splits any argument containing a newline into two and shifts every position after
+# it. argv is NUL-separated precisely because an argument may hold anything but NUL.
+check "the runner has no unquoted heredoc of any kind" "0" \
+      "$(grep -c '<<[A-Za-z]' "$RUNNER" || true)"
+check "argv is no longer flattened to newline-delimited text" "no" \
+      "$(has_text "$(grep -v '^[[:space:]]*#' "$RUNNER")" "tr '\\0' '\\n'")"
+check "the worker count crosses the boundary as one integer" "yes" \
+      "$(has_text "$(cat "$RUNNER")" 'from bench.collect_backend_meta import argv_of, worker_count')"
+
+echo
+echo "the harness bootstrap and the environment under test are recorded apart"
+check "the bootstrap is announced as not the thing under test" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "NOT the environment under test")"
+check "it writes its own artefact" "yes" \
+      "$(has_text "$(cat "$RUNNER")" '_harness_bootstrap.json')"
+check "which is a different file from the environment record" "yes" \
+      "$(has_text "$(cat "$RUNNER")" '_environment.json')"
+check "and the uv scope is stated in the record" "yes" \
+      "$(has_text "$(cat "$RUNNER")" 'uv_authorisation_scope')"
+check "naming dev2026/.venv as the only thing uv may touch" "yes" \
+      "$(has_text "$(cat "$RUNNER")" 'create or sync dev2026/.venv only')"
 check "no backticks survive inside the embedded python" "0" \
       "$(awk "/<<.PYEOF/,/^PYEOF\$/" "$RUNNER" | grep -c '\`' || true)"
 check "the heredocs read their values from the environment" "yes" \
