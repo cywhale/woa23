@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 6 | 2026-08-09 | Digests **recomputed keyed on the dist-info directory**, not the package name, so `h5py` and `netCDF4` at two versions each survive as distinct entries — §4.1.2b. The name-keyed values of rev 1–5 are superseded and marked as such, including `a796…`, which cannot be the package-tree digest under the new definition. The filename audit no longer calls its 68 hits false positives: contents were never read, so the paths are described and the judgement is withheld — §4.1.5. Provenance re-collected without `-E`, with the full `sys.flags` and the exact command recorded — §4.2. **§7 D1 replaced with measured behaviour**: of the three candidate failure modes only the unset variable fails at startup; a wrong or non-store path starts cleanly and fails per request. |
 | 5 | 2026-08-09 | **Terminology corrected.** Rev 4 called 240 `dist-info` directories "240 distributions"; they are not the same thing and the spec now counts them separately — 240 directories, **236 runtime distributions** with usable `METADATA`, 4 stub directories, 234 distinct names. Two digests named for what they cover: **package-tree** (240 dist-info entries) and **runtime distribution** (236). §4.1.3 states which evidence the clone does *not* carry — binary, stdlib, kernel — and that each stays separate. §4.2: `sys.path` empty entries are expanded against the process's cwd before checking, the allowed stdlib paths are enumerated rather than described, and every named module's `__file__` is verified, not a sample. §4.1.5 renamed a **filename audit**, which is all it is. |
 | 4 | 2026-08-08 | The 240/236 "discrepancy" resolved, and it was **mine**: my digest script filtered on `metadata["Name"]`, silently dropping four distributions whose `METADATA` does not exist. Production has 240 dist-info directories and 240 distributions, no orphans. Two real findings surfaced instead — four abandoned install stubs and two double-installed packages — recorded in §4.1.2. The recorded digest is corrected. §4.2 added: provenance for C1 must prove, from inside each arm, that nothing resolves to production's `site-packages` or `src`, with `PYTHONDONTWRITEBYTECODE=1`. §4.1.7 added: the clone's file scope, exclusions and manifest acceptance. |
 | 3 | 2026-08-08 | Renamed the artefact **production package-tree clone** — "forensic clone" over-claimed. §4.1 now enumerates acceptance per component (site-packages, dist-info, `.pth`, native libraries, symlinks, bytecode, secrets) and states plainly that **full runtime byte-equivalence is not claimed**: the stdlib is outside the tree and the interpreter is not cloned. Survey of the real tree recorded, including a **`.pth` editable install pointing at production's own `src`**, which the clone must neutralise. C2's three starts reframed as observing *this run's* seed diversity, with `INSUFFICIENT` as an outcome rather than a reason to add starts. §6 given a concrete order-stability acceptance and its relationship to C2's verdict. PI decisions on C2 repetitions and the interpreter recorded. |
@@ -164,20 +165,52 @@ reproduces them, because a clone that improves on its source is not a clone. The
 **production hygiene findings**, raised here and owned by whoever owns that
 environment — S2 does not act on them.
 
-##### 4.1.2b Two digests, named for what they cover
+##### 4.1.2b Two digests, keyed on the dist-info directory
 
-Rev 1–4 quoted one digest and used it for two purposes. They are separate values over
-separate sets:
+Revisions 1–5 computed digests over `name==version`. That is not a key: `h5py`
+appears twice and `netCDF4` appears twice, and a name-based digest cannot express
+which directory each came from — two trees with the same names at the same versions
+but different directory layouts would hash the same.
 
-| name | over | value |
+Each entry is therefore keyed on its **dist-info directory name**, which is unique
+within the tree, and carries the fields that identify what the directory claims:
+
+```
+<dist-info directory>\t<Name>\t<Version>\t<PEP 503 normalised name>\tMETADATA=<0|1>\tRECORD=<0|1>
+```
+
+Entries are sorted by directory name, joined with newlines, and hashed. Both digests
+are recomputed from inside the clone and compared with the source; both matched on
+2026-08-09.
+
+| digest | over | value |
 |---|---|---|
-| **package-tree digest** | all **240** `dist-info` entries, unnamed ones identified by directory | `a79657270859880477055f9445401e04b3f4941343e332b85f0c87486914d1fa` |
-| **runtime distribution digest** | the **236** runtime distributions, `name==version` | `60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a` |
+| **package-tree digest** | all **240** dist-info directories | `b8754d32c8aaec6d2049de5d67d3f81aeff4f19effd1525d76b62955447c9b4b` |
+| **runtime distribution digest** | the **236** directories with `METADATA` | `a26ca6c3cfe20ea643c30075d910bb03dbbc01eb3f9d2b4fd224b5d76701447b` |
 
-Both are recomputed from inside the clone and both must match. A third value — the
-**package-tree manifest digest**, over the file-level manifest of §4.1.7 — does not
-exist yet and is produced when the clone is made; it is the strongest of the three,
-because the other two describe metadata while it describes every byte.
+**Superseded.** The rev 1–5 values were name-keyed and are retained only so earlier
+reports stay traceable: `a79657270859880477055f9445401e04b3f4941343e332b85f0c87486914d1fa`
+(240 entries) and `60236d7210c8c3647a32e7da55714e246ecc878d1d6296d10e9caf966d2b0b2a`
+(236 entries). **`a796…` cannot be the package-tree digest under this definition** —
+it is name-keyed, which is the thing being replaced — so the label moves to
+`b8754d32…` rather than staying with the value.
+
+The duplicates survive as separate entries, which is the point:
+
+```
+h5py-3.12.1.dist-info          h5py     3.12.1        h5py     METADATA=1 RECORD=1
+h5py-3.9.0.dist-info           h5py     3.9.0         h5py     METADATA=1 RECORD=1
+netCDF4-1.7.1.post2.dist-info  netCDF4  1.7.1.post2   netcdf4  METADATA=1 RECORD=1
+netcdf4-1.7.3.dist-info        netCDF4  1.7.3         netcdf4  METADATA=1 RECORD=1
+```
+
+The four stubs carry empty `Name` and `Version` and are the only entries with
+`METADATA=0`; **they are also the only four with `RECORD=0`**, which is consistent
+with an interrupted install and is recorded as evidence rather than inferred.
+
+A third digest, the **package-tree manifest digest**, is over the file-level manifest
+of §4.1.7 and is the strongest: the two above describe metadata, that one describes
+every byte. Its value for this clone is in §4.1.7.
 
 ##### 4.1.3 A package-tree clone, not a runtime clone
 
@@ -221,28 +254,35 @@ and the stdlib**. This is a deliberate deviation from "identical to production" 
 recorded as one — production really does load `src` that way, and the clone
 deliberately does not.
 
-##### 4.1.5 Filename audit — what it is, and what it cannot be
+##### 4.1.5 Filename audit — hits, not verdicts
 
-This is a **filename audit**. It reads directory entries and matches names. It does
-**not** read file contents, and it therefore **cannot** show that the tree is free of
-secrets. Nothing in this spec claims otherwise, and a pass here is not evidence of
-absence.
+A **filename audit**: it matches directory entry names. It does not open files. It
+therefore cannot say whether the tree contains secrets, and **nothing below should be
+read as saying that it does not**.
 
-Patterns matched: `*.pem *.key *.crt *.p12 .env* *credential* *secret* *token*
-id_rsa* id_ed25519* .netrc .pgpass`.
+Patterns: `*.pem *.key *.crt *.p12 .env* *credential* *secret* *token* id_rsa*
+id_ed25519* .netrc .pgpass`.
 
-Result on the source tree, 2026-08-09: **68 names matched, and every one reviewed is
-a match on a library source filename** — `packaging/_tokenizer.py`,
-`keyring/credentials.py`, `dns/tokenizer.py`, `parso/python/token.py` and the like —
-plus `pip/_vendor/certifi/cacert.pem`, a public CA bundle. No file was opened to
-determine this; the judgement is from the paths, which is exactly the limit of the
-method.
+**Result: 68 filename hits**, identical in the source and the clone, none new in the
+clone. 62 are `.py`, `.pyc` or `.pyi`. The remaining 6, named individually:
 
-**Acceptance:** the audit is re-run against the clone; any name not on the reviewed
-list stops the run for a person to look at. The stronger control is not this audit at
-all — it is that the tree being copied is a package directory rather than a
-configuration or data directory, and that the clone is verified file-by-file against
-that one source.
+| path | size | what the path suggests | contents |
+|---|---|---|---|
+| `certifi/cacert.pem` | 283,932 | a CA bundle | **not inspected** |
+| `pip/_vendor/certifi/cacert.pem` | 291,366 | a vendored CA bundle | **not inspected** |
+| `pipenv/patched/pip/_vendor/certifi/cacert.pem` | 281,617 | a vendored CA bundle | **not inspected** |
+| `tornado/test/test.crt` | 1,042 | a test fixture certificate | **not inspected** |
+| `tornado/test/test.key` | 1,708 | a test fixture key | **not inspected** |
+| `jeepney/tests/secrets_introspect.xml` | 4,575 | a test fixture for a D-Bus secrets interface | **not inspected** |
+
+Rev 3–5 called all 68 false positives. That was a claim about content, reached
+without reading any content. **Withdrawn.** What can be said is what the table says:
+these paths sit inside library test directories and vendored CA bundles, which is
+where files with those names normally live — and no file was opened to confirm it.
+
+**Acceptance:** the audit is re-run against the clone and any hit not on this recorded
+list stops the run. Reading contents would need its own authorisation and has not been
+requested.
 
 ##### 4.1.6 PI decision — the interpreter
 
@@ -294,6 +334,22 @@ recorded per case.
 | `__editable___src_1_0_finder.py` | the module that `.pth` invokes; excluding one without the other leaves a broken import |
 | nothing else | no blanket exclusions. Anything else omitted would have to be justified here, and nothing is |
 
+**Built 2026-08-09.** `~/woa23-s2-package-clone/dist`, from
+`…/versions/py311/lib/python3.11/site-packages`. 33,567 source files → **33,565**
+in the clone, the difference being exactly the two named exclusions and nothing else;
+3,762 directories in both; zero symlinks. Manifest digests:
+
+```
+source.manifest  3c14cfe70369d081b9b10467d258892654299cba360a3852b886274550630407
+clone.manifest   f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4
+```
+
+**The clone is immutable.** It is read-only — verified by attempting to create a file
+and to append to an existing one, both refused, with zero writable files or
+directories remaining — and it stays that way. **No package in it is updated,
+installed or removed.** Its purpose is to be what production has; a clone that has
+been maintained is a different environment and answers a different question.
+
 **Manifest acceptance.** The clone is accepted only if all of these hold:
 
 1. a manifest of `relative path → SHA-256 → size → mtime_ns` is written for the source
@@ -322,14 +378,56 @@ Collected **from inside each arm**, after startup and before the first contract 
 
 | recorded | must satisfy |
 |---|---|
-| Python binary: absolute path, SHA-256, `--version` | recorded, not assumed |
+| the **exact command**, including every environment assignment | recorded verbatim, so the run can be reproduced and audited |
+| Python binary: absolute path, symlink target, SHA-256 of the ELF, size, `--version` | recorded, not assumed. The invoked path is a symlink; `stat` without `-L` reports the *link's* 52 bytes, which is not the binary |
+| the **whole** of `sys.flags` | recorded, not a selected few |
 | `sys.executable`, `sys.prefix`, `sys.base_prefix` | mutually consistent; a surprise here means an unexpected environment is active |
 | `sys.path`, **in order, after empty-entry expansion** | every entry within the allowed set below |
 | `module.__file__` for **every** module in §4.2.2 | resolves inside the clone, or the arm's staging directory for the application module |
-| `PYTHONDONTWRITEBYTECODE` | `1` — the run writes no bytecode, so the clone stays identical to its manifest |
-| `PYTHONNOUSERSITE` | `1` — `~/.local/lib/python3.11/site-packages` is never added |
+| `sys.dont_write_bytecode` | `True` — **the interpreter's state, not the variable**. `-E` makes Python ignore every `PYTHON*` variable while they remain visible in `os.environ`, so a check that reads the environment would report the request as satisfied while the interpreter ignored it. That happened on the first attempt |
+| `sys.flags.no_user_site` | `1` |
+| `sys.flags.hash_randomization` | `0` for C1 |
+| `sys.flags.ignore_environment` | **must be `0`.** `-E` is not permitted for provenance: it silently disables the controls this table exists to establish |
 | `PYTHONPATH` | recorded verbatim; anything outside the clone and staging stops the run |
 | `PYTHONHASHSEED` | `0` for C1 |
+
+##### 4.2.0 Observed, 2026-08-09 — both arms PASS
+
+Collected with the production binary, no `-E`, from inside each arm:
+
+```
+command   env -i HOME=... PATH=/usr/bin:/bin POLARS_SKIP_CPU_CHECK=1
+              PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0
+              WOA23_ZARR_STORE=data/ PYTHONPATH=<clone>:<arm>
+              /home/odbadmin/.pyenv/versions/py311/bin/python3.11 -S <arm>/s2_smoke.py
+
+binary    /home/odbadmin/.pyenv/versions/py311/bin/python3.11
+          -> /home/odbadmin/.pyenv/versions/3.11.4/bin/python3.11
+          ELF, 36,576 bytes, sha256 1462f705accd72d86160338557dfcdb90d873fea578033579c8e274887a06a9c
+
+sys.executable   /home/odbadmin/.pyenv/versions/py311/bin/python3.11
+sys.prefix       /home/odbadmin/.pyenv/versions/3.11.4
+sys.base_prefix  /home/odbadmin/.pyenv/versions/3.11.4
+
+sys.flags        ignore_environment=0   no_site=1        no_user_site=1
+                 dont_write_bytecode=1  hash_randomization=0
+                 isolated=0  safe_path=False  utf8_mode=1  optimize=0  dev_mode=False
+```
+
+`ignore_environment=0` is the one that matters: it is the evidence that the flags
+beside it were honoured rather than merely requested.
+
+Every `sys.path` entry and every module in §4.2.2 resolved inside the clone, the
+arm's staging directory or the enumerated stdlib. **`src.config` resolved to
+`<staging>/reference/src/config.py`, not to `/home/odbadmin/python/woa23/src`** —
+which is the evidence that excluding the editable `.pth` worked.
+
+The empty-entry expansion was exercised on real data: invoked with `-c`, `sys.path[0]`
+is `''` and expanded to `/home/odbadmin/woa23-s2-staging/candidate`, read from
+`/proc/self/cwd`.
+
+After both runs the clone still held 33,565 files, zero of them newly written, and
+zero `.pyc` newer than the clone's creation.
 
 ##### 4.2.1 `sys.path`: empty entries, and the allowed set
 
@@ -530,18 +628,51 @@ Recording it costs nothing and answers a question no gate currently asks.
 Only the two that can be established in isolation. Everything requiring a live
 service moved to the observation spec.
 
-### D1 — startup fails loudly
+### D1 — startup failure modes, measured
 
-`api/config.py:31` reads `os.environ["WOA23_ZARR_STORE"]` at import time and raises
-`KeyError` when unset. Establish, for the deployment form actually used:
+Rev 1–5 asserted that the candidate "fails loudly". Measured on 2026-08-09 in the
+isolated staging, against the package clone, with no socket bound and no request
+sent, that is true of **one** of the three cases and false of the other two.
 
-- unset variable → the process fails to start, with the cause in the log;
-- variable set to a path that does not exist → same;
-- variable set to a directory that is not a Zarr store → detected, and where.
+| case | `import api.app` | `gunicorn --check-config` | at request time |
+|---|---|---|---|
+| `WOA23_ZARR_STORE` **unset** | **fails**: `KeyError: 'WOA23_ZARR_STORE'` at `api/config.py:31` | **exit 1** | never reached |
+| set to a path that **does not exist** | succeeds | **exit 0** | `FileNotFoundError: No such file or directory: '/no/such/store/1_degree/annual/TS'` |
+| set to a directory that is **not a Zarr store** | succeeds | **exit 0** | `FileNotFoundError: …/not_a_store/1_degree/annual/TS'` |
 
-The failure must be distinguishable from "started but returning errors". A service
-that starts and then 500s on every request is the worse outcome and must not be what
-this looks like.
+**Only the unset case is a startup failure.** The other two produce a process that
+starts cleanly, passes any check that only asks "did it come up", and then fails on
+every data request with an unhandled `FileNotFoundError` — which FastAPI renders as a
+500, and which a proxy in front of it may render as a 502. That is precisely the
+outcome D1 exists to rule out, and it is not currently ruled out.
+
+The `FileNotFoundError` names the resolved group path, so it is not silent in the log.
+What it is not is a *startup* failure: a deployment that checks only whether the
+process is running will call this healthy.
+
+**No fix is proposed here.** Whether the candidate should validate the store at import
+or at readiness — and whether that validation belongs in the application at all — is a
+design decision, and S2's job is to establish the behaviour, not change it.
+
+#### D1a — the reference behaves differently, and the difference is structural
+
+| | reference | candidate |
+|---|---|---|
+| where the store comes from | `woa23_app.py:63`, `zarr_store_path = "data/"`, hard-coded | `api/config.py:31`, `os.environ["WOA23_ZARR_STORE"]`, mandatory |
+| a missing store at startup | import succeeds; `--check-config` exit 0 | **unset variable**: import fails, exit 1 |
+| effect of `WOA23_ZARR_STORE` | **none** — set to `/completely/ignored`, `woa23_app.zarr_store_path` is still `'data/'` | it *is* the store |
+| what "not configured" looks like | a relative path that resolves against whatever the cwd happens to be | an absent variable, which is loud |
+
+The two are not the same failure surface and cannot be compared as though they were.
+The reference cannot be misconfigured by the environment because it ignores it; it can
+be misconfigured by being started in the wrong directory, and nothing detects that at
+startup either.
+
+**And `WOA23_ZARR_STORE` is not in production's environment.** Read from
+`/proc/3960/environ` on 2026-08-09: production's gunicorn master has no `WOA23_*`,
+`PYTHON*`, `POLARS_*`, `DASK_*` or `OMP_*` variable at all. The candidate requires one
+that production does not currently set, and **whether PM2 would pass it through is
+unknown and is the deployment spec's question**, not this one's.
 
 ### D2 — readiness is not a data-path check
 
@@ -592,6 +723,32 @@ seed.
 - anything about behaviour under concurrent load beyond what C2 examines;
 - that deployment is safe. That is the observation and rollback spec's question, and
   it needs a canary, not a contract gate.
+
+## 9a. If a dependency is missing — what happens, and what it would cost
+
+C1's premise is that the clone **is** production's package set. Installing into it, or
+building a fresh environment with `uv`, would replace the thing under test with
+something else and the result would answer a different question.
+
+So nothing is installed. If a smoke, D1 or C1 prerequisite fails on a missing import,
+the run **stops and reports**, and the report carries:
+
+- the import that failed and the package it belongs to;
+- the full traceback;
+- whether the production package tree is still intact — file count, both digests, and
+  whether the same import fails against production's own site-packages as well as
+  against the clone. If it fails against both, the gap is production's; if only
+  against the clone, the clone is wrong and must be rebuilt, not patched;
+- a proposed `uv` command, the exact versions, and a **new** venv path — never the
+  clone, never production;
+- **what the variant becomes.** A run against a uv-built environment is not
+  "C1 with a fix". It is a different test: *the candidate under a resolved dependency
+  set*, which does not carry production's transitive pins and therefore cannot speak
+  to production's behaviour. It would need its own name, its own acceptance, and its
+  own authorisation.
+
+No such failure has occurred. Both arms imported every module in §4.2.2 from the
+clone on 2026-08-09.
 
 ## 10. Open questions for the PI
 
