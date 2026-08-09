@@ -14,11 +14,29 @@
 # A test suite run from the working tree cannot see this: it imports the file that
 # is there. What catches it is asking git, which is what this does.
 #
+# Two kinds of check, deliberately separated:
+#
+#   TREE-ONLY   does every imported module exist here, does the tree compile, is
+#               there any reference to the old name. These need no repository and
+#               run inside a clean `git archive` export, which is the only place
+#               they mean anything — a suite that consults the working tree cannot
+#               tell you what the commit contains.
+#   REPO        is each file tracked, is any of it ignored, does the committed tree
+#               export completely. These need git and are skipped, loudly, when
+#               there is no repository above this directory.
+#
 #     ./scripts/test_tracked.sh
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HERE"
+
+# A clean archive has no .git. Detect rather than assume, and say which mode ran.
+if git rev-parse --show-toplevel >/dev/null 2>&1; then
+  IN_REPO=yes
+else
+  IN_REPO=no
+fi
 
 pass=0; fail=0
 check() {
@@ -29,7 +47,70 @@ check() {
   fi
 }
 
-echo "every harness source file is tracked, and none is ignored"
+echo "mode: $([ "$IN_REPO" = yes ] && echo "repository (tree-only + repo checks)" \
+                                    || echo "clean tree (tree-only checks; no .git here)")"
+echo
+
+echo "TREE-ONLY: the old module name is gone from this tree"
+check "bench/package_digests.py is present" "yes" \
+      "$([ -f bench/package_digests.py ] && echo yes || echo no)"
+check "bench/dist_digests.py is absent" "yes" \
+      "$([ -f bench/dist_digests.py ] && echo no || echo yes)"
+# Anchored on import syntax, not on the name appearing anywhere: this file
+# explains the rule in prose that contains the very string, so a bare grep matches
+# the explanation and reports it as the violation. That is the fourth time that
+# shape of self-match has come up in this suite; the fix is to search for the
+# construct rather than the word.
+check "nothing imports dist_digests" "0" \
+      "$(grep -rlE '^[[:space:]]*(from|import)[[:space:]]+[^#]*dist_digests|-m[[:space:]]+bench\.dist_digests' \
+         bench scripts api 2>/dev/null --include='*.py' --include='*.sh' \
+         | wc -l | tr -d ' ')"
+# And the prose reference is confirmed to be prose, so the check above is not
+# passing because it looks in the wrong place.
+check "the only mention of the old name is in comments" "yes" \
+      "$(if grep -rn 'dist_digests' bench scripts api --include='*.py' --include='*.sh' 2>/dev/null \
+            | grep -vE ':[[:space:]]*#|check |echo |grep |find |\$\(' | grep -q .; \
+         then echo no; else echo yes; fi)"
+check "no compiled leftover of the old name either" "0" \
+      "$(find bench -name 'dist_digests*' | wc -l | tr -d ' ')"
+
+echo
+echo "TREE-ONLY: every imported bench module exists in this tree"
+resolve_missing=0
+imports_here=()
+while IFS= read -r line; do imports_here+=("$line"); done < <(
+  { grep -rhoE 'from bench\.[a-z_]+ import|import bench\.[a-z_]+' bench scripts \
+      --include='*.py' --include='*.sh' || true; } \
+    | grep -oE 'bench\.[a-z_]+' | sort -u)
+check "imports were found to resolve" "yes" \
+      "$([ "${#imports_here[@]}" -gt 3 ] && echo yes || echo no)"
+for mod in "${imports_here[@]}"; do
+  [ -f "${mod//.//}.py" ] || { echo "       MISSING: $mod"; resolve_missing=$((resolve_missing + 1)); }
+done
+check "every imported bench module resolves to a file here" "0" "$resolve_missing"
+
+echo
+echo "TREE-ONLY: the tree compiles"
+if python3 -m compileall -q bench api >/dev/null 2>&1; then
+  check "bench and api compile" "0" "0"
+else
+  check "bench and api compile" "0" "1"
+fi
+
+if [ "$IN_REPO" != yes ]; then
+  echo
+  echo "REPO checks skipped: no git repository above $HERE"
+  echo
+  if [ "$fail" -gt 0 ]; then
+    echo "FAILED $fail/$((pass + fail))"
+    exit 1
+  fi
+  echo "all passed ($pass assertions, tree-only mode)"
+  exit 0
+fi
+
+echo
+echo "REPO: every harness source file is tracked, and none is ignored"
 
 # Source, not output. results/ and run/ hold artefacts; .venv and __pycache__ are
 # build products. Everything else under these roots is something a run needs.
