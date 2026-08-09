@@ -501,9 +501,8 @@ The four are `C16/candidate`, `C16/reference`, `C16-csv/candidate`,
 
 ### Finding — C16 and C16-csv: row order varies across cycles, semantics hold
 
-Across the three unpinned cycles, **exactly two of the sixty-four cases changed their
-row order between cycles, on both arms**: `C16` and `C16-csv`. The other 90
-comparable (case, arm) pairs were stable.
+Of the 64 cases, **exactly `C16` and `C16-csv` showed row-order variation across
+cycles on both arms.** The other 90 comparable (case, arm) pairs were stable.
 
 **Effect directly observed; source-level mechanism strongly supported.**
 
@@ -522,6 +521,41 @@ demonstrates the mechanism offline on synthetic rows. **No runtime instrumentati
 observed the set iteration inside a worker**, and none was authorised; the internal
 causal chain is inferred from the shape of the effect and from offline reproduction,
 not proven in the running process.
+
+#### Traceability of the two observations
+
+Both are reproducible from the run's own artefacts, under
+`~/woa23-s2-c2c/dev2026/results/` on odb24.
+
+**Seed digests** — `c2_summary.json → seed_diversity.per_cycle` reproduces exactly
+the `seed_digest` field of each `c2_cycle{1,2,3}_interp_{candidate,reference}.json`;
+all six match. Each of those records also carries the probe itself — 11 strings and
+11 hashes — so the digests can be recomputed rather than taken on trust. The raw
+values differ per cycle, not merely their digests: `hash("1_degree")` was
+`-4854500566350811133`, `4447478972511239299`, `-4704986505660421793` on the
+candidate and `9026776351318122430`, `3388466108566623068`, `-714907535411415113`
+on the reference.
+
+**Order fingerprints** — each `c2_cycle{1,2,3}_contract.json` records, per case and
+per arm, `reference_order` and `candidate_order` with `body_sha256`,
+`row_order_sha256`, `columns` and `n_rows`. Across the three cycles that is 128
+(case, arm) entries, of which 94 carry a row-order digest and 34 are responses with
+no row structure. Recomputing the varied set from those artefacts gives exactly the
+four `c2_summary.json` reports.
+
+Case by case, the row-order digest per cycle:
+
+| case | arm | cycle 1 | cycle 2 | cycle 3 |
+|---|---|---|---|---|
+| `C16` | reference | `56ccfd332e27…` | `56ccfd332e27…` | `a35ae14d930a…` |
+| `C16` | candidate | `56ccfd332e27…` | `a35ae14d930a…` | `56ccfd332e27…` |
+| `C16-csv` | reference | `56ccfd332e27…` | `56ccfd332e27…` | `a35ae14d930a…` |
+| `C16-csv` | candidate | `56ccfd332e27…` | `a35ae14d930a…` | `56ccfd332e27…` |
+| `C1` (stable, for contrast) | both | `c994a1ff7849…` | `c994a1ff7849…` | `c994a1ff7849…` |
+
+The two cases take exactly **two** distinct orderings and no more, which is what a
+two-element set admits. That is consistent with the proposed mechanism and is not on
+its own proof of it — the count would look the same for any two-valued cause.
 
 **It is not a defect against this gate.** 5.2B compares the row multiset and the
 column set; row order is not part of the criterion, and under an unpinned seed a
