@@ -112,8 +112,10 @@ usage: run_controlled.sh [--contract-only | --cleanup-only | --c1 | --c2-cycle]
   --package-clone PATH   root of the read-only production package-tree clone.
   --clone-manifest PATH  the manifest written when that clone was built and
                          verified. Its digest anchors the environment record.
-  --workers N            assert production's worker count rather than trusting the
-                         measurement. C2 only.
+  --expected-workers N   ASSERT production's worker count. This does NOT set the
+                         arms' worker count — that is read from production's own
+                         argv at run time. If the two disagree the run aborts
+                         before any arm starts. C2 only.
   --label TAG            prefixes this invocation's result files. C2 cycles need
                          it so three cycles do not overwrite each other.
 
@@ -144,8 +146,13 @@ while [ $# -gt 0 ]; do
                        PKG_CLONE="$2"; shift 2 ;;
     --clone-manifest)  [ $# -ge 2 ] || { echo "--clone-manifest needs a value" >&2; exit 2; }
                        CLONE_MANIFEST="$2"; shift 2 ;;
-    --workers)         [ $# -ge 2 ] || { echo "--workers needs a value" >&2; exit 2; }
+    --expected-workers) [ $# -ge 2 ] || { echo "--expected-workers needs a value" >&2; exit 2; }
                        WORKERS="$2"; shift 2 ;;
+    --workers)         echo "--workers was renamed --expected-workers. It never set" >&2
+                       echo "  the arms' worker count: that is read from production at" >&2
+                       echo "  run time and cannot be chosen. The old name invited the" >&2
+                       echo "  opposite reading, so it is refused rather than aliased." >&2
+                       exit 2 ;;
     --label)           [ $# -ge 2 ] || { echo "--label needs a value" >&2; exit 2; }
                        LABEL="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -179,7 +186,7 @@ S2_MODE=none
 # effect" to everyone including the person who wrote it.
 if [ "$S2_MODE" = none ]; then
   for pair in "--python-binary:$PY_BINARY" "--package-clone:$PKG_CLONE" \
-              "--clone-manifest:$CLONE_MANIFEST" "--workers:$WORKERS"; do
+              "--clone-manifest:$CLONE_MANIFEST" "--expected-workers:$WORKERS"; do
     [ -n "${pair#*:}" ] || continue
     echo "${pair%%:*} means nothing without --c1 or --c2-cycle, and this run would" >&2
     echo "  have ignored it. Refusing rather than accepting a flag that has no effect." >&2
@@ -213,16 +220,16 @@ else
   done
 fi
 if [ "$C1_MODE" = yes ] && [ -n "$WORKERS" ]; then
-  echo "--workers is C2 only. C1 pins one worker per arm so that a byte-exact" >&2
+  echo "--expected-workers is C2 only. C1 pins one worker per arm so that a byte-exact" >&2
   echo "  comparison has one process producing each side's bytes." >&2
   exit 2
 fi
 if [ -n "$WORKERS" ]; then
   case "$WORKERS" in
-    ''|*[!0-9]*) echo "--workers '$WORKERS' is not a number" >&2; exit 2 ;;
+    ''|*[!0-9]*) echo "--expected-workers '$WORKERS' is not a number" >&2; exit 2 ;;
   esac
   if [ "$WORKERS" -lt 1 ] || [ "$WORKERS" -gt 16 ]; then
-    echo "--workers $WORKERS is outside 1-16" >&2; exit 2
+    echo "--expected-workers $WORKERS is outside 1-16" >&2; exit 2
   fi
 fi
 if [ -n "$LABEL" ]; then
@@ -393,7 +400,12 @@ fi
 # The repository this script lives in — the source of the candidate's api/, the venv,
 # and the run-state directory. Distinct from $WORK, which is the staging root.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN=$HERE/run
+# Per label, so three C2 cycles cannot overwrite one another. Every per-service file
+# — pid, starttime, tree, uncertain, diag and crucially the service LOGS — is named
+# `<service>.<ext>` inside this directory, so with a shared directory cycle 2 would
+# silently replace cycle 1's evidence. The logs are the part that survives a
+# successful cleanup, and therefore the part that would have been lost.
+RUN=$HERE/run/$LABEL
 VENV=$HERE/.venv
 
 # Printed before the authorisation and host gates, not after: a refused invocation
@@ -418,7 +430,8 @@ if [ "$S2_MODE" != none ]; then
   echo "   binary    : $PY_BINARY"
   echo "   clone     : $PKG_CLONE"
   echo "   manifest  : $CLONE_MANIFEST"
-  echo "   workers   : ${WORKERS:-<read from production at run time>}"
+  echo "   workers   : read from production at run time"
+  echo "               expected (asserted): ${WORKERS:-<none asserted>}"
   echo "   seed      : $([ "$S2_MODE" = c1 ] && echo "PYTHONHASHSEED=0 (pinned)" \
                           || echo "unset — this is what C2 observes")"
   echo "   arms run from the clone. dev2026/.venv is the harness's environment and"
@@ -751,8 +764,15 @@ shopt -s nullglob
 # `.diag` too: it is the record of why a previous cleanup could not confirm itself,
 # and it is written into the same directory the next run would write over. Evidence
 # that a run can silently destroy is evidence that will be destroyed.
-leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.tree "$RUN"/*.uncertain \
-           "$RUN"/*.diag)
+# The whole run/ tree, not just this label's directory. State left by ANY previous
+# run or cycle is a reason to stop: per-label directories isolate evidence, and they
+# would also hide a neighbouring cycle's unfinished cleanup from a check that only
+# looked at its own. Logs are deliberately not in this list — they are the evidence a
+# clean cleanup leaves behind.
+leftovers=()
+while IFS= read -r _leftover; do leftovers+=("$_leftover"); done < <(
+  find "$HERE/run" -type f \( -name '*.pid' -o -name '*.starttime' -o -name '*.tree' \
+       -o -name '*.uncertain' -o -name '*.diag' \) 2>/dev/null | sort)
 if [ ${#leftovers[@]} -gt 0 ]; then
   echo "leftover run state from a previous invocation:" >&2
   printf '  %s\n' "${leftovers[@]}" >&2
@@ -837,14 +857,50 @@ PYEOF
     echo "production reports $measured workers, outside the 1-16 this run will start" >&2
     exit 1
   fi
+  echo "production worker count: actual=$measured (read from pid $PROD_MASTER_BEFORE\'s argv)"
+  echo "                        expected=${WORKERS:-<none asserted>}"
   if [ -n "$WORKERS" ] && [ "$WORKERS" != "$measured" ]; then
-    echo "--workers $WORKERS was asserted but production is running $measured." >&2
-    echo "  Production changed, or the assertion is stale. Either way this run would" >&2
-    echo "  not be measuring production's configuration." >&2
+    echo "expected-workers mismatch: expected $WORKERS, production is running $measured." >&2
+    echo "  --expected-workers is an ASSERTION and never a setting: the arms take the" >&2
+    echo "  actual number, so a disagreement means production changed or the assertion" >&2
+    echo "  is stale, and either way this run would not be measuring production's" >&2
+    echo "  configuration. Stopping before any arm is started." >&2
     exit 1
   fi
-  ARM_WORKERS="$measured"
-  echo "production's worker count, read from its argv: $ARM_WORKERS"
+  ARM_WORKERS="$measured"          # the ACTUAL number, always; never $WORKERS
+
+  # -------------------------------- production must not have moved while we read ---
+  # The worker count, the master PID, its start time, the listener set and the boot
+  # id all describe one process. Reading them at different moments and using them
+  # together assumes production held still in between, and a restart between the
+  # preflight capture and here would leave this run sized for a deployment that no
+  # longer exists — with the arms not yet started, which is the last moment stopping
+  # is free.
+  recheck_st=0
+  PROD_PIDS_RECHECK="$(pids_on_port "$PROD_PORT")" || recheck_st=$?
+  [ "$recheck_st" -eq 2 ] && {
+    echo "cannot re-read production's port state; refusing to continue" >&2; exit 1; }
+  PROD_MASTER_RECHECK="$(master_of "$PROD_PIDS_RECHECK")" || {
+    echo "cannot re-identify production's master among [$PROD_PIDS_RECHECK]" >&2; exit 1; }
+  PROD_START_RECHECK="$(starttime_of "$PROD_MASTER_RECHECK")" || {
+    echo "cannot re-read production's master start time" >&2; exit 1; }
+  BOOT_RECHECK="$(cat /proc/sys/kernel/random/boot_id)" || {
+    echo "cannot re-read the boot id" >&2; exit 1; }
+  if [ "$PROD_MASTER_RECHECK" != "$PROD_MASTER_BEFORE" ] \
+     || [ "$PROD_START_RECHECK" != "$PROD_START_BEFORE" ] \
+     || [ "$PROD_PIDS_RECHECK" != "$PROD_PIDS_BEFORE" ] \
+     || [ "$BOOT_RECHECK" != "$BOOT_ID" ]; then
+    echo "production changed while its configuration was being read:" >&2
+    echo "  master     $PROD_MASTER_BEFORE -> $PROD_MASTER_RECHECK" >&2
+    echo "  starttime  $PROD_START_BEFORE -> $PROD_START_RECHECK" >&2
+    echo "  listeners  [$PROD_PIDS_BEFORE] -> [$PROD_PIDS_RECHECK]" >&2
+    echo "  boot id    $BOOT_ID -> $BOOT_RECHECK" >&2
+    echo "  The worker count just read may describe a different process than the one" >&2
+    echo "  this run would compare itself against. Stopping before any test service" >&2
+    echo "  is started." >&2
+    exit 1
+  fi
+  echo "  production unchanged across the read (master, starttime, listeners, boot id)"
 fi
 
 # The authorised process count is DERIVED from the number just measured, never

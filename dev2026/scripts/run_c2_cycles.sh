@@ -49,7 +49,7 @@ usage() {
 usage: run_c2_cycles.sh --python-binary PATH --package-clone PATH
                         --clone-manifest PATH --workdir-base PATH
                         --candidate-port N --reference-port N --scheduler-port N
-                        [--workers N]
+                        [--expected-workers N]
 
 Runs exactly three --c2-cycle invocations and reports the 5.2B verdict, the seed
 diversity observed across them, and order stability. Never runs a fourth.
@@ -74,8 +74,11 @@ while [ $# -gt 0 ]; do
                       REF_PORT="$2"; shift 2 ;;
     --scheduler-port) [ $# -ge 2 ] || { echo "--scheduler-port needs a value" >&2; exit 2; }
                       SCHED_PORT="$2"; shift 2 ;;
-    --workers)        [ $# -ge 2 ] || { echo "--workers needs a value" >&2; exit 2; }
+    --expected-workers) [ $# -ge 2 ] || { echo "--expected-workers needs a value" >&2; exit 2; }
                       WORKERS="$2"; shift 2 ;;
+    --workers)        echo "--workers was renamed --expected-workers: it asserts" >&2
+                      echo "  production's worker count and never sets the arms'." >&2
+                      exit 2 ;;
     --cycles)         echo "--cycles is not a flag. C2 is three independent cycles;" >&2
                       echo "  a run that could choose its own number could keep going" >&2
                       echo "  until the seed observation came out a particular way." >&2
@@ -116,6 +119,9 @@ echo "   clone    : $PKG_CLONE"
 echo "   manifest : $CLONE_MANIFEST"
 echo "   workdirs : ${WORKDIR_BASE}-cycle1 .. ${WORKDIR_BASE}-cycle${CYCLES}"
 echo "   ports    : candidate $CAND_PORT, reference $REF_PORT, scheduler $SCHED_PORT"
+echo "   labels   : c2_cycle1 .. c2_cycle${CYCLES} — each cycle's results, provenance,"
+echo "              state and service logs live under its own label, so a failing"
+echo "              cycle keeps its evidence and no cycle overwrites another"
 echo "   seed     : unset in every cycle. That is the thing under observation."
 echo
 
@@ -129,9 +135,10 @@ for i in $(seq 1 "$CYCLES"); do
   # Leftover state from the previous cycle is a hard stop, not something to clean.
   # The runner refuses to start on it too; checking here as well means a failed
   # cycle 1 does not get as far as creating cycle 2's staging directory.
-  shopt -s nullglob
-  leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.tree "$RUN"/*.uncertain "$RUN"/*.diag)
-  shopt -u nullglob
+  leftovers=()
+  while IFS= read -r _l; do leftovers+=("$_l"); done < <(
+    find "$RUN" -type f \( -name '*.pid' -o -name '*.starttime' -o -name '*.tree' \
+         -o -name '*.uncertain' -o -name '*.diag' \) 2>/dev/null | sort)
   if [ ${#leftovers[@]} -gt 0 ]; then
     echo "cycle $((i - 1)) left run state behind:" >&2
     printf '  %s\n' "${leftovers[@]}" >&2
@@ -147,7 +154,7 @@ for i in $(seq 1 "$CYCLES"); do
     --workdir "${WORKDIR_BASE}-cycle${i}" \
     --candidate-port "$CAND_PORT" --reference-port "$REF_PORT" \
     --scheduler-port "$SCHED_PORT" \
-    ${WORKERS:+--workers "$WORKERS"} \
+    ${WORKERS:+--expected-workers "$WORKERS"} \
     --label "$label"
   rc=$?
   set -e

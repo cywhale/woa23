@@ -226,16 +226,25 @@ check "and says it would have been ignored" "yes" \
 check "--package-clone outside an S2 mode is refused" "2" "$(code --package-clone /tmp/c)"
 check "--clone-manifest outside an S2 mode is refused" "2" "$(code --clone-manifest /tmp/m)"
 check "--workers outside an S2 mode is refused" "2" "$(code --workers 2)"
-check "--workers is refused under --c1" "2" \
-      "$(code --c1 "${S2OK[@]}" --workers 2)"
+check "--expected-workers is refused under --c1" "2" \
+      "$(code --c1 "${S2OK[@]}" --expected-workers 2)"
 check "and says C1 pins one worker per arm" "yes" \
-      "$(has_text "$(run --c1 "${S2OK[@]}" --workers 2)" "C1 pins one worker")"
+      "$(has_text "$(run --c1 "${S2OK[@]}" --expected-workers 2)" "C1 pins one worker")"
+
+# The old name is refused rather than aliased: it read like a setting, and the
+# number it names is read from production and cannot be chosen.
+check "the old --workers spelling is refused outright" "2" \
+      "$(code --c2-cycle "${S2OK[@]}" --workers 2)"
+check "and says it never set the arms worker count" "yes" \
+      "$(has_text "$(run --c2-cycle "${S2OK[@]}" --workers 2)" "It never set")"
+check "and that the count is read from production" "yes" \
+      "$(has_text "$(run --c2-cycle "${S2OK[@]}" --workers 2)" "cannot be chosen")"
 
 S2ARGS_C2=(--c2-cycle "${S2OK[@]}")
-check "a non-numeric --workers is refused" "2" "$(code "${S2ARGS_C2[@]}" --workers two)"
-check "--workers 0 is refused" "2" "$(code "${S2ARGS_C2[@]}" --workers 0)"
-check "--workers 99 is refused" "2" "$(code "${S2ARGS_C2[@]}" --workers 99)"
-check "--workers 2 is accepted past validation" "3" "$(code "${S2ARGS_C2[@]}" --workers 2)"
+check "a non-numeric --expected-workers is refused" "2" "$(code "${S2ARGS_C2[@]}" --expected-workers two)"
+check "--expected-workers 0 is refused" "2" "$(code "${S2ARGS_C2[@]}" --expected-workers 0)"
+check "--expected-workers 99 is refused" "2" "$(code "${S2ARGS_C2[@]}" --expected-workers 99)"
+check "--expected-workers 2 is accepted past validation" "3" "$(code "${S2ARGS_C2[@]}" --expected-workers 2)"
 
 check "a label with a space is refused" "2" "$(code --label 'two words')"
 check "a label with a slash is refused" "2" "$(code --label a/b)"
@@ -441,7 +450,9 @@ s2out2="$(s2run "WOA23_S2_C2_GRANTED=yes" --c2-cycle "${S2ARGS_OK[@]}" \
 check "a C2 cycle says the seed is unset on purpose" "yes" \
       "$(has_text "$s2out2" "seed      : unset — this is what C2 observes")"
 check "and that the worker count comes from production at run time" "yes" \
-      "$(has_text "$s2out2" "workers   : <read from production at run time>")"
+      "$(has_text "$s2out2" "workers   : read from production at run time")"
+check "and that nothing was asserted when nothing was given" "yes" \
+      "$(has_text "$s2out2" "expected (asserted): <none asserted>")"
 check "and states the three-cycle budget" "yes" \
       "$(has_text "$s2out2" "Three cycles make a C2 result: <= 288 per arm")"
 check "and that each cycle is cleaned up before the next" "yes" \
@@ -562,8 +573,40 @@ check "an unreadable worker count refuses to assume one" "yes" \
       "$(has_text "$RUNSRC2" 'Refusing to assume')"
 check "and says a guess would answer for a deployment that does not exist" "yes" \
       "$(has_text "$(cat "$RUNNER")" "deployment that does not exist")"
-check "an asserted --workers that disagrees with production aborts" "yes" \
-      "$(has_text "$(cat "$RUNNER")" "was asserted but production is running")"
+check "an asserted count that disagrees with production aborts" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "expected-workers mismatch")"
+check "and says the flag is an assertion, never a setting" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "is an ASSERTION and never a setting")"
+check "the arms always take the ACTUAL number" "yes" \
+      "$(has_text "$(grep -v '"'"'^[[:space:]]*#'"'"' "$RUNNER")" 'ARM_WORKERS="$measured"')"
+check "and never the asserted one" "no" \
+      "$(has_text "$(grep -v '"'"'^[[:space:]]*#'"'"' "$RUNNER")" 'ARM_WORKERS="$WORKERS"')"
+
+echo
+echo "production must not move while its configuration is being read"
+# The worker count, master PID, start time, listener set and boot id describe one
+# process; using them together assumes production held still between the reads.
+check "the identity is re-read after the worker count" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "PROD_PIDS_RECHECK")"
+check "the master is re-identified, not just the port re-polled" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "PROD_MASTER_RECHECK")"
+check "so is its start time" "yes" "$(has_text "$(cat "$RUNNER")" "PROD_START_RECHECK")"
+check "and the boot id" "yes" "$(has_text "$(cat "$RUNNER")" "BOOT_RECHECK")"
+check "a change stops the run before any test service starts" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "is started")"
+check "the production PID is never hard-coded" "0" \
+      "$(grep -cE '"'"'/proc/3960|PROD_MASTER=3960'"'"' "$RUNNER" || true)"
+check "it is derived from the listener set on the port" "yes" \
+      "$(has_text "$(cat "$RUNNER")" 'master_of "$PROD_PIDS_BEFORE"')"
+
+echo
+echo "each cycle keeps its own state, results and logs"
+check "the run-state directory is per label" "yes" \
+      "$(has_text "$(cat "$RUNNER")" 'RUN=$HERE/run/$LABEL')"
+check "and the leftover check scans the whole run tree" "yes" \
+      "$(has_text "$(cat "$RUNNER")" 'find "$HERE/run" -type f')"
+check "so a neighbouring cycle unfinished cleanup is still seen" "yes" \
+      "$(has_text "$(cat "$RUNNER")" "would also hide a neighbouring")"
 
 echo
 echo "the driver propagates the three C2 outcomes distinctly"
