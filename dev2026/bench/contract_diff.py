@@ -38,8 +38,8 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from bench.contract_cases import Case, all_cases  # noqa: E402
 from bench.provenance import (  # noqa: E402
-    load_meta, seed_requirement_for, validate_meta, validate_store_agreement,
-    verify_group_path_agreement)
+    SEED_POLICY_MEANING, load_meta, seed_requirement_for, validate_meta,
+    validate_store_agreement, verify_group_path_agreement)
 
 INDEX = ("lon", "lat", "depth", "time_period")
 
@@ -236,6 +236,7 @@ def main() -> int:
     policy = args.seed_policy or (
         "reference-unpinned" if args.variant == "5.2B" else "both-pinned")
     print(f"seed policy: {policy}")
+    print(f"  {SEED_POLICY_MEANING[policy]}")
 
     # Provenance first, before any request: the same rule the latency gate follows.
     problems = []

@@ -53,6 +53,30 @@ SEED_POLICIES: dict[str, dict[str, str]] = {
     "both-unpinned":      {"candidate": "unpinned", "reference": "unpinned"},
 }
 
+#: What each policy actually requires, in words, because one of the names does not
+#: say it. `reference-unpinned` does NOT mean "the reference must be unpinned" — it
+#: means the reference is not constrained, because under 5.2B the reference is live
+#: production and its seed is whatever it happens to be. A pinned reference is
+#: perfectly acceptable under it. The name describes the situation that motivated the
+#: policy, not the rule the policy applies, and reading it as a requirement would
+#: invert the check on the one arm it deliberately does not constrain.
+SEED_POLICY_MEANING: dict[str, str] = {
+    "both-pinned": (
+        "candidate MUST be pinned to PYTHONHASHSEED=0; reference MUST be pinned. "
+        "D2b and C1, where both arms are ours and a byte-exact comparison depends "
+        "on the ordering being reproducible."),
+    "reference-unpinned": (
+        "candidate MUST be pinned to PYTHONHASHSEED=0; reference MAY be either "
+        "pinned or unpinned — it is not checked. NOT 'the reference must be "
+        "unpinned'. 5.2B against live production, which we may not restart, so its "
+        "seed cannot be asserted in either direction."),
+    "both-unpinned": (
+        "candidate MUST be unset; reference MUST be unset. C2, where both arms are "
+        "ours and both are deliberately unpinned — a pinned arm here would observe "
+        "nothing about unpinned behaviour, so this one is checked in the inverse "
+        "direction rather than merely tolerated."),
+}
+
 
 def seed_requirement_for(policy: str, label: str) -> str:
     """What `label` must show under `policy`. Unknown policies fail closed."""

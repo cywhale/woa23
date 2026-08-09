@@ -253,7 +253,12 @@ with tempfile.TemporaryDirectory() as td:
             argv = [sys.executable] + argv[3:]
             assert "5.2A" in argv, argv
             r = subprocess.run(argv, cwd=str(HERE), capture_output=True, text=True)
-            return r, json.loads((root / "results" / out_name).read_text())
+            out = root / "results" / out_name
+            if not out.exists():
+                raise SystemExit(f"gate wrote no artefact (rc={r.returncode})\n"
+                                 f"stdout:\n{r.stdout[-1500:]}\n"
+                                 f"stderr:\n{r.stderr[-1500:]}")
+            return r, json.loads(out.read_text())
         finally:
             csrv.shutdown(); rsrv.shutdown()
 
@@ -392,10 +397,65 @@ with tempfile.TemporaryDirectory() as td:
     live = json.loads((root / "results" / "live.json").read_text())
     check("5.2B against an unpinned reference still passes — no regression", 0,
           r5b.returncode)
+    # And a PINNED reference under the same policy, because the name says otherwise.
+    pinref_path = root / "results" / "pinned_ref.json"
+    pinref_path.write_text(json.dumps(json.loads(ref_path.read_text())))
+    csrv2, curl2 = make_server("candidate", None)
+    rsrv2, rurl2 = make_server("reference", None)
+    try:
+        subst = {'"http://127.0.0.1:${CAND_PORT}"': curl2,
+                 '"http://127.0.0.1:${REF_PORT}"': rurl2,
+                 '"$VARIANT"': "5.2B",
+                 '"$SEED_POLICY"': "reference-unpinned",
+                 '"results/${LABEL}_meta_candidate.json"': str(cand_path),
+                 '"results/${LABEL}_meta_reference.json"': str(pinref_path),
+                 '"results/${LABEL}_contract.json"': str(root / "results" / "pinref.json")}
+        argv = [sys.executable] + [subst.get(a, a) for a in argv_template][3:]
+        rpin = subprocess.run(argv, cwd=str(HERE), capture_output=True, text=True)
+    finally:
+        csrv2.shutdown(); rsrv2.shutdown()
+    check("reference-unpinned also accepts a PINNED reference", 0, rpin.returncode)
+    check("so the name is not a requirement on the reference", True,
+          "MAY be either" in rpin.stdout)
     check("with its own policy recorded", "reference-unpinned", live["seed_policy"])
     check("over 64 cases", 64, len(live["results"]))
-    check("and the pinned candidate was still required", True,
-          "PYTHONHASHSEED" not in (r5b.stdout + r5b.stderr))
+    # Not "PYTHONHASHSEED does not appear" — the gate now prints the policy's
+    # meaning, which names it. The question is whether it was reported as a problem.
+    check("and no seed problem was raised", True,
+          "must be" not in r5b.stderr and "requires it to be unset" not in r5b.stderr)
+    check("the run reached the cases rather than stopping at provenance", 64,
+          len(live["results"]))
+
+    print()
+    print("the fourth corner — unpinned candidate, pinned reference — through the gate")
+    # No campaign produces this on purpose. It is what a half-applied change looks
+    # like: C2's launch on one arm and C1's on the other. Every policy must refuse
+    # it, and the gate must refuse it before sampling anything.
+    mixed_c = root / "results" / "mixed_meta_candidate.json"
+    mixed_r = root / "results" / "mixed_meta_reference.json"
+    mixed_c.write_text(json.dumps(c2c))      # unpinned candidate
+    mixed_r.write_text(json.dumps(c1r_fixed := json.loads(ref_path.read_text())))
+    for policy in ("both-pinned", "reference-unpinned", "both-unpinned"):
+        csrv3, curl3 = make_server("candidate", None)
+        rsrv3, rurl3 = make_server("reference", None)
+        try:
+            out_p = root / "results" / f"mixed_{policy}.json"
+            subst = {'"http://127.0.0.1:${CAND_PORT}"': curl3,
+                     '"http://127.0.0.1:${REF_PORT}"': rurl3,
+                     '"$VARIANT"': "5.2B" if policy != "both-pinned" else "5.2A",
+                     '"$SEED_POLICY"': policy,
+                     '"results/${LABEL}_meta_candidate.json"': str(mixed_c),
+                     '"results/${LABEL}_meta_reference.json"': str(mixed_r),
+                     '"results/${LABEL}_contract.json"': str(out_p)}
+            argv = [sys.executable] + [subst.get(a, a) for a in argv_template][3:]
+            rm = subprocess.run(argv, cwd=str(HERE), capture_output=True, text=True)
+        finally:
+            csrv3.shutdown(); rsrv3.shutdown()
+        check(f"the gate refuses the mixed shape under {policy}", True,
+              rm.returncode != 0)
+        check(f"  naming PYTHONHASHSEED under {policy}", True,
+              "PYTHONHASHSEED" in (rm.stdout + rm.stderr))
+        check(f"  and writing no artefact under {policy}", False, out_p.exists())
 
     print()
     print("the two layers guard different things, in the runner's order")

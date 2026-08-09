@@ -25,8 +25,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bench.provenance import (  # noqa: E402
-    ARM_MATCH_DIGESTS, S2_ARM_MATCH_DIGESTS, SEED_POLICIES, compare_arms,
-    seed_requirement_for, verify_environment_match,
+    ARM_MATCH_DIGESTS, S2_ARM_MATCH_DIGESTS, SEED_POLICIES,
+    SEED_POLICY_MEANING, compare_arms, seed_requirement_for,
+    verify_environment_match,
 )
 
 PASS = 0
@@ -229,16 +230,25 @@ print("the full policy x arm-shape matrix, on real records throughout")
 #                      which is what live production is)
 #   unpinned/unpinned  the C2 cycle                   -> both-unpinned
 c1c, c1r, c1e = load()
+#   unpinned/pinned    the fourth corner: an unpinned candidate against a pinned
+#                      reference. No campaign produces it on purpose, which is
+#                      exactly why it is here — it is what a half-applied change
+#                      looks like (C2's launch on one arm, C1's on the other), and
+#                      every policy must refuse it.
 SHAPES = {
     "pinned/pinned":     (c1c, c1r, c1e),
     "pinned/unpinned":   (c1c, c2r, c1e),
+    "unpinned/pinned":   (c2c, c1r, c2e),
     "unpinned/unpinned": (c2c, c2r, c2e),
 }
 # accepted[policy][shape]: does the seed rule let it through?
 EXPECTED = {
-    "both-pinned":        {"pinned/pinned": True,  "pinned/unpinned": False, "unpinned/unpinned": False},
-    "reference-unpinned": {"pinned/pinned": True,  "pinned/unpinned": True,  "unpinned/unpinned": False},
-    "both-unpinned":      {"pinned/pinned": False, "pinned/unpinned": False, "unpinned/unpinned": True},
+    "both-pinned":        {"pinned/pinned": True,  "pinned/unpinned": False,
+                           "unpinned/pinned": False, "unpinned/unpinned": False},
+    "reference-unpinned": {"pinned/pinned": True,  "pinned/unpinned": True,
+                           "unpinned/pinned": False, "unpinned/unpinned": False},
+    "both-unpinned":      {"pinned/pinned": False, "pinned/unpinned": False,
+                           "unpinned/pinned": False, "unpinned/unpinned": True},
 }
 for policy, row in EXPECTED.items():
     for shape, want_ok in row.items():
@@ -250,6 +260,50 @@ for policy, row in EXPECTED.items():
               want_ok, not probs)
 
 # The two ways C2 could be waved through without anyone deciding to.
+# The fourth corner is rejected by every policy, and for two different reasons —
+# the candidate is unpinned where it must be pinned, or the reference is pinned
+# where it must be unset. Both are checked, so neither arm can be the only one
+# holding the line.
+for policy in SEED_POLICIES:
+    probs = [p for p in offhost(compare_arms(c2c, c1r, c2e, s2=True,
+                                             seed_policy=policy))
+             if "PYTHONHASHSEED" in p]
+    check(f"unpinned candidate / pinned reference is refused under {policy}", True,
+          bool(probs))
+check("under both-pinned it is the candidate that is named", True,
+      any("candidate" in p for p in offhost(
+          compare_arms(c2c, c1r, c2e, s2=True, seed_policy="both-pinned"))
+          if "PYTHONHASHSEED" in p))
+check("under both-unpinned it is the reference that is named", True,
+      any("reference" in p and "requires it to be unset" in p for p in offhost(
+          compare_arms(c2c, c1r, c2e, s2=True, seed_policy="both-unpinned"))))
+
+print()
+print("reference-unpinned does not mean the reference must be unpinned")
+# The name describes the situation that motivated the policy, not the rule. Read as
+# a requirement it would invert the check on the one arm it deliberately leaves
+# unconstrained, so the semantics are asserted directly rather than left to the name.
+check("it accepts a PINNED reference", [],
+      [p for p in offhost(compare_arms(c1c, c1r, c1e, s2=True,
+                                       seed_policy="reference-unpinned"))
+       if "PYTHONHASHSEED" in p])
+check("and an UNPINNED reference", [],
+      [p for p in offhost(compare_arms(c1c, c2r, c1e, s2=True,
+                                       seed_policy="reference-unpinned"))
+       if "PYTHONHASHSEED" in p])
+check("while still requiring a pinned candidate", True,
+      bool([p for p in offhost(compare_arms(c2c, c1r, c2e, s2=True,
+                                            seed_policy="reference-unpinned"))
+            if "PYTHONHASHSEED" in p]))
+check("the reference is literally unconstrained under it", "any",
+      seed_requirement_for("reference-unpinned", "reference"))
+check("every policy carries its meaning in words", set(SEED_POLICIES),
+      set(SEED_POLICY_MEANING))
+check("and the misleading name is corrected in its own text", True,
+      "NOT 'the reference must be unpinned'" in SEED_POLICY_MEANING["reference-unpinned"])
+check("which says the reference MAY be either", True,
+      "MAY be either" in SEED_POLICY_MEANING["reference-unpinned"])
+
 check("no policy lets an unpinned CANDIDATE through as 'any'", True,
       all(reqs["candidate"] != "any" for reqs in SEED_POLICIES.values()))
 check("only the reference is ever 'any', and only under reference-unpinned",
