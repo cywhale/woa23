@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 8 | 2026-08-09 | **Process readiness and store readiness separated throughout** — §7 D2. A 200 on the OpenAPI document says the process is serving and nothing about the store; C1 may use it as a startup precondition and may not call the store ready. That the endpoint would answer 200 with an unreadable store is marked an **inference from D1, not a measurement**: no socket was bound. D1's fixtures restated as **six negative fixtures (N1–N6) and one real-store control (P1)**, with what each has at the store path. **§7a added: the runner as implemented** — the `--c1` / `--c2-cycle` modes, the separate `WOA23_S2_C1_GRANTED` / `WOA23_S2_C2_GRANTED` gates that no other grant implies in either direction, mandatory `--python-binary` / `--package-clone` / `--clone-manifest` with **no fallback to `dev2026/.venv`**, the interpreter probe plus `/proc/<pid>/maps` as two separate kinds of evidence, order fingerprints recorded outside the verdict, and the request ceilings. Offline only; nothing executed against VM24. |
 | 7 | 2026-08-09 | **`-S` means the smoke did not reproduce production's startup semantics** — site.py never ran, so no `.pth` was processed. C1 as evidenced is downgraded to *isolated package-tree import correctness*, with launcher and site semantics listed as a limitation, and a site-enabled sanitised variant designed in §4.3 for separate authorisation. D1 fixtures strengthened: a missing group path is **not** proof of a non-Zarr store, and the three failure stages are now distinguished — §7. The **`-E` run of 2026-08-09 is marked invalid** and may not be cited. "evidence of interrupted installation" softened to "consistent with". The filename audit no longer offers any judgement about the six non-Python hits. |
 | 6 | 2026-08-09 | Digests **recomputed keyed on the dist-info directory**, not the package name, so `h5py` and `netCDF4` at two versions each survive as distinct entries — §4.1.2b. The name-keyed values of rev 1–5 are superseded and marked as such, including `a796…`, which cannot be the package-tree digest under the new definition. The filename audit no longer calls its 68 hits false positives: contents were never read, so the paths are described and the judgement is withheld — §4.1.5. Provenance re-collected without `-E`, with the full `sys.flags` and the exact command recorded — §4.2. **§7 D1 replaced with measured behaviour**: of the three candidate failure modes only the unset variable fails at startup; a wrong or non-store path starts cleanly and fails per request. |
 | 5 | 2026-08-09 | **Terminology corrected.** Rev 4 called 240 `dist-info` directories "240 distributions"; they are not the same thing and the spec now counts them separately — 240 directories, **236 runtime distributions** with usable `METADATA`, 4 stub directories, 234 distinct names. Two digests named for what they cover: **package-tree** (240 dist-info entries) and **runtime distribution** (236). §4.1.3 states which evidence the clone does *not* carry — binary, stdlib, kernel — and that each stays separate. §4.2: `sys.path` empty entries are expanded against the process's cwd before checking, the allowed stdlib paths are enumerated rather than described, and every named module's `__file__` is verified, not a sample. §4.1.5 renamed a **filename audit**, which is all it is. |
@@ -736,15 +737,32 @@ meaning:
 listening, which no authorisation covers. Whether the OpenAPI endpoint would answer
 200 while the store is unreadable is therefore an open question, not a finding.
 
-| fixture | import | startup | first data request |
-|---|---|---|---|
-| `WOA23_ZARR_STORE` **unset** | **exit 1** `KeyError` | **exit 1** | not reached |
-| path does not exist | exit 0 | exit 0 | `FileNotFoundError` on the group path |
-| **existing but empty** directory | exit 0 | exit 0 | `FileNotFoundError` on the group path |
-| a **regular file** where the store should be | exit 0 | exit 0 | `FileNotFoundError` on the group path |
-| group path present, `.zgroup` **not JSON** | exit 0 | exit 0 | **`JSONDecodeError`**: `Expecting value: line 1 column 1 (char 0)` |
-| group path present, `.zgroup` valid JSON, `zarr_format: 99` | exit 0 | exit 0 | **`MetadataError`**: `unsupported zarr format: 99` |
-| the real store (control) | exit 0 | exit 0 | returns data |
+The fixture set is **six negative fixtures and one real-store control**. The control
+is not decoration: without it, "every fixture failed" is equally consistent with the
+harness being broken, and six identical `FileNotFoundError`s would look like six
+findings rather than one behaviour plus a harness that cannot read anything.
+
+**The six negative fixtures**, in increasing order of how much of a store is present:
+
+| # | negative fixture | what is at the path | import | startup | first data request |
+|---|---|---|---|---|---|
+| N1 | `WOA23_ZARR_STORE` **unset** | nothing is configured at all | **exit 1** `KeyError` | **exit 1** | not reached |
+| N2 | path does not exist | nothing | exit 0 | exit 0 | `FileNotFoundError` on the group path |
+| N3 | **existing but empty** directory | a directory, no contents | exit 0 | exit 0 | `FileNotFoundError` on the group path |
+| N4 | a **regular file** where the store should be | a file, not a directory | exit 0 | exit 0 | `FileNotFoundError` on the group path |
+| N5 | group path present, `.zgroup` **not JSON** | the right shape, unparseable metadata | exit 0 | exit 0 | **`JSONDecodeError`**: `Expecting value: line 1 column 1 (char 0)` |
+| N6 | group path present, `.zgroup` valid JSON, `zarr_format: 99` | the right shape, a format that does not exist | exit 0 | exit 0 | **`MetadataError`**: `unsupported zarr format: 99` |
+
+**The control:**
+
+| # | control fixture | import | startup | first data request |
+|---|---|---|---|---|
+| P1 | the real production store | exit 0 | exit 0 | **returns data** |
+
+`N1` is the only fixture of the seven that fails before serving. `N2`–`N4` are
+indistinguishable from each other at every stage. `N5` and `N6` are the only ones
+that reach Zarr's own parsing, and they are the only two that could be called
+"malformed store" without over-claiming.
 
 #### What the errors do and do not distinguish
 
@@ -794,22 +812,227 @@ startup either.
 that production does not currently set, and **whether PM2 would pass it through is
 unknown and is the deployment spec's question**, not this one's.
 
-### D2 — readiness is not a data-path check
+### D2 — process readiness and store readiness are different signals
 
-These are two different things and the first draft of this spec ran them together:
+These are two different things, the first draft of this spec ran them together, and
+D1 is what shows why that mattered.
 
-| | probes | reads the store | purpose |
+| | **process readiness** | **store readiness** |
+|---|---|---|
+| what it probes | the OpenAPI document | one real query per arm, counterbalanced |
+| reads the Zarr store | **no** | **yes** |
+| the question it answers | is the process up, routed and serving? | can this process actually read its store? |
+| what a green signal licenses | starting the gate | nothing beyond "the store opened for this query" |
+| what a green signal does **not** license | any statement about the store | any statement about the whole store, or about latency |
+
+**A 200 on the OpenAPI document says the process is serving and says nothing about
+the store.** D1 measured this from the other end: fixtures N2, N3 and N4 — a
+nonexistent path, an empty directory, and an ordinary file — all import cleanly, pass
+`gunicorn --check-config`, and fail only when a request reaches the data path. A
+process in any of those three states is one whose OpenAPI endpoint has every reason
+to answer 200.
+
+That last step is an **inference, not a measurement**. D1 bound no socket and sent no
+HTTP, so what the OpenAPI endpoint actually returns under N2–N4 has not been
+observed. Establishing it needs a listening server, which is the fourth stage below
+and is not authorised. The inference is strong enough to design against and not
+strong enough to report as a finding.
+
+#### What C1 and C2 may therefore do with readiness
+
+**Process readiness may be used as a startup precondition, and only as that.** The
+runner waits for the OpenAPI document on each arm before proceeding, because a gate
+that starts before the workers have forked measures the wrong thing. Two constraints
+follow and both are implemented:
+
+1. **Readiness must not read the store.** S1 found that a readiness probe issuing a
+   real query warmed one arm's page cache and store handle before the other had
+   served anything — on the exact path the experiment measures. The OpenAPI document
+   touches no chunk.
+2. **Nothing between the readiness check and the data probe may be described as the
+   store being ready.** The runner's function is named `process_ready`, its comment
+   says what it does not establish, and its success line says the store has not been
+   touched. Store readiness is established by the symmetric data probe and nowhere
+   else; under `--cleanup-only`, which skips the probe, the run states that store
+   readiness was **not** established rather than leaving it implied.
+
+**Readiness as a fourth D1 stage — whether the signal turns green while the store is
+unreadable — remains unestablished** and stays out of scope until a spec authorises a
+listening server. It is what a real deployment's health check would need to answer,
+and it is the deployment spec's question.
+
+## 7a. The runner, as implemented
+
+Written and tested offline on 2026-08-09. **Nothing below has been executed against
+VM24**; the whole of it is argument handling, launch construction and verification,
+covered by 129 offline CLI assertions that all stop at validation or at the
+authorisation gate, plus 121 Python assertions over the new pure logic.
+
+### 7a.1 Modes and their authorisation
+
+Four modes, exactly one per invocation, counted rather than compared pairwise — four
+flags make six pairs and the version that enumerated them missed three.
+
+| mode | environment | seed | gate | grant |
+|---|---|---|---|---|
+| default | `dev2026/.venv` | `PYTHONHASHSEED=0` | 5.2A + latency + pilot | `WOA23_D2B_GRANTED` |
+| `--contract-only` | `dev2026/.venv` | `PYTHONHASHSEED=0` | 5.2A only | `WOA23_D2B_GRANTED` |
+| `--cleanup-only` | `dev2026/.venv` | `PYTHONHASHSEED=0` | none | `WOA23_D2B_GRANTED` |
+| **`--c1`** | **package clone** | `PYTHONHASHSEED=0` | **5.2A only** | **`WOA23_S2_C1_GRANTED`** |
+| **`--c2-cycle`** | **package clone** | **unset** | **5.2B only** | **`WOA23_S2_C2_GRANTED`** |
+
+**No grant implies another, in either direction.** `WOA23_D2B_GRANTED=yes` on a
+`--c1` invocation is exit 3 with a message saying so explicitly; a C1 grant present
+during a D2b run is also exit 3, so a leftover `export` cannot widen what was
+granted. C1 and C2 refuse each other's grants as well.
+
+**Every argument and authorisation check completes before anything is created.** The
+order is: parse → mode exclusivity → S2 argument presence and shape → port validation
+→ workdir and clone boundary → **print the resolved configuration and the request
+budget** → authorisation → host and prerequisites → staging → processes → HTTP. At
+the authorisation gate nothing has been written, no port has been touched and no
+request has been sent. A malformed argument still outranks a missing grant, so a
+refusal names the wrong value rather than the missing variable.
+
+### 7a.2 The arms run from the clone, and there is no fallback
+
+`--python-binary`, `--package-clone` and `--clone-manifest` are **required** by both
+S2 modes, must be absolute, and are **refused outside them** — a flag that is
+accepted but ignored reads as a flag that took effect.
+
+**There is deliberately no default and no fallback to `dev2026/.venv`.** An S2 run
+that reached for the campaign's own venv because a flag was missing would produce a
+D2b result wearing a C1 label, and it would pass. The refusal says this in words.
+
+The launch, spelled out in the runner rather than assembled from a variable:
+
+```
+env -C <arm dir> -u VIRTUAL_ENV -u PYTHONHOME [-u PYTHONHASHSEED | PYTHONHASHSEED=0] \
+    PYTHONPATH=<clone> PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+    <production binary> -S -m gunicorn <app> -w <n> -k uvicorn.workers.UvicornWorker …
+```
+
+- `VIRTUAL_ENV` and `PYTHONHOME` are **unset**, not overridden. Either inherited from
+  the invoking shell would redirect the interpreter's idea of where its packages
+  live, and `VIRTUAL_ENV` is exactly what a leftover `source .venv/bin/activate`
+  leaves behind.
+- C2 uses `-u PYTHONHASHSEED` rather than an empty value: CPython **rejects**
+  `PYTHONHASHSEED=""`, so setting it empty would not mean "unset", it would mean the
+  interpreter refuses to start — and the arm would fail for a reason that looks
+  nothing like the one it had.
+- The clone has no `bin/`, so the Dask scheduler and worker are reached as
+  `-m distributed.cli.dask_scheduler` / `-m distributed.cli.dask_worker`, the same
+  entry points the console scripts call.
+
+The clone is subject to the **same boundary check as the workdir**, resolved the same
+way through symlinks: a `--package-clone` inside `~/python/woa23`, inside production's
+`site-packages`, or inside the workdir is refused. Pointing at the original would put
+production's live packages — and `__editable__.src-1.0.pth`, which names
+`~/python/woa23/src` — on the arms' path, and it would be reported as isolation. The
+clone is also required to be **non-writable**: a writable clone is not the artefact
+that was built and verified.
+
+### 7a.3 What the provenance now has to establish
+
+Three artefacts per S2 arm, and they establish different things:
+
+| artefact | what it is | what it establishes | what it cannot |
 |---|---|---|---|
-| **readiness** | the OpenAPI document | **no** | is the process up and routing? |
-| **data-path smoke** | one real query per arm, counterbalanced | **yes** | can it actually read the store? |
+| `<label>_environment.json` | the clone listed **under the arms' own launch** — `-S`, clone on `PYTHONPATH`, no `VIRTUAL_ENV` | which distributions the arms can see, anchored to the clone manifest's digest | that any particular process loaded them |
+| `<label>_meta_<arm>.json` | `/proc` provenance of the running arm | argv, cwd, whitelisted environment, store literal, master and worker PIDs | in-process `sys.path` |
+| `<label>_interp_<arm>.json` | the interpreter probe **and** `/proc/<pid>/maps` of every tracked arm process | see below | see below |
 
-Readiness must not read the store: S1 found that a readiness probe issuing a real
-query warmed one arm's page cache and store handle before the other had served
-anything. The data-path smoke is a separate, deliberately symmetric step.
+Two changes were needed to make the first two honest under S2:
 
-Establish that the readiness signal is meaningful for the deployment form — that it
-turns green only once the worker can serve, and that it does not turn green when the
-store is unreadable while the process is otherwise healthy.
+- **`--env-python` is now mandatory for the S2 collections.** The arm's `argv[0]` is
+  production's binary, whose sibling `python` *is* production's environment: the
+  existing `argv0_sibling` heuristic would have listed production's 236 distributions
+  and labelled them the clone's. A confident wrong answer is the failure this
+  function already exists to have fixed once.
+- **The listing reproduces the launch.** The same binary lists production's packages
+  when run plainly and the clone's when run as the arm is started, so
+  `dependencies()` now takes the interpreter arguments and environment, and records
+  both alongside the answer so it cannot be read without its question.
+- **The environment anchor is the clone manifest, not a lockfile.** There is no
+  lockfile; `S2_ENVIRONMENT_RECORD_FIELDS` puts `package_manifest_sha256` in exactly
+  the position `lockfile_sha256` holds under D2b, compared with the same strictness.
+
+**The interpreter probe and `/proc/<pid>/maps` are separate evidence and neither is
+sufficient.**
+
+- The probe is an **identically-launched sibling interpreter**: same binary, flags,
+  `PYTHONPATH`, cwd and environment, reporting `sys.executable`, `sys.prefix`,
+  `sys.base_prefix`, the full `sys.flags`, the whole ordered `sys.path` with empty
+  entries expanded against the cwd, and `__file__` for fourteen named modules. It is
+  exact about the **launch procedure** and it is **not the gunicorn worker**.
+- `/proc/<pid>/maps`, read for every process in each arm's tracked tree, is **the arm
+  itself**: every file it actually mapped, which is where polars, numpy, zarr's
+  codecs, h5py and netCDF4 would appear if they had come from production. It is
+  blind to a pure-Python module imported from the wrong place.
+
+Both fail closed. Every `sys.path` entry and every module file is checked in **both**
+its absolute and its resolved form — a clone path that is a symlink into production
+passes the first and fails the second — and an entry under *no* allowed root is a
+problem as well as an entry under a forbidden one. That second half is what catches
+the path nobody thought to forbid. Allowed and forbidden roots are each expanded to
+include their own `realpath`, because production's site-packages is reached as
+`…/versions/py311/…` and *is* `…/versions/3.11.4/envs/py311/…`; a root recorded in
+one form would not match a path resolved in the other. Containment is tested on
+component boundaries, so `…/woa23-staging` is not inside `…/woa23`.
+
+A run whose probe reports `sys.flags.ignore_environment` is refused outright (§4.2.0a),
+a missing `-S` is refused for the C1 procedure, and a probe that could write bytecode
+is refused because the clone must stay byte-identical.
+
+**The `-S` limitation is carried into the output, not just the spec.** It appears in
+the environment record, in every interpreter record, in the C2 summary, and on stdout
+at the end of every S2 run.
+
+### 7a.4 C2: three cycles, and the three statements they support
+
+One `--c2-cycle` is one cycle and **never draws the conclusion** — one process has one
+seed, and one seed is not a distribution. `scripts/run_c2_cycles.sh` runs exactly
+three, each in its own workdir, each fully cleaned up and verified before the next
+begins, and `bench/c2_summary.py` produces:
+
+1. **The 5.2B verdict.** PASS only if every cycle passed. Two passes and a failure is
+   not two thirds of an answer, and the driver stops at the first failing cycle.
+2. **Seed diversity — an observation, never an escalation.** Each cycle records the
+   probe interpreter's hashes of a fixed eleven-string set. Three distinct digests is
+   `OBSERVED`; anything less is **`INSUFFICIENT`**, which is *not* a failure of the
+   candidate and *not* a reason to run a fourth cycle. There is no `--cycles` flag,
+   and passing one is an error naming the reason: a run that could choose its own
+   number could keep going until the observation came out a particular way.
+   `INSUFFICIENT` does not affect the exit status, so nothing pushes towards a fourth.
+   **Limitation, carried with the number:** this is a sibling interpreter's seed, not
+   the gunicorn worker's.
+3. **Order stability — recorded, and deliberately not part of pass/fail.** Every case
+   now carries an order fingerprint per arm: the raw body digest, a **row-order
+   digest over the row keys only with values excluded**, and the column sequence. The
+   row-order digest is what isolates order — a changed *value* moves the body digest
+   and leaves it alone — so a cross-cycle value difference is not reported as an
+   ordering change. Without a pinned seed, two cycles ordering rows differently is the
+   expected consequence of what C2 observes, not a defect. Unlike the seed digests,
+   this comes from the processes that actually answered.
+
+### 7a.5 Request budgets, stated as ceilings before anything is sent
+
+| mode | per arm | both arms | production 8050 |
+|---|---|---|---|
+| `--cleanup-only` | ≤ 30 | ≤ 60 | **0** |
+| `--contract-only`, `--c1`, one `--c2-cycle` | ≤ 96 | ≤ 192 | **0** |
+| default (D2b full) | ≤ 480 | ≤ 960 | **0** |
+| **C2, all three cycles** | **≤ 288** | **≤ 576** | **0** |
+
+96 = 30 readiness (worst case; normally 1–3) + 2 data probe + 64 contract. Production
+is zero by construction: nothing in the script addresses port 8050, which is read from
+`/proc` and `ss` only.
+
+**Cleanup budget for C2**: three complete start/stop cycles, each stopping four
+services and verifying every process in its recorded tree, its ports, its boot ID and
+its state files. The driver refuses to begin a cycle if the previous one left any run
+state behind, and says that leftover state must be inspected rather than removed to
+make the next cycle run.
 
 ## 8. Isolation requirements
 

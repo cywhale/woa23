@@ -30,6 +30,12 @@ EXPECT_PY=3.11.4
 PROD_DIR=$HOME/python/woa23
 PROD_PY=$HOME/.pyenv/versions/py311/bin/python3.11
 STORE=$PROD_DIR/data
+# Production's live site-packages. Never read by an arm and never on any import
+# path this script builds — it is here only so it can be named as forbidden. The
+# S2 arms must not reach it, and `__editable__.src-1.0.pth` inside it points at
+# $PROD_DIR/src, so an arm that found this directory would import production's
+# live source as well as its packages.
+PROD_SITE=$HOME/.pyenv/versions/py311/lib/python3.11/site-packages
 # Defaults. Every one of these can be overridden on the command line, because a
 # staging run has to be able to sit beside the evidence of previous runs rather than
 # on top of it — but the defaults stay pointed at the last authorised D2b
@@ -55,21 +61,66 @@ FORBIDDEN_PORTS="8050 8786 8787"
 #   --cleanup-only   neither gate. Brings the processes up, records and verifies
 #                    their trees, collects provenance, stops. For reproducing a
 #                    cleanup failure.
+#
+# and two S2 modes, which are a different experiment entirely. D2b asks whether the
+# candidate matches the reference in one environment this campaign built. C1 and C2
+# ask whether that still holds in *production's* environment — production's Python
+# binary, a read-only clone of production's package tree, and no `dev2026/.venv`
+# anywhere on the arms' import path.
+#
+#   --c1             production binary + package clone, PYTHONHASHSEED=0, 5.2A
+#                    byte-exact over 64 cases. One cycle. No latency, no pilot.
+#   --c2-cycle       one cycle of C2: the same clone, production's own worker count
+#                    read at run time, and **no** PYTHONHASHSEED, compared 5.2B
+#                    semantically. Three independent cycles make a C2 result, and
+#                    scripts/run_c2_cycles.sh is what runs them — this flag is one
+#                    cycle and never draws the conclusion.
 CLEANUP_ONLY=no
 CONTRACT_ONLY=no
+C1_MODE=no
+C2_CYCLE=no
+PY_BINARY=""
+PKG_CLONE=""
+CLONE_MANIFEST=""
+WORKERS=""
+LABEL=""
 
 usage() {
   cat >&2 <<'USAGE'
-usage: run_controlled.sh [--contract-only | --cleanup-only]
+usage: run_controlled.sh [--contract-only | --cleanup-only | --c1 | --c2-cycle]
                          [--workdir PATH]
                          [--candidate-port N] [--reference-port N]
                          [--scheduler-port N]
+                         [--python-binary PATH] [--package-clone PATH]
+                         [--clone-manifest PATH] [--workers N] [--label TAG]
 
   --contract-only   run the 5.2A contract gate and stop. Skips the latency gate,
                     the noise pilot and any rung escalation.
   --cleanup-only    start the services, verify their trees, stop. No gates.
+  --c1              S2 C1: production binary + package clone, PYTHONHASHSEED=0,
+                    5.2A byte-exact, 64 cases. No latency, no pilot.
+  --c2-cycle        S2 C2, ONE cycle: same clone, production's measured worker
+                    count, no PYTHONHASHSEED, 5.2B semantic. Three cycles make a
+                    result; run scripts/run_c2_cycles.sh, not this flag directly.
   --workdir PATH    staging root. Must not already exist.
   --*-port N        loopback port. 8050, 8786 and 8787 are refused.
+
+ S2 modes only (and refused outside them):
+  --python-binary PATH   production's interpreter. No default, and no fallback to
+                         dev2026/.venv: an S2 run that quietly used the campaign's
+                         own venv would answer a question nobody asked.
+  --package-clone PATH   root of the read-only production package-tree clone.
+  --clone-manifest PATH  the manifest written when that clone was built and
+                         verified. Its digest anchors the environment record.
+  --workers N            assert production's worker count rather than trusting the
+                         measurement. C2 only.
+  --label TAG            prefixes this invocation's result files. C2 cycles need
+                         it so three cycles do not overwrite each other.
+
+ Authorisation, by mode. Each is separate and none implies another:
+  default/--contract-only/--cleanup-only   WOA23_D2B_GRANTED=yes
+  --c1                                     WOA23_S2_C1_GRANTED=yes
+  --c2-cycle                               WOA23_S2_C2_GRANTED=yes
 USAGE
 }
 
@@ -77,6 +128,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --contract-only) CONTRACT_ONLY=yes; shift ;;
     --cleanup-only)  CLEANUP_ONLY=yes; shift ;;
+    --c1)            C1_MODE=yes; shift ;;
+    --c2-cycle)      C2_CYCLE=yes; shift ;;
     --workdir)         [ $# -ge 2 ] || { echo "--workdir needs a value" >&2; exit 2; }
                        WORK="$2"; shift 2 ;;
     --candidate-port)  [ $# -ge 2 ] || { echo "--candidate-port needs a value" >&2; exit 2; }
@@ -85,16 +138,102 @@ while [ $# -gt 0 ]; do
                        REF_PORT="$2"; shift 2 ;;
     --scheduler-port)  [ $# -ge 2 ] || { echo "--scheduler-port needs a value" >&2; exit 2; }
                        SCHED_PORT="$2"; shift 2 ;;
+    --python-binary)   [ $# -ge 2 ] || { echo "--python-binary needs a value" >&2; exit 2; }
+                       PY_BINARY="$2"; shift 2 ;;
+    --package-clone)   [ $# -ge 2 ] || { echo "--package-clone needs a value" >&2; exit 2; }
+                       PKG_CLONE="$2"; shift 2 ;;
+    --clone-manifest)  [ $# -ge 2 ] || { echo "--clone-manifest needs a value" >&2; exit 2; }
+                       CLONE_MANIFEST="$2"; shift 2 ;;
+    --workers)         [ $# -ge 2 ] || { echo "--workers needs a value" >&2; exit 2; }
+                       WORKERS="$2"; shift 2 ;;
+    --label)           [ $# -ge 2 ] || { echo "--label needs a value" >&2; exit 2; }
+                       LABEL="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
-if [ "$CONTRACT_ONLY" = "yes" ] && [ "$CLEANUP_ONLY" = "yes" ]; then
-  echo "--contract-only and --cleanup-only are mutually exclusive: one runs the" >&2
-  echo "  contract gate and the other runs no gate at all." >&2
+# ------------------------------------------------------------ mode selection ---
+# Exactly one mode, checked by counting rather than by a chain of pairwise tests:
+# four flags make six pairs, and the version of this that enumerated them missed
+# three of the six.
+selected=""
+[ "$CONTRACT_ONLY" = yes ] && selected="$selected --contract-only"
+[ "$CLEANUP_ONLY"  = yes ] && selected="$selected --cleanup-only"
+[ "$C1_MODE"       = yes ] && selected="$selected --c1"
+[ "$C2_CYCLE"      = yes ] && selected="$selected --c2-cycle"
+n_modes=$(printf '%s' "$selected" | wc -w | tr -d ' ')
+if [ "$n_modes" -gt 1 ]; then
+  echo "the modes are mutually exclusive; got:$selected" >&2
+  echo "  Each runs a different set of gates against a different environment, so" >&2
+  echo "  combining them would produce a result belonging to neither." >&2
   exit 2
 fi
+
+S2_MODE=none
+[ "$C1_MODE" = yes ] && S2_MODE=c1
+[ "$C2_CYCLE" = yes ] && S2_MODE=c2
+
+# The S2 arguments exist only for the S2 modes. Accepting them elsewhere would
+# silently ignore them, and "the flag was accepted" reads as "the flag took
+# effect" to everyone including the person who wrote it.
+if [ "$S2_MODE" = none ]; then
+  for pair in "--python-binary:$PY_BINARY" "--package-clone:$PKG_CLONE" \
+              "--clone-manifest:$CLONE_MANIFEST" "--workers:$WORKERS"; do
+    [ -n "${pair#*:}" ] || continue
+    echo "${pair%%:*} means nothing without --c1 or --c2-cycle, and this run would" >&2
+    echo "  have ignored it. Refusing rather than accepting a flag that has no effect." >&2
+    exit 2
+  done
+else
+  # No default and no fallback. dev2026/.venv is this campaign's own environment;
+  # an S2 run that reached for it because a flag was missing would produce a D2b
+  # result wearing a C1 label, and it would pass.
+  [ -n "$PY_BINARY" ] || {
+    echo "$S2_MODE requires --python-binary: the arms run production's interpreter," >&2
+    echo "  and there is deliberately no fallback to dev2026/.venv." >&2
+    exit 2; }
+  [ -n "$PKG_CLONE" ] || {
+    echo "$S2_MODE requires --package-clone: the arms import from the read-only" >&2
+    echo "  production package-tree clone, and there is deliberately no fallback to" >&2
+    echo "  dev2026/.venv." >&2
+    exit 2; }
+  [ -n "$CLONE_MANIFEST" ] || {
+    echo "$S2_MODE requires --clone-manifest: without the manifest digest nothing" >&2
+    echo "  distinguishes the verified clone from a directory with the right name." >&2
+    exit 2; }
+  for pair in "--python-binary:$PY_BINARY" "--package-clone:$PKG_CLONE" \
+              "--clone-manifest:$CLONE_MANIFEST"; do
+    case "${pair#*:}" in
+      /*) ;;
+      *) echo "${pair%%:*} must be an absolute path; got '${pair#*:}'. A relative" >&2
+         echo "  path would resolve against whichever directory this was invoked from." >&2
+         exit 2 ;;
+    esac
+  done
+fi
+if [ "$C1_MODE" = yes ] && [ -n "$WORKERS" ]; then
+  echo "--workers is C2 only. C1 pins one worker per arm so that a byte-exact" >&2
+  echo "  comparison has one process producing each side's bytes." >&2
+  exit 2
+fi
+if [ -n "$WORKERS" ]; then
+  case "$WORKERS" in
+    ''|*[!0-9]*) echo "--workers '$WORKERS' is not a number" >&2; exit 2 ;;
+  esac
+  if [ "$WORKERS" -lt 1 ] || [ "$WORKERS" -gt 16 ]; then
+    echo "--workers $WORKERS is outside 1-16" >&2; exit 2
+  fi
+fi
+if [ -n "$LABEL" ]; then
+  case "$LABEL" in
+    *[!A-Za-z0-9_-]*|"")
+      echo "--label '$LABEL' may contain only letters, digits, '-' and '_': it" >&2
+      echo "  becomes part of a filename." >&2
+      exit 2 ;;
+  esac
+fi
+[ -n "$LABEL" ] || LABEL=$([ "$S2_MODE" = none ] && echo d2b || echo "$S2_MODE")
 
 # Validate the ports before anything else looks at the host. A port that is not a
 # port, or is production's, is a configuration error and not something to discover
@@ -190,6 +329,35 @@ WORK="$WORK_ABS"
 REF_DIR=$WORK/reference
 CAND_DIR=$WORK/candidate
 
+# The clone is subject to the same boundary as the workdir, resolved the same way.
+# A `--package-clone` that resolved into production would put production's live
+# site-packages on the arms' PYTHONPATH — with `__editable__.src-1.0.pth` inside it
+# pointing at $PROD_DIR/src — which is precisely the arrangement C1 exists to avoid,
+# and it would be reported as isolation.
+if [ "$S2_MODE" != none ]; then
+  CLONE_ABS="$(_resolve_existing_parent "$PKG_CLONE")" || {
+    echo "cannot resolve --package-clone $PKG_CLONE to a physical path" >&2
+    exit 2; }
+  PROD_SITE_ABS="$(_resolve_existing_parent "$PROD_SITE")" || PROD_SITE_ABS="$PROD_SITE"
+  for bad in "$PROD_ABS" "$PROD_SITE_ABS"; do
+    case "$CLONE_ABS" in
+      "$bad"|"$bad"/*)
+        echo "--package-clone $CLONE_ABS is inside production ($bad). The clone is" >&2
+        echo "  a copy of production's packages, never production's own directory:" >&2
+        echo "  pointing at the original would make every arm import from the live" >&2
+        echo "  tree and report it as isolated." >&2
+        exit 2 ;;
+    esac
+  done
+  case "$CLONE_ABS" in
+    "$WORK"|"$WORK"/*)
+      echo "--package-clone $CLONE_ABS is inside the workdir $WORK, which this run" >&2
+      echo "  creates and writes to. The clone must be immutable and outside it." >&2
+      exit 2 ;;
+  esac
+  PKG_CLONE="$CLONE_ABS"
+fi
+
 # The repository this script lives in — the source of the candidate's api/, the venv,
 # and the run-state directory. Distinct from $WORK, which is the staging root.
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -199,29 +367,136 @@ VENV=$HERE/.venv
 # Printed before the authorisation and host gates, not after: a refused invocation
 # should still record what it was asked to do, and reading the resolved values back
 # is how a wrong flag gets noticed.
+case "$S2_MODE" in
+  c1) MODE_NAME="C1 (S2: production binary + package clone, 5.2A byte-exact)" ;;
+  c2) MODE_NAME="C2 cycle (S2: production binary + package clone, 5.2B semantic)" ;;
+  *)  MODE_NAME="$([ "$CLEANUP_ONLY" = yes ] && echo cleanup-only \
+                   || { [ "$CONTRACT_ONLY" = yes ] && echo contract-only \
+                        || echo "full (contract + latency + pilot)"; })" ;;
+esac
 echo "== configuration for this invocation =="
-echo "   mode      : $([ "$CLEANUP_ONLY" = yes ] && echo cleanup-only \
-                       || { [ "$CONTRACT_ONLY" = yes ] && echo contract-only || echo "full (contract + latency + pilot)"; })"
+echo "   mode      : $MODE_NAME"
 echo "   workdir   : $WORK"
 echo "   candidate : 127.0.0.1:$CAND_PORT"
 echo "   reference : 127.0.0.1:$REF_PORT"
 echo "   scheduler : 127.0.0.1:$SCHED_PORT"
 echo "   repository: $HERE"
+echo "   label     : $LABEL"
+if [ "$S2_MODE" != none ]; then
+  echo "   binary    : $PY_BINARY"
+  echo "   clone     : $PKG_CLONE"
+  echo "   manifest  : $CLONE_MANIFEST"
+  echo "   workers   : ${WORKERS:-<read from production at run time>}"
+  echo "   seed      : $([ "$S2_MODE" = c1 ] && echo "PYTHONHASHSEED=0 (pinned)" \
+                          || echo "unset — this is what C2 observes")"
+  echo "   arms run from the clone. dev2026/.venv is the harness's environment and"
+  echo "   is not on any arm's import path."
+fi
 
-if [ "${WOA23_D2B_GRANTED:-}" != "yes" ]; then
-  echo "D2b authorisation not stated. This starts FOUR services on a production" >&2
-  echo "host — a Dask scheduler, a Dask worker, an unmodified reference API and the" >&2
-  echo "candidate API — which is SIX OS processes, because each of the two APIs is" >&2
-  echo "a gunicorn arbiter plus the worker it forks." >&2
-  echo "Re-run with WOA23_D2B_GRANTED=yes once it is granted. D2a does not imply D2b." >&2
+# ------------------------------------------------------------ request budget ---
+# Stated before anything is sent, and stated as a ceiling rather than an estimate.
+# Every number below is the maximum this invocation can issue: process readiness
+# gives up at 30 attempts per arm, the data probe is exactly two per arm, and the
+# contract gate is one request per case per arm.
+BUDGET_READY=30            # per arm, worst case; normally 1-3
+BUDGET_PROBE=2             # per arm, counterbalanced
+BUDGET_CONTRACT=64         # per arm, one per case
+case "$S2_MODE:$CLEANUP_ONLY:$CONTRACT_ONLY" in
+  c1:*|c2:*)        BUDGET_ARM=$((BUDGET_READY + BUDGET_PROBE + BUDGET_CONTRACT)) ;;
+  none:yes:*)       BUDGET_ARM=$BUDGET_READY ;;
+  none:*:yes)       BUDGET_ARM=$((BUDGET_READY + BUDGET_PROBE + BUDGET_CONTRACT)) ;;
+  *)                BUDGET_ARM=480 ;;      # plus the latency gate and the pilot
+esac
+echo "== request budget (ceilings, not estimates) =="
+echo "   per arm  : <= $BUDGET_ARM  (readiness <= $BUDGET_READY, probe $BUDGET_PROBE,"
+echo "              contract $([ "$CLEANUP_ONLY" = yes ] && echo 0 || echo "$BUDGET_CONTRACT")\
+$([ "$S2_MODE" = none ] && [ "$CLEANUP_ONLY" = no ] && [ "$CONTRACT_ONLY" = no ] \
+  && echo ", latency + pilot" || echo ""))"
+echo "   total    : <= $((BUDGET_ARM * 2)) across both arms"
+echo "   production 127.0.0.1:$PROD_PORT : 0 requests. Nothing in this script"
+echo "              addresses it; it is read from /proc and ss only."
+if [ "$S2_MODE" = c2 ]; then
+  echo "   one cycle. Three cycles make a C2 result: <= $((BUDGET_ARM * 3)) per arm,"
+  echo "              <= $((BUDGET_ARM * 6)) in total, and three full start/stop"
+  echo "              cleanups — one per cycle, each verified before the next starts."
+fi
+
+# ------------------------------------------------------------- authorisation ---
+# One grant per experiment, and no grant implies another. D2b authorised six
+# processes in an environment this campaign built and can rebuild; C1 and C2 run
+# production's own interpreter against a copy of production's packages, which is a
+# different set of risks and was granted, if at all, in a different message.
+#
+# Everything above this point is argument handling, and everything below it starts
+# something: nothing has been created, no port has been touched and no request has
+# been sent when this gate is reached.
+case "$S2_MODE" in
+  c1) GRANT_VAR=WOA23_S2_C1_GRANTED; GRANT_VAL="${WOA23_S2_C1_GRANTED:-}" ;;
+  c2) GRANT_VAR=WOA23_S2_C2_GRANTED; GRANT_VAL="${WOA23_S2_C2_GRANTED:-}" ;;
+  *)  GRANT_VAR=WOA23_D2B_GRANTED;   GRANT_VAL="${WOA23_D2B_GRANTED:-}" ;;
+esac
+if [ "$GRANT_VAL" != "yes" ]; then
+  if [ "$S2_MODE" = none ]; then
+    echo "D2b authorisation not stated. This starts FOUR services on a production" >&2
+    echo "host — a Dask scheduler, a Dask worker, an unmodified reference API and the" >&2
+    echo "candidate API — which is SIX OS processes, because each of the two APIs is" >&2
+    echo "a gunicorn arbiter plus the worker it forks." >&2
+    echo "Re-run with WOA23_D2B_GRANTED=yes once it is granted. D2a does not imply D2b." >&2
+  else
+    echo "S2 $S2_MODE authorisation not stated. This starts four services from" >&2
+    echo "production's own Python binary against a read-only clone of production's" >&2
+    echo "package tree — a different experiment from D2b, on a different environment." >&2
+    if [ "${WOA23_D2B_GRANTED:-}" = "yes" ]; then
+      echo "WOA23_D2B_GRANTED is set and does NOT authorise this: it was granted for" >&2
+      echo "  the controlled venv, not for production's interpreter and packages." >&2
+    fi
+    echo "Re-run with $GRANT_VAR=yes once that specific authorisation is granted." >&2
+  fi
   exit 3
 fi
+# The converse, so a stray export cannot widen what was granted: an S2 grant does
+# not authorise a D2b run either.
+if [ "$S2_MODE" = none ]; then
+  for v in WOA23_S2_C1_GRANTED WOA23_S2_C2_GRANTED; do
+    eval "set_val=\${$v:-}"
+    [ "$set_val" = "yes" ] || continue
+    echo "$v is set but this is a D2b mode, which it does not authorise." >&2
+    echo "  Select the mode the grant was issued for, or unset the variable." >&2
+    exit 3
+  done
+fi
+if [ "$S2_MODE" = c1 ] && [ "${WOA23_S2_C2_GRANTED:-}" = "yes" ]; then
+  echo "WOA23_S2_C2_GRANTED is set during a C1 run. C1 and C2 are separately" >&2
+  echo "  authorised; unset the one this run is not." >&2
+  exit 3
+fi
+if [ "$S2_MODE" = c2 ] && [ "${WOA23_S2_C1_GRANTED:-}" = "yes" ]; then
+  echo "WOA23_S2_C1_GRANTED is set during a C2 cycle. C1 and C2 are separately" >&2
+  echo "  authorised; unset the one this run is not." >&2
+  exit 3
+fi
+
 if [ "$(hostname -s)" != "$EXPECT_HOST" ]; then
   echo "this runs on $EXPECT_HOST only; hostname is $(hostname -s)" >&2
   exit 4
 fi
 [ -d "$STORE" ] || { echo "store $STORE not found" >&2; exit 4; }
 env -C / true 2>/dev/null || { echo "env -C is required (coreutils >= 8.28)" >&2; exit 4; }
+if [ "$S2_MODE" != none ]; then
+  [ -x "$PY_BINARY" ] || {
+    echo "--python-binary $PY_BINARY is not an executable file" >&2; exit 4; }
+  [ -d "$PKG_CLONE" ] || {
+    echo "--package-clone $PKG_CLONE is not a directory" >&2; exit 4; }
+  [ -f "$CLONE_MANIFEST" ] || {
+    echo "--clone-manifest $CLONE_MANIFEST is not a file" >&2; exit 4; }
+  # The clone is immutable by construction. If this run can write to it, it is not
+  # the artefact that was built and verified, and a stray .pyc would change it.
+  if [ -w "$PKG_CLONE" ]; then
+    echo "--package-clone $PKG_CLONE is writable by this user. The clone is meant to" >&2
+    echo "  be read-only; a writable one may already have been modified." >&2
+    exit 4
+  fi
+fi
 
 cd "$HERE"
 mkdir -p "$RUN" results
@@ -250,8 +525,16 @@ prod_py_version="$("$PROD_PY" --version 2>&1 | awk '{print $2}')"
 
 # --locked, not --frozen: it fails if uv.lock does not match pyproject.toml, rather
 # than quietly installing from a lock that has drifted from its inputs.
+#
+# Under the S2 modes this venv is the *harness's* environment and nothing else. It
+# runs contract_diff, the provenance collectors and the checks; it is not on any
+# arm's import path and no package in it can reach an arm. The harness only issues
+# HTTP and compares bytes, so its own package set cannot change what an arm returns.
+# It is still built and pinned, because a harness that cannot run is a run that
+# produces nothing.
 uv sync --locked --python "$PROD_PY" >&2
 
+if [ "$S2_MODE" = none ]; then
 uv run python - <<PYEOF || exit 1
 import hashlib, json, subprocess, sys
 sys.path.insert(0, ".")
@@ -277,11 +560,75 @@ json.dump({"kind": "controlled_environment",
            "distributions_sha256": deps["distributions_sha256"],
            "n_distributions": len(deps["distributions"]),
            "distributions": deps["distributions"]},
-          open("results/d2b_environment.json", "w"), indent=2)
+          open("results/${LABEL}_environment.json", "w"), indent=2)
 print(f"  python {deps['python_version']}  "
       f"{len(deps['distributions'])} distributions  "
       f"lock {deps['lockfile_sha256'][:16]}  dists {deps['distributions_sha256'][:16]}")
 PYEOF
+else
+# The S2 environment record describes the *clone*, not the venv, and it is produced
+# by listing the clone exactly the way an arm will be started: production's binary,
+# `-S`, the clone on PYTHONPATH, no VIRTUAL_ENV and no PYTHONHOME. Listing it any
+# other way — including simply running the binary — reports production's own 236
+# distributions, which is the environment this run exists to stay out of.
+uv run python - <<PYEOF || exit 1
+import json, sys
+from pathlib import Path
+sys.path.insert(0, ".")
+from bench.collect_backend_meta import dependencies
+from bench.s2_provenance import launch_env
+
+binary = "$PY_BINARY"
+clone = "$PKG_CLONE"
+manifest = Path("$CLONE_MANIFEST")
+want_py = "$EXPECT_PY"
+
+# hashseed=None here regardless of mode: this listing is `importlib.metadata`, whose
+# answer does not depend on the hash seed, and pinning it would suggest it did.
+env = launch_env(clone, hashseed=None)
+deps = dependencies(binary, None, interp_args=("-S",), env=env,
+                    package_manifest=manifest)
+if "distributions_error" in deps:
+    print(f"cannot list the clone's distributions: {deps['distributions_error']}",
+          file=sys.stderr)
+    raise SystemExit(1)
+if "package_manifest_error" in deps:
+    print(f"clone manifest: {deps['package_manifest_error']}", file=sys.stderr)
+    raise SystemExit(1)
+if deps["python_version"] != want_py:
+    print(f"the clone's interpreter reports {deps['python_version']}, expected "
+          f"{want_py}", file=sys.stderr)
+    raise SystemExit(1)
+if not deps["distributions"]:
+    print("the clone listed no distributions at all. A clone that imports nothing "
+          "would let both arms fail identically and be recorded as agreement.",
+          file=sys.stderr)
+    raise SystemExit(1)
+
+json.dump({"kind": "s2_package_clone_environment",
+           "mode": "$S2_MODE",
+           "python_version": deps["python_version"],
+           "env_python": binary,
+           "package_clone": clone,
+           "package_manifest": deps["package_manifest"],
+           "package_manifest_sha256": deps["package_manifest_sha256"],
+           "distributions_sha256": deps["distributions_sha256"],
+           "n_distributions": len(deps["distributions"]),
+           "distributions": deps["distributions"],
+           "interpreter_args": deps["interpreter_args"],
+           "interpreter_env": deps["interpreter_env"],
+           "site_limitation": (
+               "-S: site.py does not run, so no .pth in the clone is processed. "
+               "This is isolated package-tree import correctness, not production's "
+               "site/.pth startup semantics (spec 002 section 4.3.1).")},
+          open("results/${LABEL}_environment.json", "w"), indent=2)
+print(f"  clone python {deps['python_version']}  "
+      f"{len(deps['distributions'])} distributions  "
+      f"manifest {deps['package_manifest_sha256'][:16]}  "
+      f"dists {deps['distributions_sha256'][:16]}")
+print(f"  LIMITATION -S: site.py does not run; no .pth in the clone is processed.")
+PYEOF
+fi
 
 # ================================================================ preflight ===
 # Leftover state first: a free port is not an all-clear, because cleanup
@@ -330,6 +677,47 @@ PROD_MASTER_BEFORE="$(master_of "$PROD_PIDS_BEFORE")" || {
   echo "cannot identify production's master among [$PROD_PIDS_BEFORE]" >&2; exit 1; }
 PROD_START_BEFORE="$(starttime_of "$PROD_MASTER_BEFORE")"
 echo "production master $PROD_MASTER_BEFORE (start $PROD_START_BEFORE), listeners: $PROD_PIDS_BEFORE"
+
+# ------------------------------------------ production's worker count, measured ---
+# C2 asks what happens under production's actual concurrency, so the number is read
+# from production's own argv at run time rather than written into this script. `-w 2`
+# was true when it was last looked at; a script that hard-codes it answers for the
+# deployment it was written against, not the one it is running beside.
+ARM_WORKERS=1
+if [ "$S2_MODE" = c2 ]; then
+  prod_argv="$(tr '\0' '\n' < "/proc/$PROD_MASTER_BEFORE/cmdline" 2>/dev/null)" || {
+    echo "cannot read production's argv from /proc/$PROD_MASTER_BEFORE/cmdline" >&2
+    exit 1; }
+  measured=""
+  prev=""
+  while IFS= read -r a; do
+    case "$prev" in -w|--workers) measured="$a" ;; esac
+    case "$a" in --workers=*) measured="${a#--workers=}" ;; esac
+    prev="$a"
+  done <<EOF
+$prod_argv
+EOF
+  case "$measured" in
+    ''|*[!0-9]*)
+      echo "cannot read a worker count from production's argv. Refusing to assume" >&2
+      echo "  one: C2's whole question is what production's concurrency does, and a" >&2
+      echo "  guessed number would answer it for a deployment that does not exist." >&2
+      printf '  argv: %s\n' "$prod_argv" >&2
+      exit 1 ;;
+  esac
+  if [ "$measured" -lt 1 ] || [ "$measured" -gt 16 ]; then
+    echo "production reports $measured workers, outside the 1-16 this run will start" >&2
+    exit 1
+  fi
+  if [ -n "$WORKERS" ] && [ "$WORKERS" != "$measured" ]; then
+    echo "--workers $WORKERS was asserted but production is running $measured." >&2
+    echo "  Production changed, or the assertion is stale. Either way this run would" >&2
+    echo "  not be measuring production's configuration." >&2
+    exit 1
+  fi
+  ARM_WORKERS="$measured"
+  echo "production's worker count, read from its argv: $ARM_WORKERS"
+fi
 
 # ================================================== tracked process handling ===
 CLEANUP_FAILED=0
@@ -479,44 +867,131 @@ echo "  reference store literal confirmed at woa23_app.py:63: '$STORE_LITERAL'"
 # tcp://localhost:8786 — production's shared scheduler, serving tide_app and
 # mhw_app. The reference must never reach it, so it gets its own on $SCHED_PORT and
 # the variable is set explicitly rather than relying on a default being overridden.
-start_tracked dask_scheduler "$SCHED_PORT" \
-  "$VENV/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
+if [ "$S2_MODE" = none ]; then
+  start_tracked dask_scheduler "$SCHED_PORT" \
+    "$VENV/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
+else
+  # No console script: the clone is a package tree, not an installed environment, so
+  # it has no bin/. `-m distributed.cli.dask_scheduler` is the same entry point the
+  # `dask scheduler` wrapper calls, reached without needing a wrapper to exist.
+  start_tracked dask_scheduler "$SCHED_PORT" \
+    env -C "$WORK" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      "$PY_BINARY" -S -m distributed.cli.dask_scheduler \
+      --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
+fi
 for _ in $(seq 1 30); do port_held "$SCHED_PORT" && break; sleep 1; done
 port_held "$SCHED_PORT" || { echo "scheduler did not bind" >&2; exit 1; }
 # --no-nanny: `dask worker` defaults to --nanny, a supervisor process that forks
 # the worker. For a single worker the nanny buys nothing here and costs an extra
 # process to account for, so the worker runs in this process directly.
-start_tracked dask_worker "" \
-  "$VENV/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
-  --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard --no-nanny
+if [ "$S2_MODE" = none ]; then
+  start_tracked dask_worker "" \
+    "$VENV/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
+    --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard --no-nanny
+else
+  start_tracked dask_worker "" \
+    env -C "$WORK" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      "$PY_BINARY" -S -m distributed.cli.dask_worker "tcp://127.0.0.1:${SCHED_PORT}" \
+      --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard --no-nanny
+fi
 
 # ==================================================================== the arms ===
-# One venv, both arms. That is the whole point of 5.2A: the packages stop being a
-# variable because there is only one set of them. Both go through start_tracked, so
-# identity is recorded the same way for every process this run owns.
-start_tracked reference "$REF_PORT" \
-  env -C "$REF_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
-    DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
-    "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker \
-    -b "127.0.0.1:${REF_PORT}" --timeout 120
-
-# Same cwd-relative literal as the reference, still taken from the environment so
-# the candidate's configurability is intact. PYTHONPATH keeps the venv's packages
-# importable from a cwd that is not the repository.
-start_tracked candidate "$CAND_PORT" \
-  env -C "$CAND_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
-    WOA23_ZARR_STORE="$STORE_LITERAL" \
-    "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
-    -b "127.0.0.1:${CAND_PORT}" --timeout 120
-
-# Readiness: the OpenAPI document. It exercises the whole stack that has to be up —
-# gunicorn, the uvicorn worker, FastAPI routing — and reads **nothing** from the
-# Zarr store, so waiting for the servers to appear costs neither arm a chunk read.
+# One environment, both arms. That is the whole point of the byte-exact comparison:
+# the packages stop being a variable because there is only one set of them. Under
+# D2b that set is dev2026/.venv; under C1 and C2 it is the read-only clone of
+# production's package tree, reached the same way by both arms. Both go through
+# start_tracked either way, so identity is recorded identically for every process
+# this run owns.
 #
-# The previous probe issued a real data query, to the reference first. That gave the
+# The S2 launch is spelled out rather than assembled from a variable, because the
+# difference between the two forms is the difference between the two experiments
+# and a reader should not have to expand anything to see which one is running:
+#
+#   VIRTUAL_ENV, PYTHONHOME  unset — either would redirect the interpreter to an
+#                            environment other than the clone, and VIRTUAL_ENV is
+#                            exactly what a leftover `source .venv/bin/activate`
+#                            leaves behind in an interactive shell.
+#   -S                       site.py does not run, so no .pth is processed. This is
+#                            a real limitation and it is carried into the results.
+#   PYTHONPATH=<clone>       the only package source.
+#   PYTHONNOUSERSITE=1       ~/.local/lib/python3.11/site-packages is not a package
+#                            source either.
+#   PYTHONDONTWRITEBYTECODE  the clone is read-only and must stay byte-identical.
+if [ "$S2_MODE" = none ]; then
+  start_tracked reference "$REF_PORT" \
+    env -C "$REF_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
+      DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
+      "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker \
+      -b "127.0.0.1:${REF_PORT}" --timeout 120
+
+  # Same cwd-relative literal as the reference, still taken from the environment so
+  # the candidate's configurability is intact. PYTHONPATH keeps the venv's packages
+  # importable from a cwd that is not the repository.
+  start_tracked candidate "$CAND_PORT" \
+    env -C "$CAND_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
+      WOA23_ZARR_STORE="$STORE_LITERAL" \
+      "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
+      -b "127.0.0.1:${CAND_PORT}" --timeout 120
+elif [ "$S2_MODE" = c1 ]; then
+  start_tracked reference "$REF_PORT" \
+    env -C "$REF_DIR" -u VIRTUAL_ENV -u PYTHONHOME \
+      PYTHONHASHSEED=0 PYTHONPATH="$PKG_CLONE" \
+      PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
+      "$PY_BINARY" -S -m gunicorn woa23_app:app -w 1 \
+      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${REF_PORT}" --timeout 120
+
+  start_tracked candidate "$CAND_PORT" \
+    env -C "$CAND_DIR" -u VIRTUAL_ENV -u PYTHONHOME \
+      PYTHONHASHSEED=0 PYTHONPATH="$PKG_CLONE" \
+      PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      WOA23_ZARR_STORE="$STORE_LITERAL" \
+      "$PY_BINARY" -S -m gunicorn api.app:app -w 1 \
+      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${CAND_PORT}" --timeout 120
+else
+  # C2. `-u PYTHONHASHSEED` rather than an empty value: CPython rejects
+  # PYTHONHASHSEED="" outright, so setting it empty would not mean "unset", it would
+  # mean the interpreter refuses to start — and the arm would fail for a reason that
+  # looks nothing like the one it actually had.
+  start_tracked reference "$REF_PORT" \
+    env -C "$REF_DIR" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
+      "$PY_BINARY" -S -m gunicorn woa23_app:app -w "$ARM_WORKERS" \
+      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${REF_PORT}" --timeout 120
+
+  start_tracked candidate "$CAND_PORT" \
+    env -C "$CAND_DIR" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      WOA23_ZARR_STORE="$STORE_LITERAL" \
+      "$PY_BINARY" -S -m gunicorn api.app:app -w "$ARM_WORKERS" \
+      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${CAND_PORT}" --timeout 120
+fi
+
+# ------------------------------------------------------- PROCESS readiness only ---
+# The OpenAPI document. It exercises the whole stack that has to be up — gunicorn,
+# the uvicorn worker, FastAPI routing — and reads **nothing** from the Zarr store, so
+# waiting for the servers to appear costs neither arm a chunk read.
+#
+# That is also its limit, and the limit is the point. **A 200 here says the process
+# is serving. It says nothing whatever about the store.** D1 measured this directly:
+# with WOA23_ZARR_STORE pointing at a path that does not exist, at an empty
+# directory, or at an ordinary file, the app imports, starts, serves this document
+# with a 200, and fails only when a request finally reaches the data path. Treating
+# this as "ready" in the sense of "ready to serve data" would let all three of those
+# reach the contract gate looking healthy.
+#
+# STORE readiness — that the configured store can actually be opened and read — is
+# established by the symmetric data probe below and nowhere else, and it is a
+# *separate stage*. Nothing between here and there may be described as the store
+# being ready.
+#
+# The earlier probe issued a real data query, to the reference first. That gave the
 # reference a warm store handle and a populated page cache before the candidate had
 # served anything, and it did so on the one path the whole experiment measures.
-ready() {                   # ready <port>
+process_ready() {           # process_ready <port> — serving, NOT store-ready
   local out
   for _ in $(seq 1 30); do
     out="$(curl -s --max-time 5 -o /dev/null -w '%{http_code} %{size_download}' \
@@ -526,8 +1001,10 @@ ready() {                   # ready <port>
   done
   return 1
 }
-ready "$REF_PORT"  || { echo "reference not ready; see $RUN/reference.log" >&2; exit 1; }
-ready "$CAND_PORT" || { echo "candidate not ready; see $RUN/candidate.log" >&2; exit 1; }
+process_ready "$REF_PORT"  || { echo "reference process not ready; see $RUN/reference.log" >&2; exit 1; }
+process_ready "$CAND_PORT" || { echo "candidate process not ready; see $RUN/candidate.log" >&2; exit 1; }
+echo "  both arms are PROCESS-ready (OpenAPI 200). The store has not been touched"
+echo "  and is not known to be readable; that is the data probe's job, below."
 
 # The authorisation is for a specific set of processes, so the set is *verified*,
 # not merely printed. A run that has five or seven is outside what was granted —
@@ -537,11 +1014,14 @@ echo "== process trees (what the authorisation covers and cleanup is held to) ==
 expected_procs() {
   case "$1" in
     dask_scheduler|dask_worker) echo 1 ;;   # --no-nanny; the default would be 2
-    reference|candidate)        echo 2 ;;   # gunicorn arbiter + one forked worker
+    # gunicorn arbiter plus the workers it forks. One each under D2b and C1; under
+    # C2 it is production's measured count, so the authorised total is derived from
+    # the same number the arms were started with rather than written down twice.
+    reference|candidate)        echo $((1 + ARM_WORKERS)) ;;
     *)                          echo 0 ;;
   esac
 }
-AUTHORISED_TOTAL=6
+AUTHORISED_TOTAL=$((1 + 1 + 2 * (1 + ARM_WORKERS)))
 n_procs=0
 seen_pids=""
 for svc in dask_scheduler dask_worker reference candidate; do
@@ -573,10 +1053,16 @@ if [ "$n_procs" -ne "$AUTHORISED_TOTAL" ]; then
 fi
 echo "  $n_procs OS processes, matching the authorised set: [$seen_pids ]"
 
-# The data path still has to work before committing to 64 contract cases — a store
-# the reference cannot open should fail here, not thirty requests in. But the probe
-# must not favour an arm either, so it runs once in each order: candidate-first,
-# then reference-first. Two requests per arm, exactly counterbalanced.
+# ------------------------------------------------- STORE readiness, separately ---
+# This is the stage that establishes the store can be opened and read, and it is the
+# first one that touches it. The OpenAPI check above proved only that the process is
+# serving: D1 showed a nonexistent path, an empty directory and an ordinary file all
+# import, start and answer that document with a 200, failing only here.
+#
+# So a store the reference cannot open fails at this point rather than thirty
+# requests into the contract gate. But the probe must not favour an arm either, so it
+# runs once in each order: candidate-first, then reference-first. Two requests per
+# arm, exactly counterbalanced.
 probe() {                   # probe <label> <port>
   local out
   out="$(curl -s --max-time 60 -o /dev/null -w '%{http_code} %{size_download}' \
@@ -592,6 +1078,7 @@ if [ "$CLEANUP_ONLY" = "yes" ]; then
   # for it to save, and this mode's request count is meant to be as close to zero as
   # the process tree allows.
   echo "  data-path probe skipped (--cleanup-only): 0 requests"
+  echo "  STORE readiness is therefore NOT established by this run."
 else
   for pair in "candidate:$CAND_PORT reference:$REF_PORT" \
               "reference:$REF_PORT candidate:$CAND_PORT"; do
@@ -599,8 +1086,9 @@ else
       probe "${entry%%:*}" "${entry#*:}" || exit 1
     done
   done
+  echo "  both arms are STORE-ready: each served the data path twice, in both orders."
 fi
-echo "both arms ready"
+echo "both arms ready (process readiness and, unless --cleanup-only, store readiness)"
 
 # Re-record each tree now that the children exist. start_tracked already wrote one
 # when it began tracking — it has to, because the trap is armed from that moment and
@@ -611,22 +1099,72 @@ echo "both arms ready"
 
 # ================================================================= provenance ===
 echo "== provenance =="
-uv run python -m bench.collect_backend_meta --port "$CAND_PORT" --manifest candidate \
-  --expect-argv-contains api.app:app --lockfile uv.lock \
-  --out results/d2b_meta_candidate.json
-uv run python -m bench.collect_backend_meta --port "$REF_PORT" --manifest reference \
-  --expect-argv-contains woa23_app:app --lockfile uv.lock \
-  --out results/d2b_meta_reference.json
+if [ "$S2_MODE" = none ]; then
+  uv run python -m bench.collect_backend_meta --port "$CAND_PORT" --manifest candidate \
+    --expect-argv-contains api.app:app --lockfile uv.lock \
+    --out "results/${LABEL}_meta_candidate.json"
+  uv run python -m bench.collect_backend_meta --port "$REF_PORT" --manifest reference \
+    --expect-argv-contains woa23_app:app --lockfile uv.lock \
+    --out "results/${LABEL}_meta_reference.json"
+else
+  # --env-python, and not the derived answer. Under S2 the arm's argv[0] is
+  # production's binary, whose sibling `python` *is* production's environment: the
+  # heuristic would list production's 236 distributions and label them the clone's.
+  # The listing is reproduced under the arms' own launch (-S, clone on PYTHONPATH),
+  # because the same binary answers differently depending on how it is started.
+  for arm in candidate reference; do
+    if [ "$arm" = candidate ]; then p="$CAND_PORT"; expect=api.app:app
+    else p="$REF_PORT"; expect=woa23_app:app; fi
+    uv run python -m bench.collect_backend_meta --port "$p" --manifest "$arm" \
+      --expect-argv-contains "$expect" \
+      --env-python "$PY_BINARY" --env-python-arg -S \
+      --env-python-pythonpath "$PKG_CLONE" \
+      --package-manifest "$CLONE_MANIFEST" \
+      --out "results/${LABEL}_meta_${arm}.json"
+  done
 
-echo "== the arms must share an environment, or 5.2A proves nothing =="
-uv run python - <<'PYEOF' || exit 1
+  # ------------------------------------------- what the arms actually imported ---
+  # Two kinds of evidence, recorded separately because they establish different
+  # things. The probe is an identically-launched sibling interpreter: exact about
+  # the launch procedure, and not the gunicorn worker. /proc/<pid>/maps is the arm
+  # itself: every native extension it really loaded, which is where polars, numpy,
+  # zarr's codecs and h5py would show up if they had come from production — and
+  # blind to a pure-Python module imported from the wrong place.
+  echo "== the arms' interpreter and import paths =="
+  for arm in candidate reference; do
+    if [ "$arm" = candidate ]; then armdir="$CAND_DIR"; else armdir="$REF_DIR"; fi
+    pids="$(tree_pids "$arm")"
+    pid_args=""
+    for pid in $pids; do pid_args="$pid_args --pid $pid"; done
+    [ -n "$pid_args" ] || { echo "no tracked PIDs for $arm" >&2; exit 1; }
+    # shellcheck disable=SC2086
+    uv run python -m bench.s2_provenance \
+      --python-binary "$PY_BINARY" --package-clone "$PKG_CLONE" \
+      --cwd "$armdir" --label "$arm" \
+      $([ "$S2_MODE" = c1 ] && echo "--hashseed 0" || echo "") \
+      --allow "$PKG_CLONE" --allow "$WORK" \
+      --forbid "$PROD_DIR" --forbid "$PROD_SITE" \
+      $pid_args \
+      --out "results/${LABEL}_interp_${arm}.json" \
+      || { echo "$arm did not establish import isolation; stopping before any gate" >&2
+           exit 1; }
+  done
+fi
+
+echo "== the arms must share an environment, or the comparison proves nothing =="
+uv run python - <<PYEOF || exit 1
 import json, sys
 sys.path.insert(0, ".")
-from bench.provenance import (validate_meta, verify_environment_match,
+from bench.provenance import (ENVIRONMENT_RECORD_FIELDS,
+                              S2_ENVIRONMENT_RECORD_FIELDS,
+                              validate_meta, verify_environment_match,
                               verify_environment_record, verify_group_path_agreement)
-cand = json.load(open("results/d2b_meta_candidate.json"))
-ref = json.load(open("results/d2b_meta_reference.json"))
-env = json.load(open("results/d2b_environment.json"))
+label = "$LABEL"
+s2_mode = "$S2_MODE"
+fields = ENVIRONMENT_RECORD_FIELDS if s2_mode == "none" else S2_ENVIRONMENT_RECORD_FIELDS
+cand = json.load(open(f"results/{label}_meta_candidate.json"))
+ref = json.load(open(f"results/{label}_meta_reference.json"))
+env = json.load(open(f"results/{label}_environment.json"))
 problems = (validate_meta(cand, "candidate") + validate_meta(ref, "reference")
             # do the two arms agree with each other?
             + verify_environment_match(cand, ref)
@@ -661,14 +1199,44 @@ if [ "$CLEANUP_ONLY" = "yes" ]; then
   exit 0
 fi
 
-echo "== contract gate, variant 5.2A (byte-exact), 64 cases per arm =="
+# C1 and D2b compare bytes; C2 cannot. Under C2 neither arm has a pinned seed, so
+# `set` iteration order — and with it the row order of any query spanning more than
+# one Zarr group — is a property of the process, not of the code. Comparing bytes
+# there would fail on a difference that is not a defect. 5.2B compares the row
+# multiset and the column set instead, and order is recorded separately below rather
+# than folded into the verdict.
+VARIANT=5.2A
+[ "$S2_MODE" = c2 ] && VARIANT=5.2B
+echo "== contract gate, variant $VARIANT ($([ "$VARIANT" = 5.2A ] && echo byte-exact \
+     || echo semantic)), 64 cases per arm =="
 uv run python -m bench.contract_diff \
   --candidate "http://127.0.0.1:${CAND_PORT}" \
-  --reference "http://127.0.0.1:${REF_PORT}" --variant 5.2A \
-  --candidate-meta results/d2b_meta_candidate.json \
-  --reference-meta results/d2b_meta_reference.json \
-  --out results/d2b_contract.json \
-  || { echo "contract gate did not pass — stopping before the latency gate" >&2; exit 1; }
+  --reference "http://127.0.0.1:${REF_PORT}" --variant "$VARIANT" \
+  --candidate-meta "results/${LABEL}_meta_candidate.json" \
+  --reference-meta "results/${LABEL}_meta_reference.json" \
+  --out "results/${LABEL}_contract.json" \
+  || { echo "contract gate did not pass — stopping before anything further" >&2; exit 1; }
+
+if [ "$S2_MODE" != none ]; then
+  echo
+  echo "== --$([ "$S2_MODE" = c1 ] && echo c1 || echo c2-cycle): stopping here =="
+  echo "   The contract gate above passed. No latency gate, no noise pilot, no rung"
+  echo "   escalation: this invocation produced no timing of any kind and nothing may"
+  echo "   be quoted from it as performance."
+  echo "   LIMITATION -S: site.py did not run, so no .pth in the clone was processed."
+  echo "   This is isolated package-tree import correctness (spec 002 section 4.3.1),"
+  echo "   and the launcher is this script rather than production's PM2 path."
+  if [ "$S2_MODE" = c2 ]; then
+    echo "   This is ONE cycle. A C2 result needs three independent cycles and the"
+    echo "   seed-diversity observation across them; scripts/run_c2_cycles.sh draws"
+    echo "   that conclusion, and this invocation does not."
+  fi
+  echo "   artefacts: results/${LABEL}_contract.json"
+  echo "              results/${LABEL}_meta_{candidate,reference}.json"
+  echo "              results/${LABEL}_interp_{candidate,reference}.json"
+  echo "              results/${LABEL}_environment.json"
+  exit 0
+fi
 
 if [ "$CONTRACT_ONLY" = "yes" ]; then
   echo
@@ -685,9 +1253,9 @@ uv run python -m bench.paired_bench \
   --candidate "http://127.0.0.1:${CAND_PORT}" \
   --reference "http://127.0.0.1:${REF_PORT}" \
   --gate-variant 5.2A --warm 21 --include-heavy --margin 0.05 \
-  --candidate-meta results/d2b_meta_candidate.json \
-  --reference-meta results/d2b_meta_reference.json \
-  --out results/d2b_paired.json
+  --candidate-meta "results/${LABEL}_meta_candidate.json" \
+  --reference-meta "results/${LABEL}_meta_reference.json" \
+  --out "results/${LABEL}_paired.json"
 
 # The pilot runs LAST, and against both arms.
 #
@@ -699,15 +1267,15 @@ uv run python -m bench.paired_bench \
 # one. Running it against both arms keeps the recorded floor a property of the pair.
 echo "== sample-size planning for any escalation, both arms, after the measurement =="
 uv run python -m bench.noise_pilot --base-url "http://127.0.0.1:${REF_PORT}" \
-  --warm 25 --out results/d2b_noise_pilot_reference.json
+  --warm 25 --out "results/${LABEL}_noise_pilot_reference.json"
 uv run python -m bench.noise_pilot --base-url "http://127.0.0.1:${CAND_PORT}" \
-  --warm 25 --out results/d2b_noise_pilot_candidate.json
+  --warm 25 --out "results/${LABEL}_noise_pilot_candidate.json"
 
 echo
-echo "artefacts: results/d2b_contract.json results/d2b_paired.json"
-echo "           results/d2b_meta_{candidate,reference}.json"
-echo "           results/d2b_noise_pilot_{reference,candidate}.json"
-echo "           results/d2b_environment.json"
+echo "artefacts: results/${LABEL}_contract.json results/${LABEL}_paired.json"
+echo "           results/${LABEL}_meta_{candidate,reference}.json"
+echo "           results/${LABEL}_noise_pilot_{reference,candidate}.json"
+echo "           results/${LABEL}_environment.json"
 echo "== done; the trap now stops all four services, verifies every process in"
 echo "   their recorded trees has exited, verifies the ports, and confirms"
 echo "   production is the same process it was =="

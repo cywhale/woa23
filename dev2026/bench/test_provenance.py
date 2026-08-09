@@ -20,6 +20,7 @@ from bench.collect_backend_meta import (
     parse_ss_listeners, resolve_store, zmetadata_fingerprints)
 from bench.provenance import (
     REQUIRED_META_FIELDS, load_meta, validate_meta, validate_store_agreement,
+    ENVIRONMENT_RECORD_FIELDS, S2_ENVIRONMENT_RECORD_FIELDS,
     verify_environment_match, verify_environment_record,
     verify_group_path_agreement, verify_prior_contract, verify_prior_rung)
 
@@ -992,6 +993,61 @@ def test_verify_environment_record() -> None:
               arm, "candidate")) == 4)
 
 
+def test_verify_environment_record_s2_fields() -> None:
+    """The S2 anchor is the clone's manifest, in the position the lockfile holds.
+
+    C1 and C2 have no lockfile: the arms do not run an environment this campaign
+    resolved and installed, they run a read-only copy of production's package tree.
+    What distinguishes *the* clone from a directory with the right name is the
+    manifest written when it was built and verified, so its digest is compared with
+    exactly the strictness `lockfile_sha256` gets under D2b.
+    """
+    record = {"kind": "s2_package_clone_environment", "python_version": "3.11.4",
+              "env_python": "/home/odbadmin/.pyenv/versions/py311/bin/python3.11",
+              "package_manifest_sha256": "m" * 64,
+              "distributions_sha256": "a" * 64}
+    arm = {"env_python_version": "3.11.4",
+           "env_python": "/home/odbadmin/.pyenv/versions/py311/bin/python3.11",
+           "dependencies": {"distributions_sha256": "a" * 64,
+                            "package_manifest_sha256": "m" * 64}}
+    check("an arm running the recorded clone passes",
+          verify_environment_record(record, arm, "candidate",
+                                    S2_ENVIRONMENT_RECORD_FIELDS) == [])
+    check("a different clone manifest is caught",
+          has(verify_environment_record(
+              record, dict(arm, dependencies={**arm["dependencies"],
+                                              "package_manifest_sha256": "z" * 64}),
+              "candidate", S2_ENVIRONMENT_RECORD_FIELDS),
+              "package-tree clone manifest digest is not the environment"))
+    check("a different interpreter is caught",
+          has(verify_environment_record(record, dict(arm, env_python="/other/python"),
+                                        "reference", S2_ENVIRONMENT_RECORD_FIELDS),
+              "package environment interpreter is not the environment"))
+
+    # The failure that matters most: an S2 arm whose packages came from a lockfile
+    # environment would carry lockfile_sha256 and no manifest digest at all. Judged
+    # by the D2b field list it looks like a missing lockfile; judged by the S2 list
+    # it is reported as the missing anchor, which is what it is.
+    lockfile_arm = {"env_python_version": "3.11.4",
+                    "env_python": record["env_python"],
+                    "dependencies": {"distributions_sha256": "a" * 64,
+                                     "lockfile_sha256": "b" * 64}}
+    check("an arm with no manifest digest fails the S2 check",
+          has(verify_environment_record(record, lockfile_arm, "candidate",
+                                        S2_ENVIRONMENT_RECORD_FIELDS),
+              "no usable 'dependencies.package_manifest_sha256'"))
+    check("and the D2b field list would have missed the substitution",
+          verify_environment_record(record, lockfile_arm, "candidate") != [])
+
+    # An empty field list would pass every environment, including the wrong one.
+    check("an empty field list is refused rather than passing everything",
+          has(verify_environment_record(record, arm, "candidate", ()),
+              "no fields to compare"))
+    check("the D2b default is unchanged by the new parameter",
+          ENVIRONMENT_RECORD_FIELDS != S2_ENVIRONMENT_RECORD_FIELDS
+          and len(ENVIRONMENT_RECORD_FIELDS) == len(S2_ENVIRONMENT_RECORD_FIELDS) == 4)
+
+
 def test_gate_precedence() -> None:
     """Pin the findings-to-verdict mapping itself, not just the findings.
 
@@ -1320,6 +1376,7 @@ def main() -> int:
                test_against_validates_both_records,
                test_verify_prior_rung, test_verify_prior_contract,
                test_verify_environment_match, test_verify_environment_record,
+               test_verify_environment_record_s2_fields,
                test_verify_group_path_agreement,
                test_canonical_store_fingerprint_integration,
                test_gate_precedence,

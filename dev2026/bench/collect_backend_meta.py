@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import re
 import subprocess
@@ -350,7 +351,8 @@ def zmetadata_fingerprints(store: str | None) -> dict | None:
     return out
 
 
-def resolve_env_python(cwd: Path, argv: list[str], env: dict) -> dict:
+def resolve_env_python(cwd: Path, argv: list[str], env: dict,
+                       override: str | None = None) -> dict:
     """The interpreter whose *packages* the process is using — not `/proc/<pid>/exe`.
 
     `/proc/<pid>/exe` follows the venv's symlink to the base binary, so it names a
@@ -361,7 +363,17 @@ def resolve_env_python(cwd: Path, argv: list[str], env: dict) -> dict:
 
     So the environment is derived from what the process was told to use, in order of
     directness, and the method is recorded alongside the answer.
+
+    `override` outranks both heuristics, and the S2 modes need it. There the arm is
+    started as `<production binary> -S -m gunicorn` with the package clone on
+    PYTHONPATH: `VIRTUAL_ENV` is deliberately unset, and the argv0 sibling of
+    `~/.pyenv/versions/py311/bin/python3.11` is `~/.pyenv/versions/py311/bin/python`
+    — *production's own environment*, whose packages are the one thing the arm is
+    arranged not to use. Guessing there would answer confidently about the wrong
+    interpreter, which is the exact failure this function exists to have fixed.
     """
+    if override:
+        return {"env_python": override, "env_python_source": "explicit"}
     venv = env.get("VIRTUAL_ENV")
     if venv and (Path(venv) / "bin" / "python").exists():
         return {"env_python": str(Path(venv) / "bin" / "python"),
@@ -373,14 +385,42 @@ def resolve_env_python(cwd: Path, argv: list[str], env: dict) -> dict:
     return {"env_python": None, "env_python_source": "unresolved"}
 
 
-def dependencies(env_python: str | None, lockfile: Path | None) -> dict:
+def dependencies(env_python: str | None, lockfile: Path | None,
+                 *, interp_args: tuple[str, ...] = (),
+                 env: dict | None = None,
+                 package_manifest: Path | None = None) -> dict:
     """Installed distributions of the environment actually in use.
 
     `importlib.metadata` rather than `pip freeze`: a uv-created venv has no pip, so
     the pip call would fail or — worse, as it did — silently answer for a different
     interpreter.
+
+    `interp_args` and `env` exist for the S2 modes. There the package set is not a
+    property of the binary — the same binary lists production's 236 distributions
+    normally and the clone's under `-S` with the clone on PYTHONPATH — so listing it
+    without reproducing the arm's launch would describe production's environment
+    while claiming to describe the clone's. Both are recorded in the output so the
+    answer cannot be read without the question it answers.
     """
     out: dict = {}
+    if package_manifest is not None:
+        # The S2 anchor. There is no lockfile to point at, so what stands in its
+        # place is the manifest produced when the clone was built and verified
+        # against production — the artefact that distinguishes *this* clone from a
+        # directory that merely has the right name.
+        if not package_manifest.exists():
+            out["package_manifest_error"] = f"{package_manifest} does not exist"
+        else:
+            out["package_manifest"] = str(package_manifest)
+            out["package_manifest_sha256"] = hashlib.sha256(
+                package_manifest.read_bytes()).hexdigest()
+    if interp_args:
+        out["interpreter_args"] = list(interp_args)
+    if env is not None:
+        out["interpreter_env"] = {k: env.get(k) for k in
+                                  ("PYTHONPATH", "PYTHONNOUSERSITE",
+                                   "PYTHONDONTWRITEBYTECODE", "PYTHONHOME",
+                                   "VIRTUAL_ENV")}
     if lockfile and lockfile.exists():
         out["lockfile"] = str(lockfile)
         out["lockfile_sha256"] = hashlib.sha256(lockfile.read_bytes()).hexdigest()
@@ -403,8 +443,9 @@ def dependencies(env_python: str | None, lockfile: Path | None) -> dict:
         """
     )
     try:
-        r = subprocess.run([env_python, "-c", code],
-                           capture_output=True, text=True, timeout=60)
+        r = subprocess.run([env_python, *interp_args, "-c", code],
+                           capture_output=True, text=True, timeout=60,
+                           env=env)
         if r.returncode != 0:
             out["distributions_error"] = r.stderr.strip()[:300]
             return out
@@ -470,9 +511,15 @@ def compare_store(before: dict, after: dict) -> list[str]:
 def build_meta(*, manifest: str, port: int, pid: int, listeners: list[int],
                port_verified: bool, cwd: Path, exe: str | None,
                argv: list[str], argv_str: str | None, env: dict, store: dict,
-               lockfile: Path | None, expect_argv: list[str]) -> dict:
-    env_py = resolve_env_python(cwd, argv, env)
-    deps = dependencies(env_py["env_python"], lockfile)
+               lockfile: Path | None, expect_argv: list[str],
+               env_python_override: str | None = None,
+               interp_args: tuple[str, ...] = (),
+               interp_env: dict | None = None,
+               package_manifest: Path | None = None) -> dict:
+    env_py = resolve_env_python(cwd, argv, env, override=env_python_override)
+    deps = dependencies(env_py["env_python"], lockfile,
+                        interp_args=interp_args, env=interp_env,
+                        package_manifest=package_manifest)
     """Assemble the provenance record.
 
     Split out of `main()` so a test can build one without a live process and assert
@@ -546,8 +593,36 @@ def main() -> int:
                          "store fingerprints are compared against it and any drift "
                          "is reported non-zero. Run this AFTER the gate to cover the "
                          "sampling window, which the pre-run collections cannot.")
+    ap.add_argument("--env-python", default=None,
+                    help="name the interpreter whose packages this backend uses, "
+                         "instead of deriving it. Required by the S2 modes, where the "
+                         "arm runs production's binary against a package clone and "
+                         "both heuristics would resolve to production's own "
+                         "environment.")
+    ap.add_argument("--env-python-arg", action="append", default=[],
+                    help="argument passed to --env-python when listing distributions "
+                         "(repeatable). The S2 modes pass -S, without which the "
+                         "listing describes production's site-packages rather than "
+                         "the clone's.")
+    ap.add_argument("--env-python-pythonpath", default=None,
+                    help="PYTHONPATH for the distribution listing. Must be the same "
+                         "value the arm was started with, or the record answers for "
+                         "an environment no arm ran under.")
+    ap.add_argument("--package-manifest", type=Path, default=None,
+                    help="the manifest produced when the package-tree clone was "
+                         "built and verified against production. Its digest is the "
+                         "S2 anchor, in the position --lockfile holds under D2b: "
+                         "without it, nothing distinguishes the verified clone from "
+                         "a directory with the right name.")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
+
+    if (args.env_python_arg or args.env_python_pythonpath) and not args.env_python:
+        raise SystemExit(
+            "--env-python-arg/--env-python-pythonpath only mean something with "
+            "--env-python: without it the interpreter is derived, and applying the "
+            "S2 launch settings to a derived interpreter would produce a listing for "
+            "an environment nothing ran under.")
 
     if args.against and args.out and args.against.resolve() == args.out.resolve():
         raise SystemExit(
@@ -605,11 +680,27 @@ def main() -> int:
     env = whitelisted_env(pid)
     store = resolve_store(args.manifest, cwd, env)
 
+    interp_env = None
+    if args.env_python_pythonpath is not None:
+        # Built from this process's environment rather than from nothing, so the
+        # listing runs the way the arm did — then the three settings that decide
+        # *which* packages are visible are set explicitly.
+        interp_env = dict(os.environ)
+        for drop in ("PYTHONHOME", "VIRTUAL_ENV"):
+            interp_env.pop(drop, None)
+        interp_env["PYTHONPATH"] = args.env_python_pythonpath
+        interp_env["PYTHONNOUSERSITE"] = "1"
+        interp_env["PYTHONDONTWRITEBYTECODE"] = "1"
+
     meta = build_meta(manifest=args.manifest, port=args.port, pid=pid,
                       listeners=listeners, port_verified=port_verified, cwd=cwd,
                       exe=exe, argv=argv, argv_str=argv_str, env=env, store=store,
                       lockfile=args.lockfile,
-                      expect_argv=list(args.expect_argv_contains))
+                      expect_argv=list(args.expect_argv_contains),
+                      env_python_override=args.env_python,
+                      interp_args=tuple(args.env_python_arg),
+                      interp_env=interp_env,
+                      package_manifest=args.package_manifest)
 
     seed = meta["env"].get("PYTHONHASHSEED")
     print(f"pid {pid} on port {args.port}  cwd {cwd}")

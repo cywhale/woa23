@@ -741,9 +741,27 @@ ENVIRONMENT_RECORD_FIELDS = (
      "installed distribution set digest"),
 )
 
+# The S2 modes have no lockfile: the arms do not run an environment this campaign
+# resolved and installed, they run a read-only copy of production's package tree.
+# The anchor is therefore the clone's own manifest digest — the artefact that says
+# *this* clone is the one that was built and verified against production — and it
+# occupies exactly the position `lockfile_sha256` holds under D2b. Nothing else
+# changes: the interpreter, its version and the distribution set are still compared
+# field by field, because two arms agreeing with each other has never been evidence
+# that they agree with the environment the run intended.
+S2_ENVIRONMENT_RECORD_FIELDS = (
+    ("env_python", "env_python", "package environment interpreter"),
+    ("python_version", "env_python_version", "interpreter version"),
+    ("package_manifest_sha256", "dependencies.package_manifest_sha256",
+     "package-tree clone manifest digest"),
+    ("distributions_sha256", "dependencies.distributions_sha256",
+     "installed distribution set digest"),
+)
+
 
 def verify_environment_record(env_record: dict | None, meta: dict | None,
-                              label: str) -> list[str]:
+                              label: str,
+                              fields=ENVIRONMENT_RECORD_FIELDS) -> list[str]:
     """Is this arm running the environment the run built, or merely *an* environment?
 
     `verify_environment_match` only asks whether the two arms agree with each other.
@@ -761,7 +779,10 @@ def verify_environment_record(env_record: dict | None, meta: dict | None,
         return [f"{label}: metadata missing, cannot compare to the environment record"]
 
     problems = []
-    for env_key, meta_path, note in ENVIRONMENT_RECORD_FIELDS:
+    if not fields:
+        return [f"{label}: no fields to compare — an empty field list would pass "
+                f"every environment, including the wrong one"]
+    for env_key, meta_path, note in fields:
         want = env_record.get(env_key)
         got: object = meta
         for part in meta_path.split("."):

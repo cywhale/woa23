@@ -25,6 +25,7 @@ instead of "byte 91,244". Under 5.2A it is never the pass criterion.
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import platform
@@ -62,6 +63,42 @@ def _rows(body: bytes, is_csv: bool) -> list[dict] | None:
 
 def _sort_key(row: dict):
     return tuple(str(row.get(k)) for k in INDEX)
+
+
+def order_fingerprint(resp: dict, is_csv: bool) -> dict:
+    """Order, recorded separately from the verdict.
+
+    Under 5.2B the row order is deliberately not part of pass/fail: with no pinned
+    seed the arms iterate `zarr_group_paths` in whatever order their own process
+    hashes it, so a row-order difference is a property of the process rather than a
+    defect. That does not make it uninteresting — it is the observable the C2
+    seed-diversity question is actually about — so it is measured and carried
+    alongside the result, never folded into it.
+
+    Three separate things, because they can move independently:
+
+    - `body_sha256` — the raw bytes. Changes if anything at all changes.
+    - `row_order_sha256` — the ordered sequence of row *keys* only, values excluded.
+      This isolates order: identical rows in a different sequence change this and
+      nothing else.
+    - `columns` — the column sequence, which is where a pivot's group order surfaces.
+
+    A response with no row structure (the OpenAPI document, an error body) gets a
+    body digest and nulls, rather than a fabricated ordering.
+    """
+    out = {"body_sha256": hashlib.sha256(resp["body"]).hexdigest(),
+           "row_order_sha256": None, "columns": None, "n_rows": None}
+    if resp.get("status") != 200:
+        return out
+    rows = _rows(resp["body"], is_csv)
+    if rows is None:
+        return out
+    out["n_rows"] = len(rows)
+    if rows:
+        out["columns"] = list(rows[0])
+    keys = "\n".join("".join(str(r.get(k)) for k in INDEX) for r in rows)
+    out["row_order_sha256"] = hashlib.sha256(keys.encode()).hexdigest()
+    return out
 
 
 def compare_semantic(a: dict, b: dict, is_csv: bool) -> list[str]:
@@ -268,6 +305,10 @@ def main() -> int:
                 "verdict": verdict, "notes": notes,
                 "status_as_recorded": status_ok,
                 "request_order": order,
+                # Recorded for every variant, used as a verdict by none. Under
+                # 5.2B this is the only place row order is visible at all.
+                "reference_order": order_fingerprint(ref, is_csv),
+                "candidate_order": order_fingerprint(cand, is_csv),
             })
             if not same or not status_ok:
                 failed.append(case.id)

@@ -10,6 +10,7 @@ These use the repository's own venv, so they run offline and need no backend.
     uv run python -m bench.test_environment
 """
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -50,6 +51,70 @@ def test_resolve_reports_failure_rather_than_guessing() -> None:
     r = resolve_env_python(Path("/tmp"), [], {"VIRTUAL_ENV": "/no/such/venv"})
     check("a VIRTUAL_ENV that does not exist is not trusted",
           r["env_python_source"] == "unresolved", str(r))
+
+
+def test_resolve_override_outranks_both_heuristics() -> None:
+    """The S2 case: both heuristics would name production's own environment.
+
+    An S2 arm runs `~/.pyenv/versions/py311/bin/python3.11 -S -m gunicorn` with the
+    package clone on PYTHONPATH. `VIRTUAL_ENV` is unset by construction, and argv[0]'s
+    sibling is `.../py311/bin/python` — production's interpreter, whose site-packages
+    are the one thing the arm is arranged not to use. A confident wrong answer is the
+    failure mode this whole function exists to have fixed, so the override wins even
+    when a heuristic would have produced something.
+    """
+    r = resolve_env_python(Path("/anywhere"), ["/usr/bin/gunicorn"],
+                           {"VIRTUAL_ENV": str(HERE / ".venv")},
+                           override="/clone/bin/python3.11")
+    check("an explicit interpreter outranks VIRTUAL_ENV",
+          r == {"env_python": "/clone/bin/python3.11",
+                "env_python_source": "explicit"}, str(r))
+    r = resolve_env_python(HERE, [str(HERE / ".venv" / "bin" / "gunicorn")], {},
+                           override="/clone/bin/python3.11")
+    check("and outranks the argv0 sibling",
+          r["env_python_source"] == "explicit", str(r))
+    check("no override leaves the existing behaviour alone",
+          resolve_env_python(HERE, [str(HERE / ".venv" / "bin" / "gunicorn")], {},
+                             override=None)["env_python_source"] == "argv0_sibling")
+    check("an empty override is not an override",
+          resolve_env_python(Path("/tmp"), ["/bin/false"], {},
+                             override="")["env_python_source"] == "unresolved")
+
+
+def test_dependencies_answers_for_the_launch_not_the_binary() -> None:
+    """Under -S with a controlled PYTHONPATH, the same binary lists a different set.
+
+    This is the S2 arrangement in miniature: production's binary lists production's
+    236 distributions when run normally, and the clone's when run the way the arm is
+    started. Listing it without reproducing the launch would describe production's
+    environment while the record claimed it described the clone's.
+    """
+    if not VENV_PY.exists():
+        check("venv present for the launch-sensitivity test", False, "no .venv")
+        return
+    plain = dependencies(str(VENV_PY), None)
+    with tempfile.TemporaryDirectory() as d:
+        env = dict(os.environ)
+        env.pop("VIRTUAL_ENV", None)
+        env["PYTHONPATH"] = d
+        env["PYTHONNOUSERSITE"] = "1"
+        isolated = dependencies(str(VENV_PY), None, interp_args=("-S",), env=env)
+    n_plain = len(plain.get("distributions", []))
+    n_iso = len(isolated.get("distributions", []))
+    check("the same interpreter lists a different set under the S2 launch",
+          n_plain != n_iso, f"plain={n_plain} isolated={n_iso}")
+    check("an empty stand-in clone yields no distributions", n_iso == 0, f"{n_iso}")
+    check("the launch arguments are recorded with the answer",
+          isolated.get("interpreter_args") == ["-S"], str(isolated.get("interpreter_args")))
+    check("so is the environment that decided it",
+          (isolated.get("interpreter_env") or {}).get("PYTHONNOUSERSITE") == "1",
+          str(isolated.get("interpreter_env")))
+    check("VIRTUAL_ENV is recorded as absent rather than omitted",
+          "VIRTUAL_ENV" in (isolated.get("interpreter_env") or {})
+          and isolated["interpreter_env"]["VIRTUAL_ENV"] is None,
+          str(isolated.get("interpreter_env")))
+    check("a plain listing carries no launch fields to be misread",
+          "interpreter_args" not in plain and "interpreter_env" not in plain)
 
 
 def test_resolve_never_follows_the_symlink() -> None:
@@ -115,6 +180,8 @@ def main() -> int:
     for fn in (test_resolve_prefers_virtual_env,
                test_resolve_falls_back_to_launcher_sibling,
                test_resolve_reports_failure_rather_than_guessing,
+               test_resolve_override_outranks_both_heuristics,
+               test_dependencies_answers_for_the_launch_not_the_binary,
                test_resolve_never_follows_the_symlink,
                test_dependencies_lists_the_pinned_versions,
                test_dependencies_fails_loudly,

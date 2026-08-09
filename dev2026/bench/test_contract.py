@@ -10,7 +10,8 @@ all, as matches. The reviewer found it by hand; these keep it found.
 import json
 
 from bench.contract_cases import CASES, all_cases, csv_cases
-from bench.contract_diff import compare_semantic, request_order
+from bench.contract_diff import (compare_semantic, order_fingerprint,
+                                 request_order)
 
 failures: list[str] = []
 passed: list[str] = []
@@ -115,6 +116,65 @@ def test_non_row_payloads() -> None:
           cmp(200, b"[]", 200, b"[]") == [])
 
 
+def test_order_fingerprint_isolates_order() -> None:
+    """Order, recorded apart from the verdict, and apart from the values.
+
+    Under 5.2B a row-order difference is not a defect — it is the consequence of the
+    unpinned seed C2 exists to observe. So it must be *visible* without being part of
+    pass/fail, and it must not move when something that is not order moves.
+    """
+    rows = [{"lon": 1.5, "lat": 2.5, "depth": 0.0, "time_period": "0", "t": 1.0},
+            {"lon": 2.5, "lat": 2.5, "depth": 0.0, "time_period": "0", "t": 2.0}]
+    a = {"status": 200, "body": json.dumps(rows).encode()}
+    same = {"status": 200, "body": json.dumps(rows).encode()}
+    reversed_rows = {"status": 200, "body": json.dumps(list(reversed(rows))).encode()}
+    changed_value = {"status": 200, "body": json.dumps(
+        [rows[0], {**rows[1], "t": 99.0}]).encode()}
+
+    fa = order_fingerprint(a, False)
+    check("the same payload fingerprints the same",
+          fa == order_fingerprint(same, False))
+    check("a reversed payload has a different row-order digest",
+          fa["row_order_sha256"] != order_fingerprint(reversed_rows, False)["row_order_sha256"])
+    check("and 5.2B still calls it a match — order is not the verdict",
+          cmp(200, a["body"], 200, reversed_rows["body"]) == [])
+
+    # The isolation that makes the fingerprint mean "order": a value change moves the
+    # body digest and leaves the row-order digest alone. Without this, every
+    # cross-cycle value difference would be reported as an ordering change.
+    fv = order_fingerprint(changed_value, False)
+    check("a changed value moves the body digest",
+          fa["body_sha256"] != fv["body_sha256"])
+    check("but not the row-order digest",
+          fa["row_order_sha256"] == fv["row_order_sha256"])
+
+    check("the column sequence is recorded", fa["columns"] == list(rows[0]))
+    check("so is the row count", fa["n_rows"] == 2)
+
+    # No row structure: no fabricated ordering.
+    doc = {"status": 200, "body": json.dumps({"openapi": "3.1.0"}).encode()}
+    fd = order_fingerprint(doc, False)
+    check("an object payload has no row order", fd["row_order_sha256"] is None)
+    check("and no columns", fd["columns"] is None)
+    check("but still has a body digest", len(fd["body_sha256"]) == 64)
+
+    err = {"status": 400, "body": b'{"detail":"bad"}'}
+    fe = order_fingerprint(err, False)
+    check("an error body has no row order", fe["row_order_sha256"] is None)
+    check("and is still fingerprinted", len(fe["body_sha256"]) == 64)
+
+    empty = {"status": 200, "body": b"[]"}
+    fem = order_fingerprint(empty, False)
+    check("an empty row list has a digest rather than None",
+          fem["row_order_sha256"] is not None and fem["n_rows"] == 0)
+    check("and no columns to report", fem["columns"] is None)
+
+    csv_body = {"status": 200,
+                "body": b"lon,lat,depth,time_period,t\n1.5,2.5,0.0,0,1.0\n"}
+    fc = order_fingerprint(csv_body, True)
+    check("CSV rows are fingerprinted too", fc["n_rows"] == 1)
+
+
 def test_case_list() -> None:
     ids = [c.id for c in all_cases()]
     check("case ids are unique", len(ids) == len(set(ids)))
@@ -159,7 +219,8 @@ def test_request_order_is_counterbalanced() -> None:
 
 def main() -> int:
     for fn in (test_error_bodies, test_success_bodies, test_csv_bodies,
-               test_non_row_payloads, test_case_list,
+               test_non_row_payloads,
+               test_order_fingerprint_isolates_order, test_case_list,
                test_request_order_is_counterbalanced):
         print(f"\n{fn.__name__}")
         fn()
