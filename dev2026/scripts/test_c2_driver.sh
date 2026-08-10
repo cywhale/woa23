@@ -275,6 +275,53 @@ check "while the semantic gate is still reported as having passed" "yes" \
       "$(has_text "$out" "gate: PASS")"
 rm -r "$T"
 
+# ================================================== labels name a body of evidence ===
+echo
+echo "a rerun's cycles are named apart from the run before them"
+T="$(build_env distinct "" "")"
+rc="$(drive "$T" --label-prefix c2e)"
+out="$(cat "$T/out.txt")"
+check "the driver still exits 0" "0" "$rc"
+check "the three cycles carry the prefix" "c2e_cycle1 c2e_cycle2 c2e_cycle3" \
+      "$(tr '\n' ' ' < "$T/dev2026/run/.labels" | sed 's/ $//')"
+check "and the summary is named for the run, not the campaign" "yes" \
+      "$([ -f "$T/dev2026/results/c2e_summary.json" ] && echo yes || echo no)"
+check "nothing was written under the default prefix" "no" \
+      "$([ -f "$T/dev2026/results/c2_summary.json" ] && echo yes || echo no)"
+check "and the banner announces the labels it will use" "yes" \
+      "$(has_text "$out" "c2e_cycle1 .. c2e_cycle3")"
+
+# The point of the prefix: a second run in the same export cannot quietly replace
+# the first run's artefacts.
+rc2="$(drive "$T" --label-prefix c2e)"
+err2="$(cat "$T/err.txt")"
+check "running it again with the same prefix is refused" "1" "$rc2"
+check "and it names a file it would have overwritten" "yes" \
+      "$(has_text "$err2" "c2e_cycle1_contract.json")"
+check "no further cycle ran" "3" "$(cat "$T/dev2026/run/.calls")"
+check "the earlier summary is still there" "yes" \
+      "$([ -f "$T/dev2026/results/c2e_summary.json" ] && echo yes || echo no)"
+
+# A different prefix in the same export is fine — that is the escape hatch, and it
+# leaves the first run's files untouched.
+rc3="$(drive "$T" --label-prefix c2f)"
+check "a different prefix runs" "0" "$rc3"
+check "and both runs' results now coexist" "yes" \
+      "$([ -f "$T/dev2026/results/c2e_summary.json" ] \
+         && [ -f "$T/dev2026/results/c2f_summary.json" ] && echo yes || echo no)"
+rm -r "$T"
+
+echo
+echo "and a prefix that could write outside results/ is refused"
+T="$(build_env distinct "" "")"
+for bad in "../escape" "a/b" "" "9lives" "with space" "semi;colon"; do
+  rc="$(drive "$T" --label-prefix "$bad")"
+  check "'$bad' is rejected before anything runs" "2" "$rc"
+done
+check "not one cycle ran" "no" \
+      "$([ -f "$T/dev2026/run/.calls" ] && echo yes || echo no)"
+rm -r "$T"
+
 echo
 if [ "$fail" -gt 0 ]; then
   echo "FAILED $fail/$((pass + fail))"

@@ -43,13 +43,17 @@ CYCLES=3
 
 PY_BINARY=""; PKG_CLONE=""; CLONE_MANIFEST=""; WORKDIR_BASE=""
 CAND_PORT=""; REF_PORT=""; SCHED_PORT=""; WORKERS=""
+# Names this run's three cycles. A rerun is a separate body of evidence from the
+# run before it, and evidence that shares a name with earlier evidence is one
+# `cp -r` away from being confused with it — or from replacing it.
+LABEL_PREFIX="c2"
 
 usage() {
   cat >&2 <<'USAGE'
 usage: run_c2_cycles.sh --python-binary PATH --package-clone PATH
                         --clone-manifest PATH --workdir-base PATH
                         --candidate-port N --reference-port N --scheduler-port N
-                        [--expected-workers N]
+                        [--expected-workers N] [--label-prefix NAME]
 
 Runs exactly three --c2-cycle invocations and reports the 5.2B verdict, the seed
 diversity observed across them, and order stability. Never runs a fourth.
@@ -76,6 +80,8 @@ while [ $# -gt 0 ]; do
                       SCHED_PORT="$2"; shift 2 ;;
     --expected-workers) [ $# -ge 2 ] || { echo "--expected-workers needs a value" >&2; exit 2; }
                       WORKERS="$2"; shift 2 ;;
+    --label-prefix)   [ $# -ge 2 ] || { echo "--label-prefix needs a value" >&2; exit 2; }
+                      LABEL_PREFIX="$2"; shift 2 ;;
     --workers)        echo "--workers was renamed --expected-workers: it asserts" >&2
                       echo "  production's worker count and never sets the arms'." >&2
                       exit 2 ;;
@@ -95,6 +101,15 @@ for pair in "--python-binary:$PY_BINARY" "--package-clone:$PKG_CLONE" \
   [ -n "${pair#*:}" ] || { echo "${pair%%:*} is required" >&2; usage; exit 2; }
 done
 
+# The prefix names files and a directory, so it is checked rather than trusted:
+# anything else would let a stray value write outside results/ and run/.
+case "$LABEL_PREFIX" in
+  ''|*[!A-Za-z0-9_]*|[!A-Za-z]*)
+    echo "--label-prefix must start with a letter and hold only letters, digits" >&2
+    echo "  and underscores; got '$LABEL_PREFIX'" >&2
+    exit 2 ;;
+esac
+
 # The grant is checked here as well as in the runner. This script's own effect is
 # three start/stop cycles rather than one, and a wrapper that let itself be started
 # without the authorisation — and only found out on the first inner invocation —
@@ -113,13 +128,37 @@ if [ "${WOA23_S2_C2_GRANTED:-}" != "yes" ]; then
   exit 3
 fi
 
+# Refuse to write over an earlier run's results. New staging normally makes this
+# impossible, but "normally" is doing the work in that sentence: the runner is
+# invoked from whatever directory it was exported to, and a rerun launched from a
+# previous export with the previous prefix would overwrite the very evidence it was
+# supposed to leave alone. Checked before the first cycle, for all three labels.
+#
+# `if` rather than `[ -e ... ] &&`: an unmatched glob leaves the pattern itself in
+# $f, the test fails, and under `set -e` a bare `&&` list that fails at the end of a
+# loop body takes the script down — which would turn "no earlier results" into an
+# unexplained exit.
+existing=""
+for i in $(seq 1 "$CYCLES"); do
+  for f in "$HERE/results/${LABEL_PREFIX}_cycle${i}"_*; do
+    if [ -e "$f" ]; then existing="$existing $f"; fi
+  done
+done
+if [ -n "$existing" ]; then
+  echo "results for ${LABEL_PREFIX}_cycle1..${CYCLES} already exist:" >&2
+  for f in $existing; do echo "  $f" >&2; done
+  echo "This run would overwrite them. Use a different --label-prefix, or a" >&2
+  echo "  staging directory that does not already hold a C2 result." >&2
+  exit 1
+fi
+
 echo "== C2: $CYCLES independent cycles =="
 echo "   binary   : $PY_BINARY"
 echo "   clone    : $PKG_CLONE"
 echo "   manifest : $CLONE_MANIFEST"
 echo "   workdirs : ${WORKDIR_BASE}-cycle1 .. ${WORKDIR_BASE}-cycle${CYCLES}"
 echo "   ports    : candidate $CAND_PORT, reference $REF_PORT, scheduler $SCHED_PORT"
-echo "   labels   : c2_cycle1 .. c2_cycle${CYCLES} — each cycle's results, provenance,"
+echo "   labels   : ${LABEL_PREFIX}_cycle1 .. ${LABEL_PREFIX}_cycle${CYCLES} — each cycle's results, provenance,"
 echo "              state and service logs live under its own label, so a failing"
 echo "              cycle keeps its evidence and no cycle overwrites another"
 echo "   seed     : unset in every cycle. That is the thing under observation."
@@ -127,7 +166,7 @@ echo
 
 labels=""
 for i in $(seq 1 "$CYCLES"); do
-  label="c2_cycle${i}"
+  label="${LABEL_PREFIX}_cycle${i}"
   echo "======================================================================"
   echo "== cycle $i of $CYCLES  (label $label) =="
   echo "======================================================================"
@@ -175,7 +214,7 @@ echo "======================================================================"
 cd "$HERE"
 set +e
 # shellcheck disable=SC2086
-uv run python -m bench.c2_summary --out results/c2_summary.json $labels
+uv run python -m bench.c2_summary --out "results/${LABEL_PREFIX}_summary.json" $labels
 summary_rc=$?
 set -e
 
