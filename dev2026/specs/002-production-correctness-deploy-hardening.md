@@ -11,6 +11,7 @@ it is a performance claim.
 | rev | date | change |
 |---|---|---|
 | 1 | 2026-08-08 | First draft, from the S2 outline reviewed in-session. Split per PI direction: nginx/TLS, live observation, canary and rollback moved out to later specs. C1 fixed as 5.2A over an isolated venv built from production's distribution set; C2 defined as 5.2B. Readiness and data-path smoke separated. The `p50/p99` item that contradicted the performance non-goal removed. |
+| 17 | 2026-08-10 | **C2 re-executed on the patched candidate and PASSED — `C2 PASS — isolated package-tree semantic correctness after D1 patch at production worker count, with observed sibling seed diversity`** — §7a.5c. Commit `249aa274`, archive `d77b275f…` verified on arrival, 87 files; `api/` byte-identical to the C1-tested `919095e8`. New staging, workdir, label `c2f` and **first-use ports 18131/18132/18859**. Prerequisites read from the host **before any service started**: `STOP_WAIT_SECS=20` source `default`, `ARM_GRACEFUL_TIMEOUT=10`, production's worker count **measured = 2**, `both-unpinned`, `clone.manifest`. **Three cycles, 5.2B, 64/64 MATCH each, all PASS**; **seed diversity OBSERVED**, six distinct digests; **shutdown budget CONSISTENT** in all three cycles, the arms' `--graceful-timeout 10` read back from each arm's own `/proc/<pid>/cmdline`; **9/9 clone integrity**, 33,565 entries and 1,690,025,002 bytes each; **cleanup PASS ×3** with zero blocking state; **8050/8786/8787 zero requests**, production unchanged throughout. **Requests: 396 recorded as actually issued**, plus an unrecorded 1–30 per arm per cycle for process readiness — 402–576 total against a 576 ceiling. **Order-stability correction:** `c2f` and `c2c` involve the **same two cases**, `C16` and `C16-csv`, but did **not** behave identically — `c2c` varied on both arms (4 pairs), `c2f` on the candidate only (2 pairs); the difference is recorded and **not** explained or attributed. Two attempts preceding it are kept as evidence and not backfilled: `c2d` **cleanup FAIL** (arms inherited gunicorn's 30 s default while the wait was 20, plus a logging reentrancy race) and `c2e` **INVALID_PRE_START** (`--clone-manifest` pointed at the clone root's `SHA256SUMS`, a digest list; stopped at preflight, nothing started). Evidence archived read-only outside any deploy directory at `~/woa23-s2-archive/2026-08-10-c2f-PASS/`, 50 files, each hashed at source and destination and compared, `SHA256SUMS` `ffa68f58…`, originals untouched. Limitations retained unchanged: `-S` ran no `site.py` or `.pth`, no worker-level import provenance, seed diversity is **sibling / launch-environment level and not worker level**, the zero-chunk anchor read is **offline-audited and implementation-supported, not observed on this host**, the launcher is not PM2, and **D1 real-store depth characterization, the row-order decision, formal deployment validation and all performance validation remain open**. |
 | 16 | 2026-08-09 | **C2 executed and PASSED — `C2 PASS — isolated package-tree semantic correctness at production worker count, with observed sibling seed diversity`** — §7a.5b. Commit `5cfbf0aa`, archive verified against its digest before shipping, 78/78 files. Production's worker count **measured at run time in every cycle: actual = 2**, `--expected-workers 2` an assertion only, production's identity re-checked after each measurement; **8 processes per cycle**, derived. **Three independent cycles, 5.2B semantic, 64/64 each, all PASS**, under `both-unpinned` with `PYTHONHASHSEED` unset on both arms. **Seed diversity OBSERVED** — three distinct digests, no precondition problems; the `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` branch was not taken. **Nine clone-integrity verifications, 9/9 MATCH**; **cleanup PASS in all three cycles** with zero blocking state left; **8050/8786/8787 zero requests and never connected**; 402–576 requests total against ceilings of 288 per arm and 576 overall; per-cycle evidence isolated and complete. **Separate finding:** `C16` and `C16-csv` — and only those two of sixty-four — varied their row order across cycles on both arms while remaining semantically equivalent; **effect directly observed, source-level mechanism strongly supported**, not proven step by step in the running process. Limitations retained unchanged: `-S` ran no `site.py` or `.pth`, no worker-level import provenance, seed diversity is **sibling / launch-environment level and not worker level**, the launcher is not PM2, and **D1, formal deployment validation and all performance validation remain open**. |
 | 15 | 2026-08-09 | **C1 executed and PASSED — `C1 PASS — isolated package-tree contract correctness`** — §7a.5a. Commit `c1166bfa`, archive verified against its authorised digest before shipping, 75/75 files. **5.2A byte-exact, 64/64 MATCH, 0 DIFFER, RC/CR 32/32**, 24,440,431 bytes per arm, **15 error-status cases byte-exact as well**. Both arms on production's interpreter with `PYTHONHASHSEED=0` and `'data/'`; `clone_manifest_sha256` `f3b66c49…`, `package_tree_digest` `b8754d32…`, `runtime_distribution_digest` `a26ca6c3…`, with `60236d72…` recorded only as the deprecated `name_version_set_sha256`. Clone integrity **three MATCHes**; import isolation clean with 0 production-mapped files; **cleanup PASS**; **production 8050 = 0 requests**; 67–96 requests per arm, 134–192 total. C16 and C16-csv, the two cases that differed under D2b, now match with identical row-order digests. Limitations retained in full and unchanged: `-S` did not run `site.py` or any `.pth`, the launcher is not PM2, there is **no worker-level import provenance**, `/home/odbadmin` remains writable so the manifest checks are **bounded detection and not immutability**, **D1 is not fixed**, **C2 has not run**, and **no latency, throughput or deployment-readiness conclusion exists**. |
 | 14 | 2026-08-09 | **The third C1 attempt is `INVALID_PRE_START`** — §7a.3h. It failed earlier than either predecessor: nothing was started, no port bound, no workdir created, zero requests of every kind. `ModuleNotFoundError: bench.dist_digests` — the module existed and its tests passed **in the working tree**, but `.gitignore`'s `**/dist_*` matched it, `git add -A` skipped it silently, `git status` did not list it, and the commit shipped without it. The per-file sync verified 72 of 72 files correctly; the commit was what was incomplete. Module renamed **`bench/package_digests.py`**, and `scripts/test_tracked.sh` added: every harness source must be tracked and unignored, every `bench.*` module imported anywhere must exist and be tracked, no harness module may be named `dist_*`, and **the committed tree is exported and checked to contain every imported module** — the check that would have failed before the run rather than during it. |
@@ -1692,6 +1693,180 @@ begins, and `bench/c2_summary.py` produces:
    ordering change. Without a pinned seed, two cycles ordering rows differently is the
    expected consequence of what C2 observes, not a defect. Unlike the seed digests,
    this comes from the processes that actually answered.
+
+### 7a.5c C2, re-executed 2026-08-10 on the patched candidate (`c2f`)
+
+**C2 PASS — isolated package-tree semantic correctness after D1 patch at production
+worker count, with observed sibling seed diversity.**
+
+**The first complete, valid C2 result on the patched candidate.** The C2 of
+2026-08-09 (`c2c`) ran the *unpatched* candidate. Two attempts on the patched one did
+not produce a result and are recorded as such, not quietly dropped:
+
+| attempt | outcome | why |
+|---|---|---|
+| `c2d` | **cleanup FAIL**, cycle 1 | the arms inherited gunicorn's 30 s `graceful_timeout` while `STOP_WAIT_SECS` was 20, and a logging reentrancy race left one worker unreaped. The contract had passed. |
+| `c2e` | **INVALID_PRE_START** | `--clone-manifest` was pointed at the clone root's `SHA256SUMS`, which is a digest list, not a manifest. Stopped at clone-integrity preflight; **no service started, no request issued**. |
+| `c2f` | **PASS** | below |
+
+`c2d` and `c2e` keep their evidence. Neither was re-run in place, and neither was
+backfilled into this result.
+
+#### What ran
+
+| | |
+|---|---|
+| commit | `249aa2749bc14d13bf82b9af9cf5385ac2cb2334`, archive `d77b275f79ae3ce036ab3d3d0a6ea0eac77c7339ff37439426284d4a9835caba`, 87 files |
+| candidate `api/` | byte-identical to the C1-tested `919095e8` — `app.py d0d8c781…`, `config.py b8066414…`, `query.py 4e28bdd9…`, `store_paths.py 00cb80c2…` |
+| staging / workdir / label | `~/woa23-s2-c2f/`, `~/woa23-s2-c2f-work-cycle{1,2,3}`, `c2f` — all new |
+| ports | 18131 / 18132 / 18859 — **first use**, checked against `scripts/ports_used.tsv` before starting, and free on the host |
+| clone | the existing read-only clone, `clone.manifest` (four columns, 33,565 entries) |
+| seed policy | `both-unpinned` — `PYTHONHASHSEED` unset on **both** arms |
+| processes | **8 per cycle**: two arms of arbiter + 2 workers, plus an isolated Dask scheduler and worker |
+
+**Prerequisites were read from the host before any service started**, not taken from
+the request: `STOP_WAIT_SECS=20` (source `default`; unset in the environment),
+`ARM_GRACEFUL_TIMEOUT=10`, `assert_shutdown_budget` PASS, and production's worker
+count **measured as 2** from pid 3960's own argv.
+
+#### 1. Contract — 5.2B semantic, three of three
+
+| cycle | gate | cases | verdicts | request order |
+|---|---|---|---|---|
+| `c2f_cycle1` | **PASS** | 64 | 64 MATCH | RC 32, CR 32 |
+| `c2f_cycle2` | **PASS** | 64 | 64 MATCH | RC 32, CR 32 |
+| `c2f_cycle3` | **PASS** | 64 | 64 MATCH | RC 32, CR 32 |
+
+#### 2. Seed diversity — `OBSERVED`
+
+Six digests from three independent starts, **all distinct**:
+
+| cycle | candidate | reference |
+|---|---|---|
+| 1 | `b43233d7642d2319` | `dafdbaa61a9bb6da` |
+| 2 | `2e04ce4cb4b0348a` | `14f537d43115d1f9` |
+| 3 | `e744e91b3df4bc59` | `f346808f0ad1fe09` |
+
+`PYTHONHASHSEED` unset and `hash_randomization=1` are **preconditions, not
+evidence** — they say the interpreter was permitted to choose a seed, and are equally
+true of three starts that chose the same one. Only the measured digests distinguish
+those cases.
+
+#### 3. Order stability — recorded, deliberately outside the verdict
+
+| | `c2f` (2026-08-10, patched) | `c2c` (2026-08-09, unpatched) |
+|---|---|---|
+| comparable (case, arm) pairs | 94 | 94 |
+| **varied** | **2** | **4** |
+| which | `C16/candidate`, `C16-csv/candidate` | `C16/candidate`, `C16/reference`, `C16-csv/candidate`, `C16-csv/reference` |
+| responses with no row structure | 102 | 102 |
+
+**The two runs involve the same two cases; they did not behave identically.** In
+`c2c` both arms varied; in `c2f` only the candidate pair did, and the reference
+returned the same row order in all three cycles.
+
+**That difference is not itself a finding, and must not be read as one.** With no
+pinned seed, three cycles landing on one order is compatible with coincidence — the
+reference has three samples, not a demonstrated property. Nothing in this run
+attributes the difference to the D1 patch, to the arms' code, or to anything else,
+and no mechanism for it was investigated. What is established is what the table
+says: which pairs varied, in which run.
+
+Semantics held for these cases in every cycle: they are 5.2B MATCH throughout.
+
+#### 4. Shutdown budget — read back from the evidence, not assumed
+
+| cycle | `STOP_WAIT_SECS` | source | arms' `--graceful-timeout`, from each arm's own `/proc/<pid>/cmdline` |
+|---|---|---|---|
+| 1 | 20 | default | recorded 10 · candidate 10 · reference 10 |
+| 2 | 20 | default | recorded 10 · candidate 10 · reference 10 |
+| 3 | 20 | default | recorded 10 · candidate 10 · reference 10 |
+
+Status **CONSISTENT**. This is the relationship whose absence failed `c2d`: the
+harness's wait must exceed what the arms are entitled to take, and both numbers are
+now asserted before a cycle starts and read back afterwards from the processes
+themselves.
+
+#### Traffic, cleanup and host state
+
+**Requests — actual where recorded, and bounded where not:**
+
+| component | per arm per cycle | recorded? |
+|---|---|---|
+| contract gate | **64** | yes — `request_order_counts` RC 32 + CR 32 in each `c2f_cycle{1,2,3}_contract.json` |
+| store-readiness probe | **2** | yes — two probes per arm, in both orders, no retry path |
+| process-readiness probe | 1–30 | **no** — the loop does not count its attempts |
+
+So **396 requests are recorded as actually issued** (66 per arm per cycle × 2 arms ×
+3 cycles), and process readiness adds an unrecorded 1–30 per arm per cycle. **Total
+actual: between 402 and 576.** The ceiling declared before the run was 576 per run,
+96 per arm per cycle. *The unrecorded component is a gap in the harness, not in this
+report: `process_ready` should return its attempt count so the actual total is exact.
+No change has been made and no rerun is proposed for it.*
+
+- **Production 8050, 8786, 8787: 0 requests, never connected to.** Read from `/proc`
+  and `ss` only. Production **unchanged** at every check in all three cycles: master
+  3960, start time 1874, listeners 3960/4334/4366, boot id matched.
+- **Clone integrity: nine full verifications, 9/9 OK** — three per cycle (preflight,
+  before reference, before candidate). Each: 33,565 manifest entries against 33,565
+  files on disk, 1,690,025,002 bytes re-hashed in ~7.0 s, **0 missing, 0 extra, 0
+  digest mismatch, 0 size mismatch, 0 mtime mismatch, 0 unreadable**; manifest
+  `f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4`.
+- **Clone integrity is detection, not immutability.** `/home/odbadmin` is writable by
+  this account — recorded as residual exposure at every check. The window between a
+  verification and a worker opening a file is narrowed, not closed.
+- **Cleanup: PASS in all three cycles.** Every service stopped, every process in every
+  recorded tree exited, 18131/18132/18859 confirmed free each time. **Zero blocking
+  state files across the whole `run/` tree afterwards** — no `.pid`, `.starttime`,
+  `.tree`, `.diag` or `.uncertain`. Each `run/c2f_cycle{1,2,3}/` holds its four
+  service logs, which is what a clean stop leaves behind.
+- **The store was not written.** `~/python/woa23/data` mtime remains 2025-04-18
+  14:31:47 — *no modification observed*; the basis for the claim is that the runner
+  performs no write to it.
+- **Earlier evidence untouched:** `c2c`, `c2d` and `c2e` show zero file changes.
+
+#### Archive
+
+`~/woa23-s2-archive/2026-08-10-c2f-PASS/` — outside any deploy directory, **50
+files** (37 result artefacts, 12 service logs, the run log), each hashed at the
+source, copied, re-hashed at the destination and compared; `SHA256SUMS`
+`ffa68f58a6f8831ca4487ee787aef6cb4e8ffd5d8bd79716fe2cb8912e87e101`. Directories 555,
+files 444, verified unwritable. **The originals under `~/woa23-s2-c2f/` were copied,
+never moved, and are unchanged.**
+
+#### What this result is
+
+The candidate — **with the D1 store-startup patch applied** — and the unmodified
+reference return **semantically equivalent responses across all 64 contract cases, in
+each of three independent start/stop cycles**, when both run on production's
+interpreter and a read-only copy of production's package tree, **at production's
+measured worker count of two**, with no pinned hash seed. Three independent starts
+were observed to choose different hash seeds, and all three cycles stopped cleanly.
+
+#### What this result is **not**
+
+- **Not deployment validated, and not ready to deploy.**
+- **No latency, throughput or resource conclusion of any kind.** None was measured;
+  the latency gate, the noise pilot and every rung above 21 did not run.
+- **`-S` means `site.py` never ran** in any cycle, so no `.pth` in the clone was
+  processed. Production's site/`.pth` startup semantics were not exercised.
+- **The launcher is not production's PM2 path.**
+- **No worker-level Python import provenance exists.** The interpreter probe is a
+  sibling process; `/proc/<pid>/maps` can refute isolation but its silence proves
+  nothing, because it lists mapped files and not imports.
+- **The seed diversity is sibling / launch-environment level, not worker level.** It
+  says three starts of that launch procedure chose different seeds. It does not
+  measure the seed of any gunicorn master or worker that served a request.
+- **The candidate's startup anchor validation reading no data or coordinate chunk is
+  offline-audited and implementation-supported, not observed on this host.** This run
+  installed no audit hook and recorded no file-open events.
+- **D1 is only partly closed.** The patch makes an invalid or non-Zarr store fail
+  before the service is ready; **real-store depth characterization is still
+  CHARACTERIZATION PENDING** and was not run.
+- **The row-order contract decision is still open** — no sorting, no pinned seed.
+- **Formal deployment validation is still open** — PM2, site/`.pth` semantics,
+  readiness, nginx and TLS.
+- **Performance validation is still open** in its entirety for S2.
 
 ### 7a.5 Request budgets, stated as ceilings before anything is sent
 

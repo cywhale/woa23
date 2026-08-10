@@ -52,3 +52,6 @@
 18121	candidate arm	c2e (INVALID_PRE_START)	allocated, never bound: aborted at clone-integrity preflight before any service started
 18122	reference arm	c2e (INVALID_PRE_START)	allocated, never bound
 18849	isolated dask scheduler	c2e (INVALID_PRE_START)	allocated, never bound
+18131	candidate arm	C2 PASS (c2f)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18132	reference arm	C2 PASS (c2f)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18859	isolated dask scheduler	C2 PASS (c2f)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
