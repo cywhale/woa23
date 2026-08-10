@@ -567,8 +567,18 @@ check "the probe's own reach is stated" "yes" \
       "$(has_text "$RUNSRC3" "This probe read nothing from the store")"
 check "and what startup already read is stated" "yes" \
       "$(has_text "$RUNSRC3" "has already read Zarr METADATA for 1_degree/annual/TS")"
-check "including that no chunk was read" "yes" \
-      "$(has_text "$RUNSRC3" "no data or coordinate chunk")"
+# The zero-chunk property is NOT observed by this run — no audit hook is installed
+# on the host — so the message must say where the evidence comes from rather than
+# assert it as a local observation.
+check "the zero-chunk claim names its evidence as offline" "yes" \
+      "$(has_text "$RUNSRC3" "offline-audited")"
+check "and as implementation-supported" "yes" \
+      "$(has_text "$RUNSRC3" "implementation-supported")"
+check "and admits this run observes no file opens" "yes" \
+      "$(has_text "$RUNSRC3" "this run observes no file opens")"
+check "it does not assert the property as locally observed" "no" \
+      "$(has_text "$RUNSRC3" "and no
+    data or coordinate chunk; the reference")"
 check "the arms' asymmetry is named" "yes" \
       "$(has_text "$RUNSRC3" "the reference validates nothing at startup")"
 check "and data readiness is still deferred to the probe" "yes" \

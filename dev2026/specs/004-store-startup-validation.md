@@ -6,6 +6,7 @@ document authorises a candidate change.
 
 | rev | date | change |
 |---|---|---|
+| 9 | 2026-08-10 | **The zero-chunk property is offline-audited, not observed on VM24** — §52. Revision 8's corrected message still implied the run had watched the anchor read touch no chunk; it had not, because no audit hook is installed during a VM24 run and the runner records no file-open events. Separated: the anchor *opening* is observed on the host, and *that it read no data or coordinate chunk* is established offline against synthetic fixtures and carries over only because the same code path runs — implementation-supported, weaker than observation. Instrumenting the arms on the host would change their launch line and is not proposed. §51's citation list amended accordingly. |
 | 8 | 2026-08-10 | **Three reporting corrections** — §48-51. The runner's readiness line claimed the store had not been touched; under the patched candidate the lifespan has already read the anchor group's metadata by then, so it is corrected in the runner, its comment, spec 002 and a CLI assertion, and the resulting **asymmetry between the arms** is named — harmless to 5.2A, relevant to any future latency work. **64/64 MATCH does not prove the path strings are identical**: different strings can denote the same location, so the builder equivalence is cited from the offline D1-13 test instead, as separate evidence for a separate claim. **An unchanged mtime is an observation, not a guarantee**: the basis for 'production's store was not written' is that the runner performs no write operation, with the mtime corroborating. §51 states how the 2026-08-10 C1 rerun may be cited and what it does not establish. |
 | 7 | 2026-08-10 | **`source_time_span` and `climatology` separated** — §40. The WOA23 time spans (`all`, `decav`, …) are source provenance, not an API request parameter; `climatology` (`annual`/`seasonal`/`monthly`) is what a user selects. The Zarr group path carries **no source_time_span at all**, so §11.1's question about needing `all` in a path does not arise. Depth cases restated in full with source coverage 1965-2022 at fixture/documentation level and grid/parameter/climatology/depth as request dimensions. **D1's scope stated definitively** — §41. **Chunk wording corrected** — §42: 'reads Zarr metadata files only, no array data chunk including coordinate chunks'; no claim about *which* metadata files, since the audit hook observed exactly one (`.zgroup`) on a consolidated fixture and that is store-dependent; observer scope stated (it sees `open`, not `listdir`). **D1-D3's six requirements all demonstrated offline** — §43, including that the request reaches the group open rather than the upstream 400, and that a fixture too thin to serve a successful request cannot demonstrate request-level failure. **D1-11 tabulated per fixture as split-only** — §44. Builder input coverage enumerated — §45. Nothing applied. |
 | 6 | 2026-08-10 | **Correction, measured: `xr.open_zarr(chunks=None)` does read chunks** — it is lazy about data variables but materialises the coordinate arrays, which are stored as chunks (`depth/0`, `lat/0`, `lon/0`). The proposed check would have satisfied 'metadata only' as I had written it and violated the condition as stated. **Replaced with `zarr.open_group(mode="r")`: zero chunk reads, identical detection** of an empty directory, an unparseable `.zgroup` and an unsupported format; patch regenerated (185 lines) and re-checked. **Three cases move offline** on a synthetic isolated fixture that never involves production's store — D1-10 (audit hook, 0 chunk reads on all seven fixtures **including the valid one**), D1-D3, and a synthetic positive control for D1-8 (the real store still required). Conditions checklist and revised step list: steps 1-3 are now entirely offline. Holding for authorisation. |
@@ -1506,3 +1507,46 @@ Established:
 **Not established, and not to be written as if it were:** D1 completion; any depth
 characterization; deployment or PM2 validation; any performance conclusion; and
 anything about C2 under the patched candidate.
+
+---
+
+# Revision 9 — where the zero-chunk evidence actually comes from
+
+Offline. No VM24, no re-run.
+
+## 52. "No data or coordinate chunk" is offline-audited, not observed on the host
+
+Revision 8's corrected readiness message still overstated one thing. It said the
+candidate's startup read metadata **and no data or coordinate chunk**, in a sentence
+describing what had happened on VM24 — inviting the reading that the run had watched
+it happen. It had not.
+
+| claim | evidence | where it comes from |
+|---|---|---|
+| the anchor group opened | **observed on VM24** — readiness returned 200, which under the patched candidate requires the lifespan to have succeeded | the C1 rerun of 2026-08-10 |
+| the anchor read touched **no data or coordinate chunk** | **offline audit, implementation-supported** | `bench/test_d1_store_validation.py`, audit hook on `open` and `mmap.__new__`, **synthetic fixtures**, on the development machine |
+
+**No audit hook is installed during a VM24 run.** The runner records no file-open
+events, so nothing on that host observed which files the anchor read touched. The
+property carries over only because the run executes the same code path that was
+audited offline — which is a real argument and a weaker one than observation.
+
+What would make it an observation is instrumenting the arms on the host, and that
+changes the arms' launch line. It is **not proposed** and would need its own
+authorisation, exactly as the `post_fork` worker-provenance hook does (§7a.3 of spec
+002).
+
+Corrected in the runner's output, its comment, and pinned by CLI assertions that
+require the message to name its evidence as `offline-audited`,
+`implementation-supported`, and to state that the run observes no file opens.
+
+## 53. §51 amended
+
+The citation list in §51 gains the distinction:
+
+- **observed in the C1 rerun:** the real `1_degree/annual/TS` opened under
+  `zarr.open_group(mode="r")`;
+- **offline-audited and implementation-supported, not observed on VM24:** that this
+  open read no data or coordinate chunk.
+
+Both may be stated. Only the first is evidence from the run.

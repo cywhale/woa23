@@ -1201,9 +1201,14 @@ fi
 # What has already happened by the time this runs is NOT nothing, and saying so was
 # wrong until spec 004 landed. Under the patched candidate the lifespan opens the
 # anchor group's **Zarr metadata** during startup — before any HTTP is served — so
-# by the time a 200 comes back the candidate has read `.zgroup`-level metadata for
-# `1_degree/annual/TS`. It has read **no data or coordinate chunk**; that is asserted
-# offline by bench/test_d1_store_validation.py with an audit hook, not assumed.
+# by the time a 200 comes back the candidate has read metadata for
+# `1_degree/annual/TS`.
+#
+# That it read **no data or coordinate chunk** is NOT observed here. This run
+# installs no audit hook and records no file-open events; the property is
+# established offline, by bench/test_d1_store_validation.py, against synthetic
+# fixtures, and carries over only because this run executes the same code path.
+# It is **implementation-supported, not observed on this host**.
 #
 # The reference does not do this: `woa23_app.py` is unmodified and validates nothing
 # at startup. So the two arms differ in what they have read by this point — metadata
@@ -1242,8 +1247,11 @@ process_ready "$REF_PORT"  || { echo "reference process not ready; see $RUN/refe
 process_ready "$CAND_PORT" || { echo "candidate process not ready; see $RUN/candidate.log" >&2; exit 1; }
 echo "  both arms are PROCESS-ready (OpenAPI 200)."
 echo "    This probe read nothing from the store. The candidate's startup anchor"
-echo "    validation has already read Zarr METADATA for 1_degree/annual/TS, and no"
-echo "    data or coordinate chunk; the reference validates nothing at startup."
+echo "    validation has already read Zarr METADATA for 1_degree/annual/TS;"
+echo "    the reference validates nothing at startup."
+echo "    That the anchor read touched NO data or coordinate chunk is offline-audited"
+echo "    (bench/test_d1_store_validation.py, synthetic fixtures) and"
+echo "    implementation-supported — this run observes no file opens."
 echo "    Neither arm is known to serve DATA yet — that is the probe below."
 
 # The authorisation is for a specific set of processes, so the set is *verified*,
