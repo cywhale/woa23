@@ -1,11 +1,17 @@
 # 004 — D1: store startup validation
 
-**Status:** spec, acceptance cases, test plan and an **implementation proposal**
-(§9-16). **Nothing is implemented**, no option is adopted, and nothing in this
-document authorises a candidate change.
+**Status:** the anchor-validation option is **implemented and in the candidate**;
+the rest of D1 is not. See revision 10 and §54 for the boundary — in one line:
+**an invalid or non-Zarr store now fails before the service can be treated as ready,
+and nothing else about D1 is closed.**
+
+Revisions 1-9 below were written while nothing was implemented and say so. They are
+left as they were rather than edited in place, because they are the record of how the
+decision was reached; §54 is what supersedes their status statements.
 
 | rev | date | change |
 |---|---|---|
+| 10 | 2026-08-10 | **'Nothing is implemented' is now false and is corrected** — §54. The shared path builder and the import-time and lifespan checks were applied as `919095e8` and have since been carried, unchanged, through **C1 (`c1e`, 5.2A 64/64 byte-exact)** and **C2 (`c2f`, three cycles, 5.2B 64/64 each)**; `api/` is byte-identical across both. **The real anchor group is verified**: `1_degree/annual/TS` on production's own store opened under `zarr.open_group(mode="r")` in the C1 rerun, which is what moved D1-8 off synthetic fixtures. **What that closes is one thing**: a store that does not resolve, is not a directory, or is not a readable Zarr v2 group at the anchor fails before the service can be treated as ready. **What stays open is everything else** — `D1-depth-out-of-range` remains **CHARACTERIZATION PENDING** and has never been measured against the real store; non-anchor, request-level behaviour is **by design** not validated at startup and is demonstrated only offline on synthetic fixtures (§43); deployment validation under PM2 with `site.py` enabled is untouched, and C1 and C2 both ran under `-S` from a shell script. **The zero-chunk property is unchanged in status**: the anchor *opening* is observed on the host; that it read **no data or coordinate chunk** remains **offline-audited and implementation-supported, not observed on VM24** (§52, §53). No new measurement, no VM24 action and no candidate change accompanies this revision. |
 | 9 | 2026-08-10 | **The zero-chunk property is offline-audited, not observed on VM24** — §52. Revision 8's corrected message still implied the run had watched the anchor read touch no chunk; it had not, because no audit hook is installed during a VM24 run and the runner records no file-open events. Separated: the anchor *opening* is observed on the host, and *that it read no data or coordinate chunk* is established offline against synthetic fixtures and carries over only because the same code path runs — implementation-supported, weaker than observation. Instrumenting the arms on the host would change their launch line and is not proposed. §51's citation list amended accordingly. |
 | 8 | 2026-08-10 | **Three reporting corrections** — §48-51. The runner's readiness line claimed the store had not been touched; under the patched candidate the lifespan has already read the anchor group's metadata by then, so it is corrected in the runner, its comment, spec 002 and a CLI assertion, and the resulting **asymmetry between the arms** is named — harmless to 5.2A, relevant to any future latency work. **64/64 MATCH does not prove the path strings are identical**: different strings can denote the same location, so the builder equivalence is cited from the offline D1-13 test instead, as separate evidence for a separate claim. **An unchanged mtime is an observation, not a guarantee**: the basis for 'production's store was not written' is that the runner performs no write operation, with the mtime corroborating. §51 states how the 2026-08-10 C1 rerun may be cited and what it does not establish. |
 | 7 | 2026-08-10 | **`source_time_span` and `climatology` separated** — §40. The WOA23 time spans (`all`, `decav`, …) are source provenance, not an API request parameter; `climatology` (`annual`/`seasonal`/`monthly`) is what a user selects. The Zarr group path carries **no source_time_span at all**, so §11.1's question about needing `all` in a path does not arise. Depth cases restated in full with source coverage 1965-2022 at fixture/documentation level and grid/parameter/climatology/depth as request dimensions. **D1's scope stated definitively** — §41. **Chunk wording corrected** — §42: 'reads Zarr metadata files only, no array data chunk including coordinate chunks'; no claim about *which* metadata files, since the audit hook observed exactly one (`.zgroup`) on a consolidated fixture and that is store-dependent; observer scope stated (it sees `open`, not `listdir`). **D1-D3's six requirements all demonstrated offline** — §43, including that the request reaches the group open rather than the upstream 400, and that a fixture too thin to serve a successful request cannot demonstrate request-level failure. **D1-11 tabulated per fixture as split-only** — §44. Builder input coverage enumerated — §45. Nothing applied. |
@@ -1550,3 +1556,79 @@ The citation list in §51 gains the distinction:
   open read no data or coordinate chunk.
 
 Both may be stated. Only the first is evidence from the run.
+
+
+---
+
+# Revision 10 — what the patch closed, and what it did not
+
+## 54. D1's status, restated because the old one is wrong
+
+Revisions 1-9 all end with some form of "nothing is implemented, holding". That was
+true when each was written and **is not true now**. The patch was authorised, applied
+as `919095e8`, and has been carried unchanged through two controlled runs. Leaving
+those sentences as the document's status line would misreport the candidate.
+
+### 54.1 What is implemented
+
+| | |
+|---|---|
+| `api/store_paths.py` | the shared path builder — `group_path`, `anchor_path`, `resolve`, `describe`. No filesystem I/O at import (D1-14). |
+| `api/config.py` | import-time existence and directory check on the configured store, raising `RuntimeError` with the resolved path, the raw env value and the cwd |
+| `api/app.py` | lifespan opens the anchor group with `zarr.open_group(mode="r")` and lists its array keys, before any request is served |
+| `api/query.py` | one line: the group path comes from the shared builder, byte-identical to what it built before |
+
+Carried through **C1 `c1e`** (5.2A byte-exact, 64/64) and **C2 `c2f`** (three cycles,
+5.2B, 64/64 each), with `api/` byte-identical in both.
+
+### 54.2 What that closes — one thing, stated narrowly
+
+> A store that does not resolve, is not a directory, or is not a readable Zarr v2
+> group **at the anchor** `1_degree/annual/TS` now fails **before the service can be
+> treated as ready**. `N2` and `N4` fail at import; `N3`, `N5` and `N6` fail at
+> lifespan.
+
+**The real anchor is verified, not only the synthetic one.** The C1 rerun opened
+production's own `1_degree/annual/TS` under `zarr.open_group(mode="r")`, which is what
+moved **D1-8** off synthetic fixtures for the first time.
+
+### 54.3 What remains open — and is not made smaller by the above
+
+- **`D1-depth-out-of-range` is still CHARACTERIZATION PENDING.** It has never been
+  measured against the real store. Status, body and error text for JSON and CSV
+  separately, and that the outcome is request-level, all remain unasserted (§40.1).
+  Nothing in C1 or C2 measured it; neither run issues a depth query outside range.
+- **Non-anchor, request-level behaviour is not validated at startup, deliberately.**
+  A store faithful to WOA23 legitimately lacks combinations (§23, §41), so a missing
+  non-anchor group must stay a per-request failure and must never prevent startup.
+  That this holds is demonstrated **offline, on a synthetic fixture** (§43). It is not
+  established against the real store, and D1 does not claim it is.
+- **Deployment is untouched.** C1 and C2 both ran under `-S` from a shell script, so
+  `site.py` never ran and no `.pth` was processed; the launcher is not production's
+  PM2 path. Whether the same failure modes hold under PM2, with site enabled, is
+  **open** and belongs to deployment validation.
+- **D1-11 is split-only and says nothing about metadata.** A passing
+  `gunicorn --check-config` means the configuration is well-formed; it does not run
+  lifespan, so `N3`, `N5` and `N6` pass it (§44).
+- **Full D1 is not closed.** The above are its remaining parts, not footnotes to a
+  finished item.
+
+### 54.4 The zero-chunk property — status unchanged
+
+Repeated here so this revision cannot be read as strengthening it:
+
+- **Observed on the host:** the real `1_degree/annual/TS` opened under
+  `zarr.open_group(mode="r")` during the C1 rerun's lifespan.
+- **Offline-audited and implementation-supported, not observed on VM24:** that this
+  open read **no data or coordinate chunk**, including coordinate chunks. The audit
+  hook runs in `bench/test_d1_store_validation.py` against synthetic fixtures; **no
+  audit hook is installed during a VM24 run**, and the runner records no file-open
+  events. The property carries over only because the same code path executes (§52).
+
+Instrumenting the arms on the host would change their launch line. It is **not
+proposed**.
+
+### 54.5 What this revision is not
+
+No new measurement was taken, no VM24 action was performed, and no candidate change
+was made. This revision corrects a status statement and nothing else.

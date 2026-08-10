@@ -731,9 +731,11 @@ No change has been made and no rerun is proposed for it.*
 
 ### Archive
 
-`~/woa23-s2-archive/2026-08-10-c2f-PASS/` — outside any deploy directory, **50
-files** (37 result artefacts, 12 service logs, the run log), each hashed at the
-source, copied, re-hashed at the destination and compared; `SHA256SUMS`
+`~/woa23-s2-archive/2026-08-10-c2f-PASS/` — outside any deploy directory, **50 evidence
+files** (37 result artefacts, 12 service logs, the run log) **plus a separate
+`SHA256SUMS`**, which is the manifest of those 50 and is not one of them. Each
+evidence file was hashed at the source, copied, re-hashed at the destination and
+compared; `SHA256SUMS` is
 `ffa68f58a6f8831ca4487ee787aef6cb4e8ffd5d8bd79716fe2cb8912e87e101`. Directories 555,
 files 444, verified unwritable. **The originals under `~/woa23-s2-c2f/` were copied,
 never moved, and are unchanged.**

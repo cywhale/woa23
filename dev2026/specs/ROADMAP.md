@@ -73,7 +73,7 @@ what variant 5.2A would establish, and that needs D2b.
 
 ### S2 — Production environment correctness
 
-**Spec:** `dev2026/specs/002-production-correctness-deploy-hardening.md` (revision 16)
+**Spec:** `dev2026/specs/002-production-correctness-deploy-hardening.md` (revision 17)
 · **Status:** C1 and C2 done, and re-done on the patched candidate (`c1e`, `c2f`); D1
 real-store depth characterization, PM2 deployment validation and all performance
 validation still **open**
@@ -82,7 +82,7 @@ validation still **open**
 |---|---|---|
 | **C1** | isolated package-tree contract correctness, 5.2A byte-exact | **PASS 2026-08-09** — see below |
 | **C2** | multi-worker, unpinned seed, 5.2B semantic, seed diversity | **PASS 2026-08-09** (`c2c`, unpatched candidate) and **PASS 2026-08-10** (`c2f`, after the D1 patch) — three cycles each, 64/64 every cycle, seed diversity OBSERVED both times; see below |
-| **D1 — store startup validation** | startup failure modes | **partly closed**, spec `004-store-startup-validation.md`. The patch is applied and carried through C1 (`c1e`) and C2 (`c2f`): an invalid or non-Zarr store now fails before the service can be considered ready. **Real-store depth characterization is still CHARACTERIZATION PENDING.** |
+| **D1 — store startup validation** | startup failure modes | **partly closed**, spec `004-store-startup-validation.md` revision 10 §54. The patch is applied (`919095e8`) and carried unchanged through C1 (`c1e`) and C2 (`c2f`): an invalid or non-Zarr store now fails before the service can be treated as ready, and the **real** anchor group was opened in the C1 rerun. Still open: **`D1-depth-out-of-range` is CHARACTERIZATION PENDING** and never measured against the real store; non-anchor request-level behaviour is shown offline only; deployment under PM2 with site enabled is untouched. |
 | **Row-order contract** | whether row order is part of the API contract | **open**, decision memo `003-row-order-contract-decision.md` — `c2c` observed it varying per process on **both** arms; `c2f` observed the same two cases varying on the **candidate only**. Same cases, not the same behaviour, and neither run explains the difference. |
 | **PM2 / formal deployment validation** | production's real launcher, site/`.pth` semantics, readiness, nginx, TLS | **open** — C1 and C2 ran under `-S` from a shell script |
 | **S2 performance validation** | latency, throughput, resource use for S2 | **open, not started** — C1 and C2 measured none of it |
@@ -753,9 +753,11 @@ No change has been made and no rerun is proposed for it.*
 
 ### Archive
 
-`~/woa23-s2-archive/2026-08-10-c2f-PASS/` — outside any deploy directory, **50
-files** (37 result artefacts, 12 service logs, the run log), each hashed at the
-source, copied, re-hashed at the destination and compared; `SHA256SUMS`
+`~/woa23-s2-archive/2026-08-10-c2f-PASS/` — outside any deploy directory, **50 evidence
+files** (37 result artefacts, 12 service logs, the run log) **plus a separate
+`SHA256SUMS`**, which is the manifest of those 50 and is not one of them. Each
+evidence file was hashed at the source, copied, re-hashed at the destination and
+compared; `SHA256SUMS` is
 `ffa68f58a6f8831ca4487ee787aef6cb4e8ffd5d8bd79716fe2cb8912e87e101`. Directories 555,
 files 444, verified unwritable. **The originals under `~/woa23-s2-c2f/` were copied,
 never moved, and are unchanged.**
