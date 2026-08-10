@@ -6,6 +6,7 @@ document authorises a candidate change.
 
 | rev | date | change |
 |---|---|---|
+| 4 | 2026-08-10 | **Upstream availability rules recorded from the official WOA23 documentation** (NCEI, pp11-12), supplied by the PI — oxygen and the inorganic nutrients are one-degree only, so `query.py:114` reflects the dataset rather than limiting the API, and **Table 4's depth ranges vary by variable AND climatology** (seasonal nitrate 0-800 m against annual nitrate 0-5500 m). **Purpose narrowed** to: the configured store resolves and its required anchor group is a readable Zarr v2 group — with explicit non-goals, chief among them that **a missing non-anchor request-specific group is request-level and must never prevent startup**. **Structural guarantee selected by the PI**: `query.py:139` uses the shared builder too, output byte-identical including the double slash, and **C1 and C2 must be re-run** because the read path changes. **Depth stays request-level**, pinned by a supported and an unsupported case, with the unsupported case's outcome left to be measured rather than asserted. Sequencing revised so the read-path change is re-validated before validation is layered on it. Nothing implemented. |
 | 3 | 2026-08-10 | Clarifications and the candidate implementation plan — §17-22. **D1-12 split into D1-12a (real store: readiness completes, zero chunk reads) and D1-12b (invalid stores: fail before readiness is observable)**. **The reachable group set is 12, not 18** — revision 2's arithmetic ignored `query.py:114`, which restricts 0.25° to temperature and salinity, making six of the eighteen unreachable by construction. **Settled: the twelve are not a startup invariant**; only four are exercised by any contract case, so requiring twelve would require eight never observed. One stated anchor group instead, with an explicit store manifest named as the only acceptable route to wider coverage; §15 question 2 withdrawn. **D1-11 marked as an acceptance condition of the split option only.** Implementation plan added: a pure `api/store_paths.py` shared by both call sites, ~6 lines in `config.py`, ~8 in the existing `lifespan`, **`query.py` untouched** with D1-13 as an asserted equivalence rather than a structural one, and the trade stated. Empty public API diff. Test matrix extended to D1-15. Multi-worker behaviour under both `preload_app` settings. Nothing implemented. |
 | 2 | 2026-08-10 | Implementation proposal added — §9-16. Purpose restated as *fail before ready, not on first request*. Zarr v2 metadata scope; relative-path resolution and what a message must name; **metadata only, never a chunk**, with an acceptance case that asserts it; where validation runs under `-w 2` and what `preload_app` changes; the startup / readiness / data-path boundary. Import-time and lifespan compared, with a split recommendation and the case for lifespan-alone if one change is preferred. Four read-only questions listed as prerequisites. Nothing implemented. |
 | 1 | 2026-08-09 | First draft. Measured behaviour carried over from spec 002 §7 D1; acceptance cases, test plan and authorisation boundaries added. |
@@ -755,3 +756,237 @@ question for deployment validation rather than a prerequisite for this change.
   and undecided.
 - §15's questions 1, 3 and 4 stand; **question 2 is withdrawn** — §17.2 removes the
   design's dependence on it.
+
+---
+
+# Revision 4 — the upstream availability rules, a narrowed purpose, and the
+# structural guarantee
+
+**Still a plan. No candidate file is modified and `api/` is byte-identical to
+`origin/main`.**
+
+## 23. Why availability is conditional: the upstream data, not the code
+
+Revision 3 called the unreachable combinations "unreachable by construction", which
+was true and explained nothing. The PI supplied the authoritative source and it gives
+the actual reason: **WOA23 does not publish those fields.** The restriction in
+`api/query.py:114` is the API reflecting its upstream, not a limitation the API
+invented.
+
+**Source.** *WOA23 Product Documentation*, NOAA NCEI —
+`https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DOCUMENTATION/WOA23_Product_Documentation.pdf`,
+fetched and text-extracted 2026-08-10; 20 pages. Quotations below are from printed
+pages 11 and 12.
+
+### 23.1 Availability by variable, grid and time span (p11)
+
+> One-degree and quarter-degree Temperature and Salinity fields are NOT available for
+> the 'all' time span.
+>
+> Dissolved Oxygen (and related O2 fields) are available on a one-degree grid and for
+> the 'decav71A0' and 'all' time span.
+>
+> Nitrate, Phosphate, and Silicate fields are available ONLY for one-degree grid and
+> for the 'all' time span.
+>
+> The 'all' time span for oxygen and inorganic nutrients is the time span from
+> 1965-2022.
+>
+> Five-degree grid statistics are available only for the 'all' time span.
+>
+> Quarter-degree monthly fields are ONLY available for A5B4, B5C2, 'decav71A0',
+> 'decav81B0', 'decav91C0', and 'decav' time spans.
+
+**This confirms `query.py:114` directly.** Oxygen and the inorganic nutrients are
+**one-degree only**, so a quarter-degree request for them has no upstream data to
+serve. The code restricting 0.25° to temperature and salinity is faithful to the
+dataset; the 400 it returns is the correct answer, not a gap.
+
+It also settles §17.2 on stronger ground than the argument given there. Enumerating
+the twelve reachable paths as a startup invariant would not merely be requiring
+things we have not observed — **it would be requiring combinations the upstream
+dataset does not publish**, for any store built to WOA23's actual shape.
+
+### 23.2 Depth ranges differ per variable *and* per climatology (p12, Table 4)
+
+> **Table 4.** Depth ranges and standard depth level numbers for annual, seasonal, and
+> monthly statistics of each available oceanographic variable.
+
+| variable (code) | annual | seasonal | monthly |
+|---|---|---|---|
+| Temperature (t) | 0–5500 m (102 levels) | 0–5500 m (102) | 0–1500 m (57) |
+| Salinity (s) | 0–5500 m (102) | 0–5500 m (102) | 0–1500 m (57) |
+| Oxygen (o) | 0–5500 m (102) | **0–1500 m (57)** | 0–1500 m (57) |
+| Nitrate (n) | 0–5500 m (102) | **0–800 m (43)** | **0–800 m (43)** |
+| Phosphate (p) | 0–5500 m (102) | **0–800 m (43)** | **0–800 m (43)** |
+| Silicate (i) | 0–5500 m (102) | **0–800 m (43)** | **0–800 m (43)** |
+
+Table 3 (p11) gives the standard level numbers; the maximum depth of WOA23 is
+**5500 m**, which is the figure `api/query.py:145` already encodes as its `dep1`
+default of `5501`.
+
+**The depth ceiling is therefore a function of (variable, climatology), not a
+constant.** Seasonal nitrate stops at 800 m while annual nitrate reaches 5500 m. A
+startup check cannot express that: the variable and the climatology are both chosen
+per request.
+
+## 24. The purpose, narrowed
+
+Replacing §9's sentence:
+
+> **D1 validates that the configured store resolves and that its required anchor
+> group is a readable Zarr v2 group.** It does not validate, and does not claim to
+> validate, the completeness of any variable / grid / time-span / depth combination.
+
+### 24.1 Non-goals, stated explicitly
+
+- **D1 does not verify that every reachable group exists.** §17.2 settled this, and
+  §23.1 gives the upstream reason: the combinations are conditional by dataset
+  design, not by accident.
+- **A missing non-anchor, request-specific group must be handled by request-level
+  criteria** — the 400 at `query.py:119` for an unavailable grid/parameter pairing,
+  or the per-request failure for a group that is absent. **It must never prevent
+  startup.** A store lacking seasonal silicate should fail seasonal-silicate requests
+  and serve everything else.
+- **D1 does not validate depth.** Depth availability varies by variable *and*
+  climatology (§23.2) and is selected per request. It stays a request-level criterion
+  and §26 pins it with regressions **so that it is not confused with startup
+  validation**.
+- **D1 does not validate time spans.** The API surfaces `time_period`, not WOA23's
+  time-span axis; whether the two need reconciling is out of scope here.
+- **D1 does not check data content.** Metadata only (§11.3), still.
+
+### 24.2 What "required anchor group" means, precisely
+
+`<store>/1_degree/annual/TS` — one-degree, annual, temperature/salinity. Per §23.1
+this is the combination WOA23 publishes most broadly, and per §17.2 it is the API's
+default and carries 22 of the exercised contract cases. **If that group cannot be
+opened, no default request can be served and the store is not the store this service
+is for.** That is the whole of the claim.
+
+## 25. The structural guarantee (PI-selected)
+
+Revision 3 offered (i) an asserted equivalence with `query.py` untouched, and (ii) a
+structural guarantee. **The PI selected (ii).** Revision 3's §18.4 is superseded.
+
+### 25.1 What changes
+
+`api/store_paths.py` provides the builder, and **all three call sites use it**:
+`api/config.py` (import-time), `api/app.py` (lifespan) and **`api/query.py:139`**.
+
+**The output must be byte-identical to today's expression, including the double
+slash.** `query.py:139` is `f"{zarr_store_path}/{grid_path}/{subgroup}"`, so with the
+reference-matching literal `'data/'` it yields `data//1_degree/annual/TS`. The builder
+reproduces that exactly — it **concatenates, it does not normalise**. Any tidying of
+the double slash would be a behavioural change disguised as a refactor, and it would
+change the string whose hash decides `set` iteration order — the very mechanism spec
+003 is about.
+
+### 25.2 What it costs, stated plainly
+
+**This touches the read path**, which is what C1 and C2 validated. Therefore:
+
+- **C1 must be re-run** — 5.2A byte-exact, 64 cases — and must still be 64/64 MATCH.
+- **C2 must be re-run** — three cycles, 5.2B semantic — and must still pass, with the
+  seed-diversity observation reported as it comes.
+- Until both are re-run, **the existing C1 and C2 results do not describe the changed
+  candidate** and must not be cited as if they did.
+
+This is the price of the stronger guarantee and it is the PI's call to pay it. The
+alternative was a test asserting two expressions agree, which a future edit to
+`query.py` could break silently.
+
+### 25.3 The property this buys
+
+D1-13 stops being an assertion about two pieces of code agreeing and becomes
+structural: there is **one** builder, so validation cannot check a path the read path
+does not use. The equivalence test remains as a regression **against the old literal
+expression**, which is what proves the refactor changed nothing:
+
+> **D1-13a:** `group_path(store, grid, subgroup) == f"{store}/{grid}/{subgroup}"` for a
+> table of inputs including trailing-slash, empty and absolute stores — pinning the
+> builder to the literal it replaces, including the double slash.
+
+## 26. Depth regressions — request level, and kept apart from startup
+
+Per the PI: one supported and one unsupported depth, at request level, so depth is
+never read as something startup validation covers.
+
+### 26.1 What already exists
+
+The contract suite already pins an out-of-range depth, and **asymmetrically**:
+
+| case | params | recorded status |
+|---|---|---|
+| `C18` | `dep0=6000, dep1=7000` | **200** |
+| `C18-csv` | `dep0=6000, dep1=7000` | **400** |
+
+Both were **byte-exact MATCH in C1**. 6000–7000 m is beyond WOA23's 5500 m maximum
+(§23.2), so this is the "beyond the dataset entirely" case, and the JSON/CSV
+asymmetry is existing recorded behaviour rather than something this spec introduces.
+
+### 26.2 What is missing, and is the more informative case
+
+A depth that is **within** WOA23's overall maximum but **outside that variable and
+climatology's range** — the distinction Table 4 makes and `C18` does not reach:
+
+| new case | request | why |
+|---|---|---|
+| **D1-D1 (supported)** | annual nitrate, `dep0=0, dep1=800` | inside annual nitrate's 0–5500 m; must return data |
+| **D1-D2 (unsupported)** | **seasonal** nitrate, `dep0=3000, dep1=4000` | annual nitrate reaches 5500 m but **seasonal nitrate stops at 800 m** (Table 4). Within WOA23's maximum, outside this combination's range |
+
+**The required outcome of D1-D2 is not asserted here, because it has not been
+measured.** It could be an empty 200, a 400, or an error, and each would be a
+different finding. The regression's job is to **pin whatever it is** so that a later
+change cannot alter it unnoticed — and to establish it as a **request-level**
+behaviour. If it turns out to be something undesirable, that is a separate decision,
+in the shape of spec 003's, not a licence for D1 to start rejecting stores.
+
+### 26.3 The boundary this protects
+
+| | decided at | by what |
+|---|---|---|
+| store resolves, anchor group opens | **startup** | D1 |
+| grid/parameter pairing unavailable upstream | **request** | `query.py:119`, 400 |
+| requested depth outside this variable+climatology's range | **request** | the depth slice, pinned by D1-D1/D1-D2 |
+| a non-anchor group absent from the store | **request** | per-request failure — **never startup** |
+
+Only the first row is D1's. **Three of the four rows are request-level, and the
+service must remain able to start and serve everything else when any of them fails.**
+
+## 27. Updated test matrix additions
+
+Carrying forward §19 and replacing D1-13:
+
+| case | assertion |
+|---|---|
+| **D1-13a** | the shared builder reproduces `f"{store}/{grid}/{subgroup}"` exactly, over trailing-slash / empty / absolute / relative stores, **including the double slash** |
+| **D1-13b** | `api/query.py` calls the shared builder and contains no second path-building expression |
+| **D1-D1** | annual nitrate at 0–800 m returns data (supported depth, request level) |
+| **D1-D2** | seasonal nitrate at 3000–4000 m — **pin the observed behaviour**, whatever it is; assert only that it is a per-request outcome and that the service is still serving afterwards |
+| **D1-D3** | a request for a group absent from the store fails **that request** and the service continues to serve the anchor group — the non-goal of §24.1, asserted |
+
+`C18` / `C18-csv` stay as they are, unchanged, as the beyond-dataset case.
+
+## 28. Sequencing, revised for the structural guarantee
+
+1. `api/store_paths.py` + D1-13a — pure, offline, **no behaviour change**.
+2. `api/query.py:139` switched to the builder + D1-13b. **This is the read-path
+   change.** Offline suites must be green before anything else.
+3. **C1 re-run** — 5.2A, 64/64 expected. Needs its own authorisation.
+4. **C2 re-run** — three cycles, 5.2B. Needs its own authorisation.
+5. Only then the `config.py` and `app.py` call sites, and the D1 matrix.
+
+Steps 3 and 4 gate step 5: adding validation on top of an unverified read-path change
+would leave two changes to disentangle if anything failed.
+
+## 29. Boundaries
+
+- **Nothing implemented.** `api/` byte-identical to `origin/main`.
+- **No VM24 action**, no PM2, no deployment validation, no performance measurement.
+- **Row order untouched** — spec 003 independent and undecided.
+- The C1/C2 re-runs in §28 are **named as required, not requested**; each needs its
+  own authorisation when the time comes.
+- §23's quotations are from the official WOA23 documentation, extracted from the PDF
+  at the URL above. The depth table is reproduced for the combinations the API can
+  reach; the document contains more.
