@@ -6,6 +6,7 @@ document authorises a candidate change.
 
 | rev | date | change |
 |---|---|---|
+| 8 | 2026-08-10 | **Three reporting corrections** — §48-51. The runner's readiness line claimed the store had not been touched; under the patched candidate the lifespan has already read the anchor group's metadata by then, so it is corrected in the runner, its comment, spec 002 and a CLI assertion, and the resulting **asymmetry between the arms** is named — harmless to 5.2A, relevant to any future latency work. **64/64 MATCH does not prove the path strings are identical**: different strings can denote the same location, so the builder equivalence is cited from the offline D1-13 test instead, as separate evidence for a separate claim. **An unchanged mtime is an observation, not a guarantee**: the basis for 'production's store was not written' is that the runner performs no write operation, with the mtime corroborating. §51 states how the 2026-08-10 C1 rerun may be cited and what it does not establish. |
 | 7 | 2026-08-10 | **`source_time_span` and `climatology` separated** — §40. The WOA23 time spans (`all`, `decav`, …) are source provenance, not an API request parameter; `climatology` (`annual`/`seasonal`/`monthly`) is what a user selects. The Zarr group path carries **no source_time_span at all**, so §11.1's question about needing `all` in a path does not arise. Depth cases restated in full with source coverage 1965-2022 at fixture/documentation level and grid/parameter/climatology/depth as request dimensions. **D1's scope stated definitively** — §41. **Chunk wording corrected** — §42: 'reads Zarr metadata files only, no array data chunk including coordinate chunks'; no claim about *which* metadata files, since the audit hook observed exactly one (`.zgroup`) on a consolidated fixture and that is store-dependent; observer scope stated (it sees `open`, not `listdir`). **D1-D3's six requirements all demonstrated offline** — §43, including that the request reaches the group open rather than the upstream 400, and that a fixture too thin to serve a successful request cannot demonstrate request-level failure. **D1-11 tabulated per fixture as split-only** — §44. Builder input coverage enumerated — §45. Nothing applied. |
 | 6 | 2026-08-10 | **Correction, measured: `xr.open_zarr(chunks=None)` does read chunks** — it is lazy about data variables but materialises the coordinate arrays, which are stored as chunks (`depth/0`, `lat/0`, `lon/0`). The proposed check would have satisfied 'metadata only' as I had written it and violated the condition as stated. **Replaced with `zarr.open_group(mode="r")`: zero chunk reads, identical detection** of an empty directory, an unparseable `.zgroup` and an unsupported format; patch regenerated (185 lines) and re-checked. **Three cases move offline** on a synthetic isolated fixture that never involves production's store — D1-10 (audit hook, 0 chunk reads on all seven fixtures **including the valid one**), D1-D3, and a synthetic positive control for D1-8 (the real store still required). Conditions checklist and revised step list: steps 1-3 are now entirely offline. Holding for authorisation. |
 | 5 | 2026-08-10 | **Source citation** for the WOA23 documentation — URL, sha256 `140aa25f…`, retrieval date, page and table anchors for §23, and a note that the PDF's embedded `/Title` still says WOA18 while the body is WOA23. **`D1-D2` renamed `D1-depth-out-of-range` and marked CHARACTERIZATION PENDING**: the first measurement after implementation must pin status (JSON and CSV separately, since `C18`/`C18-csv` already differ), body/error text, and that the outcome is request-level — it may not stay unasserted. `D1-D1` renamed `D1-depth-supported`. **Proposed diff committed as `specs/patches/004-store-paths.patch`**, produced outside the repository and verified with `git apply --check` — not applied. Sandbox exercise of the patch **corrected this spec twice**: N3, an empty directory, passes the import check and is caught at lifespan, not at import as revision 3 claimed; and D1-11 is correspondingly narrower — `--check-config` fails for N2 and N4 only, succeeding for N3, N5, N6 and P1. Nothing implemented. |
@@ -1414,3 +1415,94 @@ no VM24, no HTTP to production or staging, no C1/C2, no deployment or performanc
 work. The measurements in §42 and §43 were made against a **throwaway export of
 `HEAD` with the patch applied inside it**, in a temporary directory, using synthetic
 fixtures; the repository's `api/` was never written to.
+
+---
+
+# Revision 8 — three reporting corrections, and how the C1 rerun may be cited
+
+Offline. No VM24, no re-run, no D1 characterization, no deployment or performance
+work. The C1 rerun result stands; what changes is how it is described.
+
+## 48. "The store has not been touched" was false, and is fixed
+
+The runner printed, at process readiness:
+
+> both arms are PROCESS-ready (OpenAPI 200). The store has not been touched
+> and is not known to be readable
+
+**Under the patched candidate that is wrong.** The lifespan opens the anchor group's
+Zarr metadata during startup — before any HTTP is served — so by the time a 200 comes
+back the candidate has already read metadata for `1_degree/annual/TS`.
+
+Corrected, in the runner's output, its comment, this spec and a CLI assertion that
+pins it:
+
+> This probe read nothing from the store. The candidate's startup anchor validation
+> has already read Zarr **metadata** for `1_degree/annual/TS`, and **no data or
+> coordinate chunk**; the reference validates nothing at startup. Neither arm is
+> known to serve **data** yet — that is the probe below.
+
+**The arms are now asymmetric at this point** and the runner says so: the candidate
+has read one group's metadata, the reference nothing. It cannot change any byte
+either returns, which is all 5.2A compares, so **the C1 result is unaffected**. It
+would matter to a *latency* comparison — a warmed metadata cache is exactly the
+asymmetry S1 removed from the readiness probe — and no latency is measured in `--c1`
+or `--c2-cycle`. Whoever designs S2 performance validation inherits this and should
+find it written down rather than discover it.
+
+## 49. 64/64 MATCH does not prove the path strings are identical
+
+The C1 rerun report argued that if `group_path` produced different strings the 64
+cases could not have matched byte-for-byte. **That does not follow.** Two different
+path strings can denote the same location — a doubled slash, a `./` segment, a
+symlinked parent — and would yield identical responses. Byte-identical output is
+evidence the arms read the same *data*, not that they built the same *string*.
+
+The correct statement, and the one to cite:
+
+> **5.2A: 64/64 byte-exact MATCH.** Separately, and offline, `bench/test_d1_store_validation.py`
+> asserts that the shared builder reproduces `query.py`'s previous expression exactly —
+> including the double slash — over trailing-slash, bare, absolute, absolute-with-slash,
+> empty and dot-relative stores.
+
+Two independent pieces of evidence for two different claims. Neither substitutes for
+the other, and the contract result is not evidence about string construction.
+
+## 50. An unchanged mtime is an observation, not a guarantee
+
+The report cited production's store mtime as unchanged. That is worth recording as an
+observation and is **not** proof that nothing could have been written.
+
+- **What it shows:** no modification was observed at that path.
+- **What it does not show:** that the run was incapable of writing. The account owns
+  the store directory; the mtime of a directory does not change when a file inside a
+  subdirectory is rewritten in place, and an unchanged timestamp is consistent with
+  several things besides "nothing happened".
+- **The actual basis** is behavioural: the runner performs no write operation against
+  the store. Both arms open it for reading; the candidate's validation uses
+  `zarr.open_group(mode="r")`; the staging `data` entry is a symlink to production's
+  directory and nothing in the run writes through it.
+
+So the claim is **"the run performs no writes to the store, and no modification was
+observed"** — the first clause carrying the weight, the second corroborating. This is
+the same distinction §7a.3c drew for the package clone: mode bits and behaviour are
+different kinds of assurance, and an observation after the fact is the weakest of the
+three.
+
+## 51. How the C1 rerun of 2026-08-10 may be cited
+
+**Scope: `C1 PASS — isolated package-tree contract correctness after D1 patch`.**
+
+Established:
+
+- the real `1_degree/annual/TS` opens under `zarr.open_group(mode="r")` — the first
+  time the patched validation met the production store, so **D1-8 is no longer
+  supported only by a synthetic fixture**;
+- 5.2A **64/64 byte-exact MATCH**, RC/CR 32/32, 15 error-status cases included;
+- `api/store_paths.py` is carried in the candidate's five-file source provenance;
+- clone integrity 3/3, six processes, request ceilings respected, production
+  untouched, cleanup PASS.
+
+**Not established, and not to be written as if it were:** D1 completion; any depth
+characterization; deployment or PM2 validation; any performance conclusion; and
+anything about C2 under the patched candidate.

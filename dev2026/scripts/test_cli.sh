@@ -555,6 +555,33 @@ check "and not the separated form" "no" \
       "$(has_text "$(grep -v '^[[:space:]]*#' "$RUNNER")" '--env-python-arg -S')"
 
 echo
+echo "readiness does not claim the store is untouched"
+# It used to. The candidate's lifespan now reads the anchor group's Zarr metadata
+# during startup, before any HTTP is served, so "the store has not been touched" was
+# false the moment spec 004's patch landed. The claim is split: this probe read
+# nothing; startup already read metadata; no chunk was read either way.
+RUNSRC3="$(cat "$RUNNER")"
+check "the stale claim is gone" "no" \
+      "$(has_text "$RUNSRC3" "The store has not been touched")"
+check "the probe's own reach is stated" "yes" \
+      "$(has_text "$RUNSRC3" "This probe read nothing from the store")"
+check "and what startup already read is stated" "yes" \
+      "$(has_text "$RUNSRC3" "has already read Zarr METADATA for 1_degree/annual/TS")"
+check "including that no chunk was read" "yes" \
+      "$(has_text "$RUNSRC3" "no data or coordinate chunk")"
+check "the arms' asymmetry is named" "yes" \
+      "$(has_text "$RUNSRC3" "the reference validates nothing at startup")"
+check "and data readiness is still deferred to the probe" "yes" \
+      "$(has_text "$RUNSRC3" "Neither arm is known to serve DATA yet")"
+# The asymmetry is harmless to 5.2A and would not be to a latency comparison; the
+# runner says so rather than leaving it for someone to notice later.
+# Matched on a fragment that does not straddle the wrap. Fifth time this shape of
+# self-inflicted miss has come up in this file: the phrase is in the source, split
+# across two comment lines, and a contiguous match reports it absent.
+check "the latency implication is recorded" "yes" \
+      "$(has_text "$RUNSRC3" "would matter to a latency")"
+
+echo
 echo "the C2 process count is derived, never written down"
 # 8 is what production's measured -w 2 implies, not a fact about the system. A
 # reconfiguration to four workers makes it twelve, and a count that did not move

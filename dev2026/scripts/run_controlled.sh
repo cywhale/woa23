@@ -1195,21 +1195,35 @@ fi
 
 # ------------------------------------------------------- PROCESS readiness only ---
 # The OpenAPI document. It exercises the whole stack that has to be up — gunicorn,
-# the uvicorn worker, FastAPI routing — and reads **nothing** from the Zarr store, so
-# waiting for the servers to appear costs neither arm a chunk read.
+# the uvicorn worker, FastAPI routing — and **this probe** reads nothing from the
+# Zarr store, so waiting for the servers to appear costs neither arm a chunk read.
 #
-# That is also its limit, and the limit is the point. **A 200 here says the process
-# is serving. It says nothing whatever about the store.** D1 measured this directly:
-# with WOA23_ZARR_STORE pointing at a path that does not exist, at an empty
-# directory, or at an ordinary file, the app imports, starts, serves this document
-# with a 200, and fails only when a request finally reaches the data path. Treating
-# this as "ready" in the sense of "ready to serve data" would let all three of those
-# reach the contract gate looking healthy.
+# What has already happened by the time this runs is NOT nothing, and saying so was
+# wrong until spec 004 landed. Under the patched candidate the lifespan opens the
+# anchor group's **Zarr metadata** during startup — before any HTTP is served — so
+# by the time a 200 comes back the candidate has read `.zgroup`-level metadata for
+# `1_degree/annual/TS`. It has read **no data or coordinate chunk**; that is asserted
+# offline by bench/test_d1_store_validation.py with an audit hook, not assumed.
 #
-# STORE readiness — that the configured store can actually be opened and read — is
-# established by the symmetric data probe below and nowhere else, and it is a
-# *separate stage*. Nothing between here and there may be described as the store
-# being ready.
+# The reference does not do this: `woa23_app.py` is unmodified and validates nothing
+# at startup. So the two arms differ in what they have read by this point — metadata
+# for one group on the candidate, nothing on the reference. That cannot change any
+# byte either returns, which is what 5.2A compares. It would matter to a latency
+# comparison, where a warmed metadata cache is exactly the kind of asymmetry S1 went
+# to trouble to remove; no latency is measured in --c1 or --c2-cycle.
+#
+# That is also this probe's limit, and the limit is the point. **A 200 here says the
+# process is serving.** Under the UNPATCHED candidate it said nothing at all about
+# the store — D1 measured that directly: with WOA23_ZARR_STORE pointing at a path
+# that does not exist, an empty directory, or an ordinary file, the app imported,
+# started, served this document with a 200, and failed only when a request reached
+# the data path. Under the patched candidate those three cannot get this far, but a
+# 200 still does not establish that a *data* read will succeed.
+#
+# STORE readiness — that the configured store can actually be opened and read for
+# data — is established by the symmetric data probe below and nowhere else, and it
+# is a *separate stage*. Nothing between here and there may be described as the
+# store being ready to serve data.
 #
 # The earlier probe issued a real data query, to the reference first. That gave the
 # reference a warm store handle and a populated page cache before the candidate had
@@ -1226,8 +1240,11 @@ process_ready() {           # process_ready <port> — serving, NOT store-ready
 }
 process_ready "$REF_PORT"  || { echo "reference process not ready; see $RUN/reference.log" >&2; exit 1; }
 process_ready "$CAND_PORT" || { echo "candidate process not ready; see $RUN/candidate.log" >&2; exit 1; }
-echo "  both arms are PROCESS-ready (OpenAPI 200). The store has not been touched"
-echo "  and is not known to be readable; that is the data probe's job, below."
+echo "  both arms are PROCESS-ready (OpenAPI 200)."
+echo "    This probe read nothing from the store. The candidate's startup anchor"
+echo "    validation has already read Zarr METADATA for 1_degree/annual/TS, and no"
+echo "    data or coordinate chunk; the reference validates nothing at startup."
+echo "    Neither arm is known to serve DATA yet — that is the probe below."
 
 # The authorisation is for a specific set of processes, so the set is *verified*,
 # not merely printed. A run that has five or seven is outside what was granted —

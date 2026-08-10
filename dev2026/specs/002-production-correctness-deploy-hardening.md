@@ -846,8 +846,12 @@ D1 is what shows why that mattered.
 | what a green signal licenses | starting the gate | nothing beyond "the store opened for this query" |
 | what a green signal does **not** license | any statement about the store | any statement about the whole store, or about latency |
 
-**A 200 on the OpenAPI document says the process is serving and says nothing about
-the store.** D1 measured this from the other end: fixtures N2, N3 and N4 — a
+**A 200 on the OpenAPI document says the process is serving.** Read this as of the
+**unpatched** candidate, which is what C1 and C2 ran: it then said nothing about the
+store at all. Spec 004's patch changes that — the candidate's lifespan now reads the
+anchor group's Zarr metadata before serving — so under the patched candidate a 200
+implies the anchor group opened. It still does not imply a *data* read will succeed,
+and the probe itself still reads nothing from the store. D1 measured this from the other end: fixtures N2, N3 and N4 — a
 nonexistent path, an empty directory, and an ordinary file — all import cleanly, pass
 `gunicorn --check-config`, and fail only when a request reaches the data path. A
 process in any of those three states is one whose OpenAPI endpoint has every reason
