@@ -104,13 +104,21 @@ check "a port an earlier run bound is known to have been used" "0" \
 check "and the row says which run" "yes" \
       "$(contains "$(port_previously_used 18091)" "c2c")"
 check "a port nothing has used is not in it" "1" \
-      "$(port_previously_used 18121 >/dev/null 2>&1; echo $?)"
+      "$(port_previously_used 18141 >/dev/null 2>&1; echo $?)"
 check "production's own ports are listed, so they can never be proposed" "0" \
       "$(port_previously_used 8050 >/dev/null; echo $?)"
 check "and so is the isolated scheduler D2b used" "0" \
       "$(port_previously_used 18787 >/dev/null; echo $?)"
 
-check "the status line names a first use" "18121 first-use" "$(port_ledger_status 18121)"
+check "the status line names a first use" "18141 first-use" "$(port_ledger_status 18141)"
+
+# c2e never bound its ports — it aborted before any service started — but its
+# evidence is named against them, so they are listed and the row says which.
+# "Never bound" and "free to propose again" are not the same statement.
+check "a port allocated to a run that never started is still listed" "0" \
+      "$(port_previously_used 18121 >/dev/null; echo $?)"
+check "and the row says it was never bound" "yes" \
+      "$(contains "$(port_previously_used 18121)" "never bound")"
 check "and marks a reuse as a reuse" "yes" \
       "$(contains "$(port_ledger_status 18091)" "REUSED")"
 
@@ -124,9 +132,9 @@ check "and a longer one does not match a shorter port" "1" \
 # turn the check off the moment the file went missing.
 PORTS_LEDGER=/nonexistent/ports.tsv
 check "an unreadable ledger reports 2, not 'unused'" "2" \
-      "$(port_previously_used 18121 >/dev/null 2>&1; echo $?)"
+      "$(port_previously_used 18141 >/dev/null 2>&1; echo $?)"
 check "and the status line says so rather than guessing" "yes" \
-      "$(contains "$(port_ledger_status 18121 2>&1)" "UNKNOWN")"
+      "$(contains "$(port_ledger_status 18141 2>&1)" "UNKNOWN")"
 PORTS_LEDGER="$HERE/ports_used.tsv"
 
 # Every port in the ledger must be a port. A typo'd row is a row that silently

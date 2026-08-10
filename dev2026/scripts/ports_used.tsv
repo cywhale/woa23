@@ -12,6 +12,11 @@
 # anything — it means no run of THIS campaign recorded binding it. Production's own
 # ports are listed because they are the ones that must never be touched at all.
 #
+# A port allocated to a run that never started is listed too, and said to be so.
+# It was never bound, so it is not "used" in the sense the host would report — but
+# a run's evidence is named against the ports it was launched with, and proposing
+# one of them again as fresh is the same mistake in a quieter form.
+#
 # Maintained by hand and by commit. The runners cannot append to it: they execute
 # from a throwaway export, so anything they wrote would be discarded with it. Adding
 # the ports of a completed run is a deliberate edit before the next one is proposed.
@@ -44,3 +49,6 @@
 18111	candidate arm	S2 rerun	authorised run parameter, this campaign
 18112	reference arm	S2 rerun	authorised run parameter, this campaign
 18839	isolated dask scheduler	S2 rerun	authorised run parameter, this campaign
+18121	candidate arm	c2e (INVALID_PRE_START)	allocated, never bound: aborted at clone-integrity preflight before any service started
+18122	reference arm	c2e (INVALID_PRE_START)	allocated, never bound
+18849	isolated dask scheduler	c2e (INVALID_PRE_START)	allocated, never bound
