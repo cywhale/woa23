@@ -34,8 +34,11 @@ has_text() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 # $1 = the seed each cycle reports ("distinct" or "same")
 # $2 = a cycle number that should fail, or "" for none
 # $3 = a cycle number after which leftover run state appears, or ""
+# $4 = the --graceful-timeout the arms report, default 10. 30 is gunicorn's own
+#      default, which is what the arms inherited when C2 cycle 1 stranded an
+#      arbiter, and it is larger than STOP_WAIT_SECS.
 build_env() {
-  local seeds="$1" fail_at="$2" leftover_after="$3"
+  local seeds="$1" fail_at="$2" leftover_after="$3" grace="${4:-10}"
   local T; T="$(mktemp -d)"
   mkdir -p "$T/.local/bin" "$T/dev2026/scripts" "$T/dev2026/run" "$T/dev2026/results"
 
@@ -95,6 +98,23 @@ for arm in candidate reference; do
 JSON
 done
 echo '{"kind":"s2_package_clone_environment"}' > "\$HERE/results/\${label}_environment.json"
+# The shutdown budget and the arms' launch argv. The stub writes them because the
+# real runner does: the summary reads back what each cycle allowed its arms at stop
+# time, and a cycle that produced no such record is not summarisable.
+cat > "\$HERE/results/\${label}_shutdown_budget.json" <<JSON
+{"kind":"shutdown_budget","label":"\$label","arm_graceful_timeout":$grace,
+ "stop_wait_secs":20,"stop_wait_source":"default","holds":true}
+JSON
+for arm in candidate reference; do
+  app=woa23_app:app
+  [ "\$arm" = candidate ] && app=api.app:app
+  cat > "\$HERE/results/\${label}_meta_\${arm}.json" <<JSON
+{"kind":"backend_meta","label":"\$arm",
+ "launch_argv":["python3.11","-S","-m","gunicorn","\$app","-w","2",
+   "-k","uvicorn.workers.UvicornWorker","--graceful-timeout","$grace",
+   "-b","127.0.0.1:18071","--timeout","120"]}
+JSON
+done
 
 # A cycle that cannot confirm its cleanup leaves run state behind. This is how the
 # driver is told, and the next cycle must refuse to start on it.
@@ -229,6 +249,30 @@ check "and it says not to remove it to make the next cycle run" "yes" \
       "$(has_text "$(cat "$T/err.txt")" "do not remove it to make the next cycle run")"
 check "no summary was written" "no" \
       "$([ -f "$T/dev2026/results/c2_summary.json" ] && echo yes || echo no)"
+rm -r "$T"
+
+# ======================================== a cycle whose stop window was too short ===
+echo
+echo "a cycle that could not outlast its own arms is not a pass"
+# The C2 cycle-1 configuration, end to end: the arms report gunicorn's 30-second
+# default while the harness waits 20. Every gate inside the cycle passes and the
+# seeds are distinct, so the only thing standing between this and a reported PASS is
+# whether anything reads the budget back.
+T="$(build_env distinct "" "" 30)"
+rc="$(drive "$T")"
+out="$(cat "$T/out.txt")"
+check "the driver does not exit 0" "yes" "$([ "$rc" != 0 ] && echo yes || echo no)"
+check "it is a FAIL, not an INSUFFICIENT" "1" "$rc"
+check "all three cycles still ran" "3" "$(cat "$T/dev2026/run/.calls")"
+check "the budget block reports INCONSISTENT" "yes" \
+      "$(has_text "$out" "status: INCONSISTENT")"
+check "and names the cycle and both numbers" "yes" \
+      "$(has_text "$out" "STOP_WAIT_SECS=20 does not exceed")"
+check "the outcome is FAIL" "yes" "$(has_text "$out" "C2 OUTCOME: FAIL")"
+check "and the reason is the configuration, not the contract" "yes" \
+      "$(has_text "$out" "authorised")"
+check "while the semantic gate is still reported as having passed" "yes" \
+      "$(has_text "$out" "gate: PASS")"
 rm -r "$T"
 
 echo

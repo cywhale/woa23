@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bench.c2_summary import (  # noqa: E402
     OUTCOME_EXIT, load_cycle, order_stability, overall_outcome, seed_diversity,
-    verdict,
+    shutdown_budget, verdict,
 )
 
 PASS = 0
@@ -45,8 +45,27 @@ def case(cid, ref_order, cand_order, verdict_="MATCH"):
 
 def write_cycle(root, label, *, gate="PASS", variant="5.2B", seed=None,
                 cases=None, skip=(), hashseed_env=None, randomization=1,
-                n_strings=11):
+                n_strings=11, stop_wait=20, grace=10, arm_grace=None,
+                stop_wait_source="default"):
     root.mkdir(parents=True, exist_ok=True)
+    if "shutdown_budget" not in skip:
+        (root / f"{label}_shutdown_budget.json").write_text(json.dumps({
+            "kind": "shutdown_budget", "label": label,
+            "arm_graceful_timeout": grace, "stop_wait_secs": stop_wait,
+            "stop_wait_source": stop_wait_source, "holds": True}))
+    for arm in ("candidate", "reference"):
+        if f"meta_{arm}" in skip:
+            continue
+        # The launch argv is what the summary reads the arms' budget out of, so the
+        # fixture carries a real one rather than the number on its own.
+        app = "api.app:app" if arm == "candidate" else "woa23_app:app"
+        argv = ["python3.11", "-S", "-m", "gunicorn", app, "-w", "2",
+                "-k", "uvicorn.workers.UvicornWorker", "--timeout", "120"]
+        launched = arm_grace if arm_grace is not None else grace
+        if launched is not None:
+            argv += ["--graceful-timeout", str(launched)]
+        (root / f"{label}_meta_{arm}.json").write_text(json.dumps({
+            "kind": "backend_meta", "label": arm, "launch_argv": argv}))
     if "contract" not in skip:
         (root / f"{label}_contract.json").write_text(json.dumps({
             "kind": "contract_diff", "gate": gate, "variant": variant,
@@ -349,6 +368,103 @@ with tempfile.TemporaryDirectory() as td:
     build(root, c1={"seed": "a" * 64}, c2={"seed": "b" * 64, "gate": "FAIL"},
           c3={"seed": "c" * 64})
     check("a failed gate exits 1", 1, cli(*LABELS).returncode)
+
+
+print()
+print("the shutdown budget each cycle ran under, read back from its own evidence")
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    SEEDS = {"c1": {"seed": "a" * 64}, "c2": {"seed": "b" * 64},
+             "c3": {"seed": "c" * 64}}
+
+    cycles = build(root, **SEEDS)
+    b = shutdown_budget(cycles)
+    check("three well-configured cycles are CONSISTENT", "CONSISTENT", b["status"])
+    check("and the arms' launched value is read from the argv, not the record",
+          [10, 10, 10], [e["candidate"] for e in b["per_cycle"]])
+    check("the reference is read too", [10, 10, 10],
+          [e["reference"] for e in b["per_cycle"]])
+    check("and where STOP_WAIT_SECS came from is carried",
+          ["default"] * 3, [e["stop_wait_source"] for e in b["per_cycle"]])
+
+    # The C2 cycle-1 shape: the arms take longer than the harness waits. Here it is
+    # a configuration that could produce it, caught from the record instead of from
+    # a stranded process.
+    cycles = build(root, **dict(SEEDS, c2={"seed": "b" * 64, "stop_wait": 20,
+                                           "grace": 30}))
+    b = shutdown_budget(cycles)
+    check("a stop window no longer than the arms' budget is INCONSISTENT",
+          "INCONSISTENT", b["status"])
+    check("and the cycle is named", True,
+          any("c2_cycle2" in p_ for p_ in b["problems"]))
+    check("with both numbers in the message", True,
+          any("STOP_WAIT_SECS=20" in p_ and "30" in p_ for p_ in b["problems"]))
+
+    cycles = build(root, **dict(SEEDS, c3={"seed": "c" * 64, "grace": None}))
+    b = shutdown_budget(cycles)
+    check("an arm launched with no --graceful-timeout is INCONSISTENT",
+          "INCONSISTENT", b["status"])
+    check("and it is not silently read as gunicorn's default", True,
+          all(e.get("candidate") != 30 for e in b["per_cycle"]))
+
+    # The record and the process disagreeing is the case that matters most: the
+    # budget file says what the run intended, the argv says what it did.
+    cycles = build(root, **dict(SEEDS, c1={"seed": "a" * 64, "grace": 10,
+                                           "arm_grace": 30}))
+    b = shutdown_budget(cycles)
+    check("an arm launched with a value the cycle did not record is INCONSISTENT",
+          "INCONSISTENT", b["status"])
+    check("and the message contrasts the two", True,
+          any("30s" in p_ and "10s" in p_ for p_ in b["problems"]))
+
+# A fresh directory: `build` writes into whatever is already there, so skipping a
+# file in a reused root leaves the previous case's copy of it in place and the test
+# would pass for the wrong reason.
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    for i, label in enumerate(LABELS, start=1):
+        write_cycle(root, label, seed=chr(96 + i) * 64,
+                    skip=("shutdown_budget",) if i == 2 else ())
+    cycles = [load_cycle(root, label) for label in LABELS]
+    b = shutdown_budget(cycles)
+    check("a cycle with no recorded budget is INCONSISTENT", "INCONSISTENT",
+          b["status"])
+    check("and the missing artefact also fails the verdict closed", "FAIL",
+          verdict(cycles)["gate"])
+
+print()
+print("an unconfirmed shutdown budget outranks the gates that ran inside it")
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    SEEDS = {"c1": {"seed": "a" * 64}, "c2": {"seed": "b" * 64},
+             "c3": {"seed": "c" * 64}}
+
+    cycles = build(root, **SEEDS)
+    v, sd, ok = verdict(cycles), seed_diversity(cycles), shutdown_budget(cycles)
+    check("a clean run is unaffected by the new input", "PASS",
+          overall_outcome(v, sd, ok)["outcome"])
+    check("and the budget status is carried in the outcome", "CONSISTENT",
+          overall_outcome(v, sd, ok)["shutdown_budget"])
+
+    bad = {"status": "INCONSISTENT", "per_cycle": [], "problems": ["x"]}
+    o = overall_outcome(v, sd, bad)
+    check("three passing gates do not survive an unconfirmed budget", "FAIL",
+          o["outcome"])
+    check("and it exits non-zero", 1, o["exit_code"])
+    check("the reason names the configuration, not the contract", True,
+          "authorised" in o["because"])
+    check("the semantic gate is still reported as having passed", "PASS",
+          o["contract_gate"])
+
+    # Downward only. There is no arrangement of budget records that turns a failing
+    # contract into a pass.
+    vfail = dict(v, gate="FAIL")
+    check("a consistent budget cannot rescue a failed gate", "FAIL",
+          overall_outcome(vfail, sd, ok)["outcome"])
+    check("omitting the argument keeps the old two-input behaviour", "PASS",
+          overall_outcome(v, sd)["outcome"])
+    check("and records no budget status when none was supplied", None,
+          overall_outcome(v, sd)["shutdown_budget"])
 
 
 print()

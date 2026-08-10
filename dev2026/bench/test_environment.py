@@ -226,6 +226,63 @@ def test_worker_count_survives_hostile_argv() -> None:
     check("an empty argv is an error", n([]) is None)
 
 
+def test_graceful_timeout_is_read_not_assumed() -> None:
+    """The value C2 cycle 1 was never asked for.
+
+    The arms' launch argv was already being recorded when that cycle stranded an
+    arbiter. What was missing was anything that read it: gunicorn's default of 30 s
+    was in force, `STOP_WAIT_SECS` was 20, and both facts were sitting in the
+    evidence unexamined. So absence is an error here, never a silent fallback to
+    whatever the library would have done.
+    """
+    from bench.collect_backend_meta import graceful_timeout
+
+    def n(argv):
+        return graceful_timeout(argv)[0]
+
+    def why(argv):
+        return graceful_timeout(argv)[1] or ""
+
+    base = ["gunicorn", "api.app:app", "-k", "uvicorn.workers.UvicornWorker"]
+    check("--graceful-timeout N is read", n(base + ["--graceful-timeout", "10"]) == 10)
+    check("--graceful-timeout=N is read", n(base + ["--graceful-timeout=10"]) == 10)
+    check("the arms' actual shape gives 10",
+          n(["/home/odbadmin/.pyenv/versions/py311/bin/python3.11", "-S", "-m",
+             "gunicorn", "api.app:app", "-w", "2", "-k",
+             "uvicorn.workers.UvicornWorker", "--graceful-timeout", "10",
+             "-b", "127.0.0.1:18071", "--timeout", "120"]) == 10)
+
+    check("absence is an error, not gunicorn's 30-second default",
+          n(base) is None)
+    check("and the error says so rather than naming a number",
+          "default" in why(base), why(base))
+
+    # --timeout is a different flag with a different meaning, and the arms carry
+    # both. Reading one for the other would size the stop window against the
+    # request timeout, which is 120 and would hide any shutdown problem entirely.
+    check("--timeout is not --graceful-timeout",
+          n(base + ["--timeout", "120"]) is None)
+    check("and the pairing is not confused when both are present",
+          n(base + ["--timeout", "120", "--graceful-timeout", "10"]) == 10)
+
+    check("a trailing flag with no value is an error",
+          n(base + ["--graceful-timeout"]) is None)
+    check("two different values are ambiguous, not first-wins",
+          n(base + ["--graceful-timeout", "10", "--graceful-timeout=30"]) is None)
+    check("but the same value twice is not ambiguous",
+          n(base + ["--graceful-timeout", "10", "--graceful-timeout=10"]) == 10)
+    check("a non-integer value is rejected",
+          n(base + ["--graceful-timeout", "10s"]) is None)
+
+    # Same hostile-argv properties as the worker count, and for the same reason:
+    # this argv comes from /proc and may contain anything but NUL.
+    check("an argument containing a newline does not split",
+          n(["gunicorn", "--name", "a\n--graceful-timeout\n99",
+             "--graceful-timeout", "10"]) == 10)
+    check("a newline-embedded flag is not mistaken for the real one",
+          n(["gunicorn", "--name", "x\n--graceful-timeout\n99"]) is None)
+
+
 def test_argv_of_splits_on_nul_only() -> None:
     """Read back from a real file, in the exact /proc/<pid>/cmdline format."""
     from bench.collect_backend_meta import argv_of, worker_count
@@ -322,6 +379,7 @@ def main() -> int:
                test_dependencies_answers_for_the_launch_not_the_binary,
                test_dash_valued_options_reach_the_parser,
                test_worker_count_survives_hostile_argv,
+               test_graceful_timeout_is_read_not_assumed,
                test_argv_of_splits_on_nul_only,
                test_resolve_never_follows_the_symlink,
                test_dependencies_lists_the_pinned_versions,

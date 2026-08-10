@@ -27,7 +27,46 @@
 # gunicorn's SIGCHLD-vs-buffered-stderr reentrancy recurs and a worker is never
 # reaped, the arbiter now gives up at its own 10 s rather than at 30, and this wait
 # still outlasts it. scripts/test_stop_multiworker.sh asserts the inequality.
+#
+# Where the value came from is decided BEFORE the default is applied, because the
+# two cases are not equally trustworthy and a run has to be able to say which it
+# had. An exported STOP_WAIT_SECS left in an interactive shell is exactly the kind
+# of thing that would silently reintroduce the C2 failure, and "the default is 20"
+# is not a statement about what a particular run actually used.
+if [ -n "${STOP_WAIT_SECS:-}" ]; then STOP_WAIT_SOURCE=environment
+else STOP_WAIT_SOURCE=default; fi
 : "${STOP_WAIT_SECS:=20}"
+
+# The other half of the invariant, and deliberately NOT overridable from the
+# environment: these two numbers are one relationship, and a relationship whose
+# sides can both be moved from outside is not one this repository controls. The
+# arms are launched with `--graceful-timeout "$ARM_GRACEFUL_TIMEOUT"` — every one
+# of them, from this single definition, so the six launch lines cannot drift apart
+# and no reader has to check whether they did.
+ARM_GRACEFUL_TIMEOUT=10
+
+# Assert the invariant at RUN TIME rather than trusting the defaults, and do it
+# before anything is started. A static assertion in the test suite says the values
+# in the source are consistent; it says nothing about the environment a particular
+# invocation inherited, which is where the value can actually be wrong.
+assert_shutdown_budget() {
+  case "$STOP_WAIT_SECS" in
+    ''|*[!0-9]*)
+      echo "STOP_WAIT_SECS is ${STOP_WAIT_SECS:-<empty>}, which is not a number of" >&2
+      echo "  seconds (source: $STOP_WAIT_SOURCE). Refusing to start: the stop" >&2
+      echo "  window would be whatever \`seq\` made of it." >&2
+      return 1 ;;
+  esac
+  if [ "$STOP_WAIT_SECS" -le "$ARM_GRACEFUL_TIMEOUT" ]; then
+    echo "STOP_WAIT_SECS=$STOP_WAIT_SECS (source: $STOP_WAIT_SOURCE) does not exceed" >&2
+    echo "  the arms' --graceful-timeout=$ARM_GRACEFUL_TIMEOUT. Cleanup would give up" >&2
+    echo "  before the arbiters were obliged to finish, and every stop would be at" >&2
+    echo "  risk of reporting a survivor that was merely still within its budget." >&2
+    echo "  This is the exact shape that failed C2 cycle 1 on 2026-08-10." >&2
+    return 1
+  fi
+  return 0
+}
 
 # The PID's start time — an identity token that PID number alone is not, because
 # PIDs are recycled. Field 22 of /proc/<pid>/stat, parsed past the parenthesised

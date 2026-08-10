@@ -15,6 +15,12 @@ invites the summary "it passed":
 | PASS | `INSUFFICIENT` | `PASS_WITH_INSUFFICIENT_SEED_DIVERSITY` | 5 |
 | any FAIL | (not consulted) | `FAIL` | 1 |
 
+**The shutdown budget** sits outside that table and can only move it downward. If
+any cycle cannot show, from its own evidence, that its stop window outlasted what
+its arms were allowed at shutdown, the outcome is `FAIL` whatever the gates said —
+that cycle's cleanup was not held to the configuration the run was authorised for.
+Nothing here can turn a failure into a pass.
+
 **Seed diversity** is an *observation*, reported and never acted on. If the cycles
 did not produce distinct seeds the answer is INSUFFICIENT — which is not a failure
 of the candidate, and not a reason to run a fourth cycle. It means this run cannot
@@ -42,13 +48,26 @@ import json
 import sys
 from pathlib import Path
 
+# The same parser the collector asserts with, so the summary cannot disagree with
+# the check that ran at collection time by reimplementing it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from bench.collect_backend_meta import graceful_timeout  # noqa: E402
+
 
 def load_cycle(results: Path, label: str) -> dict:
     out: dict = {"label": label}
     for key, name in (("contract", f"{label}_contract.json"),
                       ("interp_candidate", f"{label}_interp_candidate.json"),
                       ("interp_reference", f"{label}_interp_reference.json"),
-                      ("environment", f"{label}_environment.json")):
+                      ("environment", f"{label}_environment.json"),
+                      # The shutdown budget this cycle ran under, and the arms' own
+                      # command lines to check it against. A missing one is already
+                      # a problem by the rule below: `verdict` fails closed on any
+                      # artefact a cycle was supposed to write and did not.
+                      ("shutdown_budget", f"{label}_shutdown_budget.json"),
+                      ("meta_candidate", f"{label}_meta_candidate.json"),
+                      ("meta_reference", f"{label}_meta_reference.json")):
         path = results / name
         if not path.exists():
             out.setdefault("missing", []).append(str(path))
@@ -194,8 +213,75 @@ OUTCOME_EXIT = {
 }
 
 
-def overall_outcome(v: dict, s: dict) -> dict:
-    """Combine the semantic verdict and the seed observation into one named result."""
+def shutdown_budget(cycles: list[dict]) -> dict:
+    """What each cycle allowed its arms at stop time, read back from the evidence.
+
+    Three cycles' cleanups are three chances to strand a process on the host, and
+    C2 cycle 1 on 2026-08-10 took one of them: the arms inherited gunicorn's 30 s
+    `graceful_timeout` default while `STOP_WAIT_SECS` was 20. Both numbers are now
+    fixed by the harness, asserted before a cycle starts, and asserted again against
+    the arms' own `/proc/<pid>/cmdline` — but an assertion that ran is only visible
+    if something reads its result afterwards, which is what this is.
+
+    The arms' value is taken from `launch_argv` in each arm's provenance record, so
+    it is what the process was launched with, not what the runner intended.
+    """
+    per_cycle, problems = [], []
+    for c in cycles:
+        label = c["label"]
+        rec = c.get("shutdown_budget")
+        entry: dict = {"label": label}
+        if isinstance(rec, dict):
+            entry["stop_wait_secs"] = rec.get("stop_wait_secs")
+            entry["stop_wait_source"] = rec.get("stop_wait_source")
+            entry["arm_graceful_timeout"] = rec.get("arm_graceful_timeout")
+        else:
+            problems.append(f"{label}: no shutdown budget was recorded")
+        for arm in ("candidate", "reference"):
+            meta = c.get(f"meta_{arm}")
+            argv = meta.get("launch_argv") if isinstance(meta, dict) else None
+            if not isinstance(argv, list):
+                entry[arm] = None
+                problems.append(f"{label}: no launch argv recorded for the {arm}")
+                continue
+            seconds, err = graceful_timeout([a for a in argv if isinstance(a, str)])
+            entry[arm] = seconds
+            if seconds is None:
+                problems.append(f"{label}: the {arm}'s launch argv has no usable "
+                                f"--graceful-timeout ({err})")
+            elif (entry.get("arm_graceful_timeout") is not None
+                  and seconds != entry["arm_graceful_timeout"]):
+                problems.append(
+                    f"{label}: the {arm} was launched with --graceful-timeout "
+                    f"{seconds}s, but the cycle recorded a budget of "
+                    f"{entry['arm_graceful_timeout']}s")
+        wait, grace = entry.get("stop_wait_secs"), entry.get("arm_graceful_timeout")
+        if isinstance(wait, int) and isinstance(grace, int) and wait <= grace:
+            problems.append(
+                f"{label}: STOP_WAIT_SECS={wait} does not exceed the arms' "
+                f"--graceful-timeout={grace}. This cycle's cleanup could report a "
+                f"survivor that was still inside its own budget.")
+        per_cycle.append(entry)
+    return {"status": "CONSISTENT" if not problems else "INCONSISTENT",
+            "per_cycle": per_cycle, "problems": problems}
+
+
+def overall_outcome(v: dict, s: dict, b: dict | None = None) -> dict:
+    """Combine the semantic verdict and the seed observation into one named result.
+
+    The shutdown budget is admitted here as a third input, and only ever downward:
+    it cannot turn a failure into a pass. A cycle whose stop window was not sized
+    against its arms' own budget did not run the authorised configuration, and its
+    cleanup result is not the one that was asked for — so the run is not reported as
+    a pass on the strength of gates that ran inside it.
+    """
+    if b is not None and b.get("status") != "CONSISTENT":
+        return {"outcome": "FAIL", "exit_code": OUTCOME_EXIT["FAIL"],
+                "because": ("at least one cycle's shutdown budget could not be "
+                            "confirmed from its own evidence; cleanup was not held "
+                            "to the configuration this run was authorised for"),
+                "contract_gate": v.get("gate"), "seed_diversity": s.get("status"),
+                "shutdown_budget": b.get("status")}
     if v.get("gate") != "PASS":
         name = "FAIL"
         because = ("at least one cycle's 5.2B semantic gate did not pass; the seed "
@@ -213,7 +299,8 @@ def overall_outcome(v: dict, s: dict) -> dict:
                    "one. It is NOT a candidate failure. It is NOT a reason to run a "
                    "fourth cycle.")
     return {"outcome": name, "exit_code": OUTCOME_EXIT[name], "because": because,
-            "contract_gate": v.get("gate"), "seed_diversity": s.get("status")}
+            "contract_gate": v.get("gate"), "seed_diversity": s.get("status"),
+            "shutdown_budget": (b or {}).get("status")}
 
 
 def order_stability(cycles: list[dict]) -> dict:
@@ -282,6 +369,7 @@ def main() -> int:
     v = verdict(cycles)
     s = seed_diversity(cycles)
     o = order_stability(cycles)
+    b = shutdown_budget(cycles)
 
     print("contract, 5.2B semantic, all three cycles")
     print(f"  gate: {v['gate']}   per cycle: {v['per_cycle']}")
@@ -311,7 +399,18 @@ def main() -> int:
         print(f"    varied: {name}")
     print(f"  {o['note']}")
 
-    outcome = overall_outcome(v, s)
+    print()
+    print("shutdown budget — what each cycle allowed its arms at stop time")
+    print(f"  status: {b['status']}")
+    for e in b["per_cycle"]:
+        print(f"    {e['label']:12s} STOP_WAIT_SECS={e.get('stop_wait_secs')!r} "
+              f"({e.get('stop_wait_source')}) vs --graceful-timeout: "
+              f"recorded {e.get('arm_graceful_timeout')!r}, "
+              f"candidate {e.get('candidate')!r}, reference {e.get('reference')!r}")
+    for p_ in b["problems"]:
+        print(f"    - {p_}")
+
+    outcome = overall_outcome(v, s, b)
     print()
     print("=" * 70)
     print(f"C2 OUTCOME: {outcome['outcome']}   (exit {outcome['exit_code']})")
@@ -324,6 +423,7 @@ def main() -> int:
                "outcome": outcome["outcome"], "exit_code": outcome["exit_code"],
                "outcome_detail": outcome,
                "contract": v, "seed_diversity": s, "order_stability": o,
+               "shutdown_budget": b,
                "site_limitation": (
                    "every cycle ran under -S: site.py did not run and no .pth in the "
                    "clone was processed. Isolated package-tree import correctness, "

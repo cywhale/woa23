@@ -543,6 +543,26 @@ mkdir -p "$RUN" results
 # shellcheck source=lib_procs.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib_procs.sh"
 
+# ----------------------------------------------------------- shutdown budget ---
+# Asserted here, before a single process exists, and recorded as an artefact of the
+# run rather than left as a property of the source.
+#
+# The distinction matters. `STOP_WAIT_SECS` has a default of 20, but a default is
+# not what a run used: an exported value in the invoking shell overrides it
+# silently, and 20 in the source would still be reported while 5 was in force. C2
+# cycle 1 failed on exactly this relationship being wrong, so the run states both
+# numbers, states where each came from, and refuses to start if the inequality does
+# not hold.
+echo "== shutdown budget (asserted before anything starts) =="
+echo "   arms --graceful-timeout : ${ARM_GRACEFUL_TIMEOUT}s — one definition in"
+echo "                             lib_procs.sh for all six launch lines"
+echo "   STOP_WAIT_SECS          : ${STOP_WAIT_SECS}s (source: $STOP_WAIT_SOURCE)"
+assert_shutdown_budget || exit 4
+echo "   ${STOP_WAIT_SECS} > ${ARM_GRACEFUL_TIMEOUT}: cleanup outlasts the arms' own budget"
+printf '{\n  "kind": "shutdown_budget",\n  "label": "%s",\n  "arm_graceful_timeout": %s,\n  "stop_wait_secs": %s,\n  "stop_wait_source": "%s",\n  "holds": true\n}\n' \
+  "$LABEL" "$ARM_GRACEFUL_TIMEOUT" "$STOP_WAIT_SECS" "$STOP_WAIT_SOURCE" \
+  > "results/${LABEL}_shutdown_budget.json"
+
 # ============================================================== environment ===
 # Built and verified before any process starts. A run that discovers its
 # environment is wrong after the servers are up has already perturbed the host for
@@ -1137,7 +1157,7 @@ if [ "$S2_MODE" = none ]; then
   start_tracked reference "$REF_PORT" \
     env -C "$REF_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
       DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
-      "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout 10 \
+      "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
       -b "127.0.0.1:${REF_PORT}" --timeout 120
 
   # Same cwd-relative literal as the reference, still taken from the environment so
@@ -1146,7 +1166,7 @@ if [ "$S2_MODE" = none ]; then
   start_tracked candidate "$CAND_PORT" \
     env -C "$CAND_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
       WOA23_ZARR_STORE="$STORE_LITERAL" \
-      "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout 10 \
+      "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
       -b "127.0.0.1:${CAND_PORT}" --timeout 120
 elif [ "$S2_MODE" = c1 ]; then
   # Re-verified here rather than trusted from preflight. Between the two checks this
@@ -1161,7 +1181,7 @@ elif [ "$S2_MODE" = c1 ]; then
       PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
       "$PY_BINARY" -S -m gunicorn woa23_app:app -w 1 \
-      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${REF_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${REF_PORT}" --timeout 120
 
   clone_integrity before-candidate || exit 1
   start_tracked candidate "$CAND_PORT" \
@@ -1170,7 +1190,7 @@ elif [ "$S2_MODE" = c1 ]; then
       PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       WOA23_ZARR_STORE="$STORE_LITERAL" \
       "$PY_BINARY" -S -m gunicorn api.app:app -w 1 \
-      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${CAND_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${CAND_PORT}" --timeout 120
 else
   # C2. `-u PYTHONHASHSEED` rather than an empty value: CPython rejects
   # PYTHONHASHSEED="" outright, so setting it empty would not mean "unset", it would
@@ -1182,7 +1202,7 @@ else
       PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
       "$PY_BINARY" -S -m gunicorn woa23_app:app -w "$ARM_WORKERS" \
-      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${REF_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${REF_PORT}" --timeout 120
 
   clone_integrity before-candidate || exit 1
   start_tracked candidate "$CAND_PORT" \
@@ -1190,7 +1210,7 @@ else
       PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       WOA23_ZARR_STORE="$STORE_LITERAL" \
       "$PY_BINARY" -S -m gunicorn api.app:app -w "$ARM_WORKERS" \
-      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${CAND_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${CAND_PORT}" --timeout 120
 fi
 
 # ------------------------------------------------------- PROCESS readiness only ---
@@ -1350,9 +1370,11 @@ echo "== provenance =="
 if [ "$S2_MODE" = none ]; then
   uv run python -m bench.collect_backend_meta --port "$CAND_PORT" --manifest candidate \
     --expect-argv-contains api.app:app --lockfile uv.lock \
+    --expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
     --out "results/${LABEL}_meta_candidate.json"
   uv run python -m bench.collect_backend_meta --port "$REF_PORT" --manifest reference \
     --expect-argv-contains woa23_app:app --lockfile uv.lock \
+    --expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
     --out "results/${LABEL}_meta_reference.json"
 else
   # --env-python, and not the derived answer. Under S2 the arm's argv[0] is
@@ -1370,6 +1392,7 @@ else
     # The `=` form is unambiguous.
     uv run python -m bench.collect_backend_meta --port "$p" --manifest "$arm" \
       --expect-argv-contains "$expect" \
+      --expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
       --env-python "$PY_BINARY" --env-python-arg=-S \
       --env-python-pythonpath "$PKG_CLONE" \
       --clone-manifest "$CLONE_MANIFEST" --clone-root "$PKG_CLONE" \

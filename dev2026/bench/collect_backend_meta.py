@@ -235,6 +235,49 @@ def worker_count(argv: list[str]) -> tuple[int | None, str | None]:
     return int(value), None
 
 
+def graceful_timeout(argv: list[str]) -> tuple[int | None, str | None]:
+    """gunicorn's `--graceful-timeout` from its argv, in seconds.
+
+    Same shape as `worker_count` and pure for the same reason, but it answers a
+    different question. The worker count decides how many processes a run is
+    authorised to start; this decides **how long the arbiter is entitled to take to
+    stop**, which is the number `STOP_WAIT_SECS` has to exceed.
+
+    C2 cycle 1 on 2026-08-10 failed cleanup because nobody had ever read this value:
+    the arms did not pass the flag, gunicorn's default is 30 s, and the harness
+    waited 20. Recording the launch argv was not enough — it was recorded then, and
+    the absence of the flag in it went unnoticed, because nothing looked.
+
+    Returns (seconds, error). `None` with an error means the flag is not there or
+    cannot be read as one value; that is never silently treated as the default.
+    """
+    found: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--graceful-timeout":
+            if i + 1 >= len(argv):
+                return None, f"{a} is the last argument, with no value after it"
+            found.append(argv[i + 1])
+            i += 2
+            continue
+        if a.startswith("--graceful-timeout="):
+            found.append(a[len("--graceful-timeout="):])
+        i += 1
+
+    if not found:
+        return None, ("no --graceful-timeout in argv; gunicorn would use its own "
+                      "default, which this harness does not choose")
+    distinct = set(found)
+    if len(distinct) > 1:
+        return None, (f"argv specifies --graceful-timeout more than once, with "
+                      f"different values: {sorted(distinct)}")
+    value = found[0]
+    if not value.isdigit():
+        return None, f"--graceful-timeout {value!r} is not a decimal integer"
+    return int(value), None
+
+
 def whitelisted_env(pid: int) -> dict:
     raw = proc_field(pid, "environ")
     if not raw:
@@ -678,6 +721,14 @@ def main() -> int:
                          "is not collected at all without it. For the candidate: "
                          "--expect-argv-contains api.app:app; for the reference: "
                          "--expect-argv-contains woa23_app:app")
+    ap.add_argument("--expect-graceful-timeout", type=int, default=None,
+                    help="assert that the process was launched with this "
+                         "--graceful-timeout, in seconds. Optional, because this "
+                         "collector is also pointed at production, whose command "
+                         "line this campaign does not choose. The runners pass it "
+                         "for every arm THEY launch: the launch argv was already "
+                         "being recorded when C2 cycle 1 failed, and what was "
+                         "missing was anything that read it.")
     ap.add_argument("--against", type=Path, default=None,
                     help="a backend_meta file collected earlier. The freshly read "
                          "store fingerprints are compared against it and any drift "
@@ -759,6 +810,25 @@ def main() -> int:
             f"argv is missing {missing}. argv = {argv}. Refusing to record provenance "
             f"for a process that may simply be occupying the port."
         )
+
+    # Read from the argv that was just verified to be the intended backend's, so a
+    # mismatch here is a statement about this arm and not about some other process.
+    # Checked before anything is written: a provenance file recording a shutdown
+    # budget the harness cannot outlast should not exist, because it would be
+    # indistinguishable from one that could.
+    if args.expect_graceful_timeout is not None:
+        seconds, gt_err = graceful_timeout(argv)
+        if seconds is None:
+            raise SystemExit(
+                f"pid {pid} on port {args.port} was launched without a usable "
+                f"--graceful-timeout ({gt_err}). Expected "
+                f"{args.expect_graceful_timeout}s. argv = {argv}")
+        if seconds != args.expect_graceful_timeout:
+            raise SystemExit(
+                f"pid {pid} on port {args.port} was launched with "
+                f"--graceful-timeout {seconds}s, not the expected "
+                f"{args.expect_graceful_timeout}s. Cleanup's wait is sized against "
+                f"the expected value, so the two must agree. argv = {argv}")
 
     cwd_link = Path(f"/proc/{pid}/cwd")
     try:

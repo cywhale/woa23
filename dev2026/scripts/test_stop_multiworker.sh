@@ -151,13 +151,61 @@ echo "6. the harness waits at least as long as the arms are allowed to take"
 # and STOP_WAIT_SECS was 20, so the harness gave up before the library was obliged to
 # finish. Whatever the arms are configured with, the wait must not be shorter.
 default_wait="$(bash -c 'unset STOP_WAIT_SECS; . '"$HERE"'/lib_procs.sh 2>/dev/null; echo "$STOP_WAIT_SECS"')"
-arm_graceful="$(grep -oE 'graceful-timeout [0-9]+' "$HERE/run_controlled.sh" | head -1 | grep -oE '[0-9]+')"
-check "the arms set an explicit --graceful-timeout" "yes" \
-      "$([ -n "$arm_graceful" ] && echo yes || echo no)"
-if [ -n "$arm_graceful" ]; then
-  check "STOP_WAIT_SECS ($default_wait) exceeds the arms' graceful timeout ($arm_graceful)" \
-        "yes" "$([ "$default_wait" -gt "$arm_graceful" ] && echo yes || echo no)"
-fi
+check "the arms' graceful timeout is defined once, beside the wait it constrains" \
+      "yes" "$([ -n "${ARM_GRACEFUL_TIMEOUT:-}" ] && echo yes || echo no)"
+check "STOP_WAIT_SECS ($default_wait) exceeds it ($ARM_GRACEFUL_TIMEOUT)" "yes" \
+      "$([ "$default_wait" -gt "$ARM_GRACEFUL_TIMEOUT" ] && echo yes || echo no)"
+
+# Every launch line must take the number from that one definition. Six launches
+# each carrying their own literal is six chances for one of them to be edited alone,
+# and the one that was wrong would be indistinguishable from the five that were not.
+runner="$(cat "$HERE/run_controlled.sh")"
+n_var="$(grep -c -- '--graceful-timeout "\$ARM_GRACEFUL_TIMEOUT"' "$HERE/run_controlled.sh")"
+n_literal="$(grep -cE -- '--graceful-timeout[= ][0-9]' "$HERE/run_controlled.sh" || true)"
+check "there are six arm launches carrying it" "6" "$n_var"
+check "and not one of them spells the number out" "0" "$n_literal"
+check "the runner asserts the relationship at run time, not just in this file" "yes" \
+      "$(contains "$runner" "assert_shutdown_budget || exit")"
+check "and records what it actually ran with" "yes" \
+      "$(contains "$runner" "_shutdown_budget.json")"
+check "the arms' own command lines are checked against it" "yes" \
+      "$(contains "$runner" '--expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT"')"
+
+echo
+echo "7. the runtime assertion, which is what a wrong environment actually hits"
+# STOP_WAIT_SECS has a default; a default is not what a run used. An exported value
+# in the invoking shell silently replaces it, and that is a live path to exactly the
+# configuration that failed C2 — so the check is on the effective value.
+budget() {                  # budget <env-assignment...> -> rc, message on stdout
+  env "$@" bash -c '. '"$HERE"'/lib_procs.sh; assert_shutdown_budget' 2>&1
+}
+budget_rc() {
+  env "$@" bash -c '. '"$HERE"'/lib_procs.sh; assert_shutdown_budget' >/dev/null 2>&1
+  echo $?
+}
+check "the default configuration passes" "0" "$(budget_rc STOP_WAIT_SECS=)"
+check "an inherited value below the arms' budget is refused" "1" \
+      "$(budget_rc STOP_WAIT_SECS=5)"
+check "and equal is refused too — the wait must EXCEED it" "1" \
+      "$(budget_rc STOP_WAIT_SECS=10)"
+check "one second more is accepted" "0" "$(budget_rc STOP_WAIT_SECS=11)"
+check "the refusal reports the effective value, not the default" "yes" \
+      "$(contains "$(budget STOP_WAIT_SECS=5)" "STOP_WAIT_SECS=5")"
+check "and says the value came from the environment" "yes" \
+      "$(contains "$(budget STOP_WAIT_SECS=5)" "source: environment")"
+check "an unset value is reported as the default it fell back to" "yes" \
+      "$(contains "$(budget STOP_WAIT_SECS=3)" "environment")"
+check "a non-numeric value is refused rather than passed to seq" "1" \
+      "$(budget_rc STOP_WAIT_SECS=soon)"
+check "and says what it received" "yes" \
+      "$(contains "$(budget STOP_WAIT_SECS=soon)" "not a number")"
+check "an empty value falls back to the default and passes" "0" \
+      "$(budget_rc STOP_WAIT_SECS=)"
+
+# The arms' side is fixed on purpose. If the environment could move both sides, the
+# inequality would hold trivially against whatever the environment wanted.
+check "the arms' budget cannot be moved from the environment" "10" \
+      "$(env ARM_GRACEFUL_TIMEOUT=999 bash -c '. '"$HERE"'/lib_procs.sh; echo "$ARM_GRACEFUL_TIMEOUT"')"
 
 echo
 if [ "$fail" -gt 0 ]; then
