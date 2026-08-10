@@ -1,0 +1,46 @@
+# Every loopback port this campaign has already bound, so "a port that has never
+# been used" stops being something anyone has to remember.
+#
+# The rule this file exists to enforce: a run gets ports no earlier run had. Reusing
+# one is not forbidden, but it must be DELIBERATE and it must be SAID — a report
+# calling a reused port "new" is the failure this ledger prevents. `run_controlled.sh`
+# refuses a port listed here unless --allow-reused-ports is passed, and every run
+# records, per port, whether it was a first use or a reuse.
+#
+# Read the scope honestly: this ledger records what is KNOWN, and it was written
+# after the fact. Absence from it is not proof a port was never bound on odb24 by
+# anything — it means no run of THIS campaign recorded binding it. Production's own
+# ports are listed because they are the ones that must never be touched at all.
+#
+# Maintained by hand and by commit. The runners cannot append to it: they execute
+# from a throwaway export, so anything they wrote would be discarded with it. Adding
+# the ports of a completed run is a deliberate edit before the next one is proposed.
+#
+# port	role	run	evidence
+8050	production api	production	live service; never bound by this campaign
+8786	production dask scheduler	production	live service; never bound by this campaign
+8787	production dask	production	live service; never bound by this campaign
+8051	candidate arm	D2b	specs/D2b-request.md
+8052	reference arm	D2b	specs/D2b-request.md
+18787	isolated dask scheduler	D2b	specs/D2b-request.md; run_controlled.sh default
+18051	candidate arm	S2 attempt	authorised run parameter, this campaign
+18052	reference arm	S2 attempt	authorised run parameter, this campaign
+18788	isolated dask scheduler	S2 attempt	authorised run parameter, this campaign
+18061	candidate arm	C1 (c1d)	specs/ROADMAP.md, specs/002 s: cleanup confirmed free
+18062	reference arm	C1 (c1d)	specs/ROADMAP.md, specs/002
+18798	isolated dask scheduler	C1 (c1d)	specs/ROADMAP.md, specs/002
+18071	candidate arm	C2 attempt	authorised run parameter, this campaign
+18072	reference arm	C2 attempt	authorised run parameter, this campaign
+18799	isolated dask scheduler	C2 attempt	authorised run parameter, this campaign
+18081	candidate arm	S2 run	authorised run parameter, this campaign
+18082	reference arm	S2 run	authorised run parameter, this campaign
+18809	isolated dask scheduler	S2 run	authorised run parameter, this campaign
+18091	candidate arm	C2 PASS (c2c)	specs/ROADMAP.md, specs/002: confirmed free after each cycle
+18092	reference arm	C2 PASS (c2c)	specs/ROADMAP.md, specs/002
+18819	isolated dask scheduler	C2 PASS (c2c)	specs/ROADMAP.md, specs/002
+18101	candidate arm	S2 rerun	authorised run parameter, this campaign
+18102	reference arm	S2 rerun	authorised run parameter, this campaign
+18829	isolated dask scheduler	S2 rerun	authorised run parameter, this campaign
+18111	candidate arm	S2 rerun	authorised run parameter, this campaign
+18112	reference arm	S2 rerun	authorised run parameter, this campaign
+18839	isolated dask scheduler	S2 rerun	authorised run parameter, this campaign

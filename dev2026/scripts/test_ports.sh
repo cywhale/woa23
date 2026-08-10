@@ -89,6 +89,53 @@ check "pid_holds_port fails closed"               "no" \
       "$(pid_holds_port 3960 8050 2>/dev/null && echo yes || echo no)"
 unset SS_MUST_FAIL
 
+# `case` inside a command substitution breaks bash 3.2's parser, as it has several
+# times across this suite; a helper keeps it out of `$( )`.
+contains() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
+
+echo
+echo "the used-port ledger answers a question the host cannot"
+# A finished run's ports are free again — that is what a working cleanup means. So
+# `port_held` passes on every port this campaign has ever used, and cannot tell a
+# fresh one from c2c's. That is the gap 18091/18092 fell into when they were called
+# new ports in a request.
+check "a port an earlier run bound is known to have been used" "0" \
+      "$(port_previously_used 18091 >/dev/null; echo $?)"
+check "and the row says which run" "yes" \
+      "$(contains "$(port_previously_used 18091)" "c2c")"
+check "a port nothing has used is not in it" "1" \
+      "$(port_previously_used 18121 >/dev/null 2>&1; echo $?)"
+check "production's own ports are listed, so they can never be proposed" "0" \
+      "$(port_previously_used 8050 >/dev/null; echo $?)"
+check "and so is the isolated scheduler D2b used" "0" \
+      "$(port_previously_used 18787 >/dev/null; echo $?)"
+
+check "the status line names a first use" "18121 first-use" "$(port_ledger_status 18121)"
+check "and marks a reuse as a reuse" "yes" \
+      "$(contains "$(port_ledger_status 18091)" "REUSED")"
+
+# A prefix must not match: 1809 is not 18091, and 18091 is not 180915.
+check "a shorter number does not match a longer port" "1" \
+      "$(port_previously_used 1809 >/dev/null 2>&1; echo $?)"
+check "and a longer one does not match a shorter port" "1" \
+      "$(port_previously_used 180915 >/dev/null 2>&1; echo $?)"
+
+# An unreadable ledger is not an answer. Treating it as "not used" would silently
+# turn the check off the moment the file went missing.
+PORTS_LEDGER=/nonexistent/ports.tsv
+check "an unreadable ledger reports 2, not 'unused'" "2" \
+      "$(port_previously_used 18121 >/dev/null 2>&1; echo $?)"
+check "and the status line says so rather than guessing" "yes" \
+      "$(contains "$(port_ledger_status 18121 2>&1)" "UNKNOWN")"
+PORTS_LEDGER="$HERE/ports_used.tsv"
+
+# Every port in the ledger must be a port. A typo'd row is a row that silently
+# never matches anything.
+bad="$(grep -vE '^#' "$PORTS_LEDGER" | grep -vE '^[0-9]{2,5}\t' | grep -c . || true)"
+check "every non-comment row starts with a port and a tab" "0" "$bad"
+dupes="$(grep -vE '^#' "$PORTS_LEDGER" | cut -f1 | sort | uniq -d | grep -c . || true)"
+check "and no port is listed twice" "0" "$dupes"
+
 echo
 if [ "$fail" -gt 0 ]; then
   echo "FAILED $fail/$((pass + fail))"

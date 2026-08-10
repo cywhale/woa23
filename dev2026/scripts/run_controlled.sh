@@ -76,6 +76,9 @@ FORBIDDEN_PORTS="8050 8786 8787"
 #                    scripts/run_c2_cycles.sh is what runs them — this flag is one
 #                    cycle and never draws the conclusion.
 CLEANUP_ONLY=no
+# Reusing a port an earlier run bound is allowed; calling a reused port new is not.
+# The flag is the difference between the two, and it is recorded in the evidence.
+ALLOW_REUSED_PORTS=no
 CONTRACT_ONLY=no
 C1_MODE=no
 C2_CYCLE=no
@@ -153,6 +156,7 @@ while [ $# -gt 0 ]; do
                        echo "  run time and cannot be chosen. The old name invited the" >&2
                        echo "  opposite reading, so it is refused rather than aliased." >&2
                        exit 2 ;;
+    --allow-reused-ports) ALLOW_REUSED_PORTS=yes; shift ;;
     --label)           [ $# -ge 2 ] || { echo "--label needs a value" >&2; exit 2; }
                        LABEL="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -529,6 +533,16 @@ fi
 env -C / true 2>/dev/null || { echo "env -C is required (coreutils >= 8.28)" >&2; exit 4; }
 
 cd "$HERE"
+
+# What this label already owns, checked BEFORE the directory it would own is
+# created. Doing it after `mkdir -p "$RUN"` would mean the guard found a directory
+# this invocation had just made and refused itself.
+# shellcheck source=lib_labels.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_labels.sh"
+refuse_label_collision "$HERE" "$LABEL" \
+  "Choose a label this staging directory has not used, or a fresh staging export." \
+  || exit 4
+
 mkdir -p "$RUN" results
 
 
@@ -800,6 +814,47 @@ if [ ${#leftovers[@]} -gt 0 ]; then
   exit 1
 fi
 shopt -u nullglob
+
+# Two different questions, both asked, neither standing in for the other.
+#
+# "Is anything listening right now" is what port_held answers, from the host. Every
+# port a finished run used passes it, precisely because that run's cleanup worked —
+# so it cannot tell a fresh port from one c2c bound three cycles at.
+#
+# "Has this campaign used this port before" is the ledger, and it is the question a
+# report gets wrong: 18091/18092 were described as new when they were c2c's. Reusing
+# a port is allowed and is sometimes right; describing a reused one as new is not.
+# Both answers are recorded per port, so the run states it rather than the report.
+ports_json=""
+reused=""
+for pair in "candidate:$CAND_PORT" "reference:$REF_PORT" "scheduler:$SCHED_PORT"; do
+  role="${pair%%:*}"; port="${pair#*:}"
+  st=0; rows="$(port_previously_used "$port")" || st=$?
+  case "$st" in
+    0) first_use=false; reused="$reused $port"
+       echo "port $port ($role) has been used before by this campaign:" >&2
+       printf '  %s\n' "$rows" >&2 ;;
+    1) first_use=true ;;
+    *) echo "cannot read the used-port ledger ($PORTS_LEDGER). Refusing to start:" >&2
+       echo "  an unreadable ledger is not the same as an unused port." >&2
+       exit 4 ;;
+  esac
+  ports_json="$ports_json{\"role\":\"$role\",\"port\":$port,\"first_use\":$first_use},"
+done
+if [ -n "$reused" ] && [ "$ALLOW_REUSED_PORTS" != yes ]; then
+  echo "Refusing to start on previously used port(s):$reused" >&2
+  echo "  Pick ports this campaign has not bound, or pass --allow-reused-ports," >&2
+  echo "  which records the reuse in the run's evidence so no report can call" >&2
+  echo "  them new." >&2
+  exit 4
+fi
+printf '{\n  "kind": "ports",\n  "label": "%s",\n  "allow_reused": %s,\n  "ports": [%s]\n}\n' \
+  "$LABEL" "$([ "$ALLOW_REUSED_PORTS" = yes ] && echo true || echo false)" \
+  "${ports_json%,}" > "results/${LABEL}_ports.json"
+echo "== ports (host state and campaign history are different questions) =="
+for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
+  echo "   $(port_ledger_status "$port" || true)"
+done
 
 for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
   st=0; port_held "$port" || st=$?

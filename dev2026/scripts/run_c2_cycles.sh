@@ -47,6 +47,9 @@ CAND_PORT=""; REF_PORT=""; SCHED_PORT=""; WORKERS=""
 # run before it, and evidence that shares a name with earlier evidence is one
 # `cp -r` away from being confused with it — or from replacing it.
 LABEL_PREFIX="c2"
+# Passed straight through to every cycle. Deciding it here would let the wrapper
+# soften a check that belongs to the runner.
+ALLOW_REUSED=""
 
 usage() {
   cat >&2 <<'USAGE'
@@ -54,6 +57,7 @@ usage: run_c2_cycles.sh --python-binary PATH --package-clone PATH
                         --clone-manifest PATH --workdir-base PATH
                         --candidate-port N --reference-port N --scheduler-port N
                         [--expected-workers N] [--label-prefix NAME]
+                        [--allow-reused-ports]
 
 Runs exactly three --c2-cycle invocations and reports the 5.2B verdict, the seed
 diversity observed across them, and order stability. Never runs a fourth.
@@ -82,6 +86,7 @@ while [ $# -gt 0 ]; do
                       WORKERS="$2"; shift 2 ;;
     --label-prefix)   [ $# -ge 2 ] || { echo "--label-prefix needs a value" >&2; exit 2; }
                       LABEL_PREFIX="$2"; shift 2 ;;
+    --allow-reused-ports) ALLOW_REUSED=--allow-reused-ports; shift ;;
     --workers)        echo "--workers was renamed --expected-workers: it asserts" >&2
                       echo "  production's worker count and never sets the arms'." >&2
                       exit 2 ;;
@@ -128,29 +133,23 @@ if [ "${WOA23_S2_C2_GRANTED:-}" != "yes" ]; then
   exit 3
 fi
 
-# Refuse to write over an earlier run's results. New staging normally makes this
-# impossible, but "normally" is doing the work in that sentence: the runner is
-# invoked from whatever directory it was exported to, and a rerun launched from a
-# previous export with the previous prefix would overwrite the very evidence it was
-# supposed to leave alone. Checked before the first cycle, for all three labels.
+# Refuse to write over an earlier run's evidence — all of it, not the results.
 #
-# `if` rather than `[ -e ... ] &&`: an unmatched glob leaves the pattern itself in
-# $f, the test fails, and under `set -e` a bare `&&` list that fails at the end of a
-# loop body takes the script down — which would turn "no earlier results" into an
-# unexplained exit.
-existing=""
-for i in $(seq 1 "$CYCLES"); do
-  for f in "$HERE/results/${LABEL_PREFIX}_cycle${i}"_*; do
-    if [ -e "$f" ]; then existing="$existing $f"; fi
-  done
-done
-if [ -n "$existing" ]; then
-  echo "results for ${LABEL_PREFIX}_cycle1..${CYCLES} already exist:" >&2
-  for f in $existing; do echo "  $f" >&2; done
-  echo "This run would overwrite them. Use a different --label-prefix, or a" >&2
-  echo "  staging directory that does not already hold a C2 result." >&2
-  exit 1
-fi
+# The first version of this checked results/ only. That is the half that is easy to
+# think of and the less costly half to lose: `run/<label>/` holds each service's log
+# and any state a cleanup deliberately preserved when it refused to kill something,
+# which is precisely the evidence a failed run exists to keep. Both trees, matched
+# by prefix, so the three cycles AND the summary are covered by one check.
+#
+# New staging usually makes this impossible. "Usually" is doing the work in that
+# sentence: the driver writes into whatever export it was launched from, so a rerun
+# started from a previous export would overwrite the artefacts it was told to leave
+# alone.
+# shellcheck source=lib_labels.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_labels.sh"
+refuse_label_collision "$HERE" "${LABEL_PREFIX}_" \
+  "Use a different --label-prefix, or a staging export with no C2 result in it." \
+  || exit 1
 
 echo "== C2: $CYCLES independent cycles =="
 echo "   binary   : $PY_BINARY"
@@ -194,6 +193,7 @@ for i in $(seq 1 "$CYCLES"); do
     --candidate-port "$CAND_PORT" --reference-port "$REF_PORT" \
     --scheduler-port "$SCHED_PORT" \
     ${WORKERS:+--expected-workers "$WORKERS"} \
+    ${ALLOW_REUSED:+$ALLOW_REUSED} \
     --label "$label"
   rc=$?
   set -e

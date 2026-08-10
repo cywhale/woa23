@@ -55,7 +55,7 @@ exec "$REAL_PY" "\$@"
 UVEOF
   chmod +x "$T/.local/bin/uv"
 
-  cp "$HERE/run_c2_cycles.sh" "$T/dev2026/scripts/"
+  cp "$HERE/run_c2_cycles.sh" "$HERE/lib_labels.sh" "$T/dev2026/scripts/"
   ln -s "$REPO/bench" "$T/dev2026/bench"
 
   cat > "$T/dev2026/scripts/run_controlled.sh" <<STUBEOF
@@ -320,6 +320,33 @@ for bad in "../escape" "a/b" "" "9lives" "with space" "semi;colon"; do
 done
 check "not one cycle ran" "no" \
       "$([ -f "$T/dev2026/run/.calls" ] && echo yes || echo no)"
+rm -r "$T"
+
+echo
+echo "state and logs count as evidence, not only results"
+# The guard this replaces checked results/ alone, so a rerun into an export holding
+# a previous run's service logs and preserved cleanup state would have overwritten
+# them — the evidence a failed run exists to keep. Here results/ is empty and only
+# run/<label>/ exists.
+T="$(build_env distinct "" "")"
+mkdir -p "$T/dev2026/run/c2g_cycle2"
+: > "$T/dev2026/run/c2g_cycle2/candidate.log"
+rc="$(drive "$T" --label-prefix c2g)"
+err="$(cat "$T/err.txt")"
+check "the driver refuses" "1" "$rc"
+check "and names the log it would have written over" "yes" \
+      "$(has_text "$err" "c2g_cycle2")"
+check "no cycle ran" "no" \
+      "$([ -f "$T/dev2026/run/.calls" ] && echo yes || echo no)"
+check "and the log is still there" "yes" \
+      "$([ -f "$T/dev2026/run/c2g_cycle2/candidate.log" ] && echo yes || echo no)"
+
+# A preserved pidfile — what a cleanup that refused to kill something leaves — is
+# the single most costly thing to overwrite, so it is checked on its own.
+rm "$T/dev2026/run/c2g_cycle2/candidate.log"
+: > "$T/dev2026/run/c2g_cycle2/candidate.pid"
+check "a preserved pidfile alone refuses the run" "1" \
+      "$(drive "$T" --label-prefix c2g)"
 rm -r "$T"
 
 echo

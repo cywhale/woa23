@@ -160,6 +160,20 @@ check "the grant message names four services and six processes" "yes" \
       "$(WOA23_D2B_GRANTED= "$RUNNER" 2>&1 | { has_text "$(cat)" "SIX OS processes"; })"
 
 echo
+echo "reusing a port is a decision, so it is a flag rather than a default"
+check "--allow-reused-ports is accepted" "no" \
+      "$([ "$(WOA23_D2B_GRANTED= "$RUNNER" --allow-reused-ports --contract-only \
+              --workdir /tmp/x >/dev/null 2>&1; echo $?)" = 2 ] && echo yes || echo no)"
+# It takes no value. A flag that swallowed the next argument would silently drop
+# whatever followed it — a label, a port — and the run would proceed with a default.
+check "it does not swallow the argument after it" "yes" \
+      "$(has_text "$(run --allow-reused-ports --contract-only \
+                         --workdir "$HOME/woa23-s1-staging-merged" --label kept)" \
+                  "label     : kept")"
+check "and an unknown flag is still exit 2" "2" \
+      "$(WOA23_D2B_GRANTED= "$RUNNER" --allow-reused-port >/dev/null 2>&1; echo $?)"
+
+echo
 echo "the resolved configuration is announced, not assumed"
 out="$(run --contract-only --workdir "$HOME/woa23-s1-staging-merged" \
            --candidate-port 19001 --reference-port 19002 --scheduler-port 19003)" || true
