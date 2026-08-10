@@ -1137,7 +1137,7 @@ if [ "$S2_MODE" = none ]; then
   start_tracked reference "$REF_PORT" \
     env -C "$REF_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
       DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
-      "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker \
+      "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout 10 \
       -b "127.0.0.1:${REF_PORT}" --timeout 120
 
   # Same cwd-relative literal as the reference, still taken from the environment so
@@ -1146,7 +1146,7 @@ if [ "$S2_MODE" = none ]; then
   start_tracked candidate "$CAND_PORT" \
     env -C "$CAND_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
       WOA23_ZARR_STORE="$STORE_LITERAL" \
-      "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
+      "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout 10 \
       -b "127.0.0.1:${CAND_PORT}" --timeout 120
 elif [ "$S2_MODE" = c1 ]; then
   # Re-verified here rather than trusted from preflight. Between the two checks this
@@ -1161,7 +1161,7 @@ elif [ "$S2_MODE" = c1 ]; then
       PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
       "$PY_BINARY" -S -m gunicorn woa23_app:app -w 1 \
-      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${REF_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${REF_PORT}" --timeout 120
 
   clone_integrity before-candidate || exit 1
   start_tracked candidate "$CAND_PORT" \
@@ -1170,7 +1170,7 @@ elif [ "$S2_MODE" = c1 ]; then
       PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       WOA23_ZARR_STORE="$STORE_LITERAL" \
       "$PY_BINARY" -S -m gunicorn api.app:app -w 1 \
-      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${CAND_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${CAND_PORT}" --timeout 120
 else
   # C2. `-u PYTHONHASHSEED` rather than an empty value: CPython rejects
   # PYTHONHASHSEED="" outright, so setting it empty would not mean "unset", it would
@@ -1182,7 +1182,7 @@ else
       PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
       "$PY_BINARY" -S -m gunicorn woa23_app:app -w "$ARM_WORKERS" \
-      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${REF_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${REF_PORT}" --timeout 120
 
   clone_integrity before-candidate || exit 1
   start_tracked candidate "$CAND_PORT" \
@@ -1190,7 +1190,7 @@ else
       PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
       WOA23_ZARR_STORE="$STORE_LITERAL" \
       "$PY_BINARY" -S -m gunicorn api.app:app -w "$ARM_WORKERS" \
-      -k uvicorn.workers.UvicornWorker -b "127.0.0.1:${CAND_PORT}" --timeout 120
+      -k uvicorn.workers.UvicornWorker --graceful-timeout 10 -b "127.0.0.1:${CAND_PORT}" --timeout 120
 fi
 
 # ------------------------------------------------------- PROCESS readiness only ---

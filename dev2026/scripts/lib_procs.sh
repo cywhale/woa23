@@ -14,6 +14,19 @@
 # released. The runners leave it at the default; scripts/test_procs.sh shortens it,
 # because several of its cases are *designed* never to drain and would otherwise
 # spend the full wait each time.
+# Must exceed the arms' own shutdown budget, and that relationship is the point.
+#
+# C2 cycle 1 on 2026-08-10 failed cleanup because it did not. gunicorn's
+# `graceful_timeout` defaults to **30 s** and the arms did not set it, so the arbiter
+# was entitled to take 30 s to exit while this waited 20 — the harness gave up before
+# the library was obliged to finish. The arms now pass `--graceful-timeout 10`
+# explicitly, so the longest a well-behaved arbiter may take is a number this
+# repository chooses rather than one a dependency defaults to.
+#
+# 20 > 10 with room to spare. The margin also covers the case that made C2 fail: if
+# gunicorn's SIGCHLD-vs-buffered-stderr reentrancy recurs and a worker is never
+# reaped, the arbiter now gives up at its own 10 s rather than at 30, and this wait
+# still outlasts it. scripts/test_stop_multiworker.sh asserts the inequality.
 : "${STOP_WAIT_SECS:=20}"
 
 # The PID's start time — an identity token that PID number alone is not, because
