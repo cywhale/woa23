@@ -6,6 +6,7 @@ document authorises a candidate change.
 
 | rev | date | change |
 |---|---|---|
+| 5 | 2026-08-10 | **Source citation** for the WOA23 documentation — URL, sha256 `140aa25f…`, retrieval date, page and table anchors for §23, and a note that the PDF's embedded `/Title` still says WOA18 while the body is WOA23. **`D1-D2` renamed `D1-depth-out-of-range` and marked CHARACTERIZATION PENDING**: the first measurement after implementation must pin status (JSON and CSV separately, since `C18`/`C18-csv` already differ), body/error text, and that the outcome is request-level — it may not stay unasserted. `D1-D1` renamed `D1-depth-supported`. **Proposed diff committed as `specs/patches/004-store-paths.patch`**, produced outside the repository and verified with `git apply --check` — not applied. Sandbox exercise of the patch **corrected this spec twice**: N3, an empty directory, passes the import check and is caught at lifespan, not at import as revision 3 claimed; and D1-11 is correspondingly narrower — `--check-config` fails for N2 and N4 only, succeeding for N3, N5, N6 and P1. Nothing implemented. |
 | 4 | 2026-08-10 | **Upstream availability rules recorded from the official WOA23 documentation** (NCEI, pp11-12), supplied by the PI — oxygen and the inorganic nutrients are one-degree only, so `query.py:114` reflects the dataset rather than limiting the API, and **Table 4's depth ranges vary by variable AND climatology** (seasonal nitrate 0-800 m against annual nitrate 0-5500 m). **Purpose narrowed** to: the configured store resolves and its required anchor group is a readable Zarr v2 group — with explicit non-goals, chief among them that **a missing non-anchor request-specific group is request-level and must never prevent startup**. **Structural guarantee selected by the PI**: `query.py:139` uses the shared builder too, output byte-identical including the double slash, and **C1 and C2 must be re-run** because the read path changes. **Depth stays request-level**, pinned by a supported and an unsupported case, with the unsupported case's outcome left to be measured rather than asserted. Sequencing revised so the read-path change is re-validated before validation is layered on it. Nothing implemented. |
 | 3 | 2026-08-10 | Clarifications and the candidate implementation plan — §17-22. **D1-12 split into D1-12a (real store: readiness completes, zero chunk reads) and D1-12b (invalid stores: fail before readiness is observable)**. **The reachable group set is 12, not 18** — revision 2's arithmetic ignored `query.py:114`, which restricts 0.25° to temperature and salinity, making six of the eighteen unreachable by construction. **Settled: the twelve are not a startup invariant**; only four are exercised by any contract case, so requiring twelve would require eight never observed. One stated anchor group instead, with an explicit store manifest named as the only acceptable route to wider coverage; §15 question 2 withdrawn. **D1-11 marked as an acceptance condition of the split option only.** Implementation plan added: a pure `api/store_paths.py` shared by both call sites, ~6 lines in `config.py`, ~8 in the existing `lifespan`, **`query.py` untouched** with D1-13 as an asserted equivalence rather than a structural one, and the trade stated. Empty public API diff. Test matrix extended to D1-15. Multi-worker behaviour under both `preload_app` settings. Nothing implemented. |
 | 2 | 2026-08-10 | Implementation proposal added — §9-16. Purpose restated as *fail before ready, not on first request*. Zarr v2 metadata scope; relative-path resolution and what a message must name; **metadata only, never a chunk**, with an acceptance case that asserts it; where validation runs under `-w 2` and what `preload_app` changes; the startup / readiness / data-path boundary. Import-time and lifespan compared, with a split recommendation and the case for lifespan-alone if one change is preferred. Four read-only questions listed as prerequisites. Nothing implemented. |
@@ -990,3 +991,163 @@ would leave two changes to disentangle if anything failed.
 - §23's quotations are from the official WOA23 documentation, extracted from the PDF
   at the URL above. The depth table is reproduced for the combinations the API can
   reach; the document contains more.
+
+---
+
+# Revision 5 — the source citation, the characterization case, and the proposed diff
+
+**Still not implemented.** `api/` is byte-identical to `origin/main`. The diff below
+exists as a patch file and has been validated in a throwaway sandbox; it has not been
+applied to the repository.
+
+## 30. Source citation
+
+Everything in §23 about grid, variable, time-span and depth availability comes from
+one document. Recorded so the basis is traceable rather than paraphrased.
+
+| | |
+|---|---|
+| title | *World Ocean Atlas 2023 Product Documentation* |
+| publisher | NOAA National Centers for Environmental Information (NCEI) |
+| URL | `https://www.ncei.noaa.gov/data/oceans/woa/WOA23/DOCUMENTATION/WOA23_Product_Documentation.pdf` |
+| retrieved | 2026-08-10 |
+| **sha256** | `140aa25f37bc68d72ac39b5e28aef17144d2b47cbbc995338f9bd48f9e0dd59d` |
+| size / pages | 519,496 bytes / 20 pages |
+| PDF `/CreationDate` | `D:20240211112101-05'00'` |
+| extraction | `pypdf`, `extract_text()` on page indices 10 and 11 |
+
+**Caveat on the metadata.** The PDF's embedded `/Title` reads *"This document
+describes WOA18 data files"* and `/Author` is `boyer` — leftovers from the WOA18
+template. **The body is WOA23**; the tables cited are headed WOA23 and give WOA23's
+5500 m maximum. The stale title is recorded so nobody later reads it as evidence that
+the wrong document was cited.
+
+### 30.1 What was taken from which page
+
+| citation | printed page | anchor text |
+|---|---|---|
+| grid / variable / time-span availability (§23.1) | **p11** | the bullet list beginning "Quarter-degree monthly fields are ONLY available for…" |
+| standard depth levels | **p11** | *Table 3. Depths associated with each standard level number.* |
+| **depth ranges per variable per climatology** (§23.2) | **p12** | *Table 4. Depth ranges and standard depth levels numbers for annual, seasonal, and monthly statistics of each available oceanographic variable.* |
+
+Table 4 is reproduced in §23.2 for the six variables the API can address. The document
+contains more than is reproduced, and §23.2 is a subset chosen for relevance, not a
+complete transcription.
+
+## 31. The depth cases, renamed and given a deadline
+
+Renamed as directed, and the second is now **characterization pending** rather than
+permanently unasserted.
+
+| case | request | status |
+|---|---|---|
+| **D1-depth-supported** | annual nitrate, `dep0=0, dep1=800` | expected to return data — inside annual nitrate's 0–5500 m (Table 4) |
+| **D1-depth-out-of-range** | **seasonal** nitrate, `dep0=3000, dep1=4000` | **CHARACTERIZATION PENDING** — within WOA23's 5500 m maximum, outside seasonal nitrate's 0–800 m |
+
+**`D1-depth-out-of-range` must not stay unasserted.** The first measurement after
+implementation **must** record and then pin:
+
+1. the **HTTP status** for the JSON endpoint and for the CSV endpoint separately —
+   `C18`/`C18-csv` already show these two can differ (200 against 400) for a
+   beyond-dataset depth, so they must not be assumed equal here;
+2. the **response body or error message**, exactly, as the assertion's expected value;
+3. that the outcome is **request-level** — the process is still serving afterwards,
+   and a subsequent anchor-group request succeeds.
+
+Until that measurement, the case is marked pending and **the spec does not claim what
+the behaviour is**. After it, the case is a normal regression with a fixed expected
+value, and any change to it is a change to be justified. `C18`/`C18-csv` remain
+unchanged as the beyond-dataset case.
+
+## 32. The proposed diff
+
+**`dev2026/specs/patches/004-store-paths.patch`** — 177 lines, four files.
+
+Produced outside the repository: the files were copied to a scratch tree, edited
+there, and diffed against the originals, so `api/` was never written to. Verified
+with `git apply --check` from the repository root — **checked, not applied**.
+
+| file | change |
+|---|---|
+| `api/store_paths.py` | **new**, pure — `group_path`, `anchor_path`, `resolve`, `describe`, and the anchor constants |
+| `api/config.py` | +19 — resolve, then require the path to exist and be a directory |
+| `api/app.py` | +21 — open the anchor group for metadata inside the existing `lifespan` |
+| `api/query.py` | +1 −1 — line 139 calls `group_path`; one import added |
+
+### 32.1 What the sandbox established
+
+The patch was applied to a throwaway export of `HEAD` and exercised there. **Two of
+these are corrections to this spec, found by running rather than by reading.**
+
+**D1-13a holds.** `group_path(store, grid, subgroup)` is byte-identical to
+`f"{store}/{grid}/{subgroup}"` for every input tried — trailing-slash, bare,
+absolute, absolute-with-slash, empty and `./`-prefixed stores across two grids and two
+subgroups. `'data/'` still yields `'data//1_degree/annual/TS'`, **double slash
+preserved**.
+
+**D1-14 holds.** `api/store_paths.py` contains no `open(`, `listdir`,
+`os.path.exists` or `os.path.isdir`. Importing it does no filesystem I/O.
+
+**Correction 1 — N3 is caught at lifespan, not at import.** Revision 3's §19.1 said
+import would fail for N2, N3 and N4. It does not: **an empty directory exists and is
+a directory**, so an existence-and-type check accepts it. Measured in the sandbox:
+
+| fixture | import | lifespan |
+|---|---|---|
+| N1 unset | **rejected** — `KeyError: 'WOA23_ZARR_STORE'` | — |
+| N2 nonexistent | **rejected** — "does not exist: …" | — |
+| **N3 empty directory** | **passes** | **rejected** — "required anchor group could not be opened" |
+| N4 regular file | **rejected** — "is not a directory: …" | — |
+| N5 `.zgroup` not JSON | passes | **rejected** — anchor could not be opened |
+| N6 `zarr_format: 99` | passes | **rejected** — anchor could not be opened |
+| P1 real store | passes | *(needs the real store; not exercisable offline)* |
+
+**Correction 2 — D1-11 is narrower than revision 3 claimed.** Since
+`gunicorn --check-config` runs imports and not lifespan, and N3 now passes import:
+
+> **D1-11 (revised):** `--check-config` **fails for N2 and N4**, and **succeeds for
+> N3, N5, N6 and P1**.
+
+The config check covers *configuration* — a path that is absent or of the wrong type.
+It does **not** cover an empty directory, and stating otherwise would overstate what a
+deployment learns from running it.
+
+### 32.2 What the sandbox did not establish
+
+- **P1, the real store**, at either stage. It needs the real store, which is on VM24.
+  D1-7, D1-8 and D1-12a are therefore **unverified** and are the first things a run
+  must check.
+- **D1-10, zero chunk reads.** `open_zarr(..., chunks=None)` is lazy by construction,
+  but "no chunk was read" is asserted by a chunk-read observer against a real store,
+  not by reading the call.
+- Anything about **C1 or C2** under the patch. §25.2 stands: the read path changes, so
+  both must be re-run and the existing results do not describe the patched candidate.
+
+## 33. Test plan for the implementation
+
+In the order of §28, with what is offline and what is not.
+
+| # | step | tests | offline? |
+|---|---|---|---|
+| 1 | `store_paths.py` | D1-13a (builder ≡ literal, incl. double slash), D1-14 (no I/O on import), D1-15 (anchor is a stated constant) | **yes** |
+| 2 | `query.py` switched to the builder | D1-13b (no second path expression in `query.py`), full existing offline suite green | **yes** |
+| 3 | **C1 re-run** | 5.2A, 64 cases, expect 64/64 MATCH | **no — needs authorisation** |
+| 4 | **C2 re-run** | three cycles, 5.2B, expect PASS; seed diversity reported as it comes | **no — needs authorisation** |
+| 5 | `config.py` + `app.py` call sites | D1-1..D1-6 at the corrected stages (§32.1), D1-9/9a (messages name resolved path, configured value, cwd), D1-11 revised, D1-12b | **yes** |
+| 6 | real-store cases | D1-7, D1-8, D1-10, D1-12a | **no — needs a store** |
+| 7 | request-level cases | D1-depth-supported, **D1-depth-out-of-range characterization**, D1-D3 (absent non-anchor group fails that request only) | **no — needs a store** |
+
+Steps 3 and 4 gate step 5: layering validation onto an unverified read-path change
+would leave two changes to disentangle if either failed.
+
+**Old C1 and C2 evidence is not carried forward.** New artefacts under new labels and
+new staging directories, as every previous run has done; nothing is backfilled.
+
+## 34. Boundaries
+
+- **Nothing implemented.** `api/` byte-identical to `origin/main`; the patch is a file
+  under `specs/patches/`, checked but not applied.
+- **No VM24 action**, no C1/C2 re-run, no deployment validation, no performance work.
+- The sandbox used a throwaway export of `HEAD` outside the repository and touched
+  nothing under `dev2026/api/`.
+- **Row order untouched** — spec 003 independent and undecided.
