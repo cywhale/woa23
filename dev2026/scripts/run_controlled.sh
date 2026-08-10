@@ -1045,12 +1045,27 @@ for f in woa23_app.py src/__init__.py src/config.py src/dask_client_manager.py \
 done
 
 echo "== verifying the candidate copy is byte-identical to the repository's =="
-for f in api/__init__.py api/app.py api/config.py api/query.py; do
+# Enumerated, not listed. This was a hard-coded four-file loop, and spec 004 added a
+# fifth module — api/store_paths.py, which holds the path builder both arms' group
+# paths now come from. `cp -r` copied it and the loop would not have checked it: the
+# one file whose byte-identity matters most to this run would have been the one file
+# unverified. A list of filenames drifts from the directory it describes; the
+# directory does not.
+cand_files_repo="$(cd "$HERE" && find api -name '*.py' -not -path '*/__pycache__/*' | sort)"
+cand_files_stage="$(cd "$CAND_DIR" && find api -name '*.py' -not -path '*/__pycache__/*' | sort)"
+if [ "$cand_files_repo" != "$cand_files_stage" ]; then
+  echo "  the staged candidate does not have the same file set as the repository:" >&2
+  diff <(printf '%s\n' "$cand_files_repo") <(printf '%s\n' "$cand_files_stage") >&2 || true
+  exit 1
+fi
+printf '%s\n' "$cand_files_repo" | while IFS= read -r f; do
+  [ -n "$f" ] || continue
   a="$(sha256sum "$HERE/$f" | cut -d' ' -f1)"
   b="$(sha256sum "$CAND_DIR/$f" | cut -d' ' -f1)"
   [ "$a" = "$b" ] || { echo "  $f DIFFERS from the repository ($a vs $b)" >&2; exit 1; }
   echo "  $f  $a"
-done
+done || exit 1
+echo "  $(printf '%s\n' "$cand_files_repo" | grep -c .) candidate source files verified"
 
 # woa23_app.py:63 is the source of the reference's literal. If that line ever
 # changes, the string below is silently wrong, so it is checked rather than trusted.
