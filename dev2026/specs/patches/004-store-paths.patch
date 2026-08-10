@@ -20,7 +20,7 @@ diff --git a/dev2026/api/app.py b/dev2026/api/app.py
  
  
  def generate_custom_openapi():
-@@ -56,6 +58,27 @@
+@@ -56,6 +58,35 @@
  @asynccontextmanager
  async def lifespan(app: FastAPI):
      print("App start at ", datetime.now())
@@ -29,18 +29,26 @@ diff --git a/dev2026/api/app.py b/dev2026/api/app.py
 +    # and never becomes ready — which is the point: an unusable store must not reach
 +    # the first data request.
 +    #
-+    # METADATA ONLY. `open_zarr(..., chunks=None)` is lazy and reads no chunk; a
-+    # chunk read here would warm the page cache before any measurement, which is the
-+    # mistake S1 already found in a readiness probe.
++    # METADATA ONLY, and that is why this opens the zarr GROUP rather than calling
++    # xr.open_zarr. Measured: `xr.open_zarr(path, chunks=None)` is lazy about data
++    # variables but materialises the COORDINATE arrays, which are themselves stored
++    # as chunks — depth/0, lat/0, lon/0. `zarr.open_group(mode="r")` reads .zgroup
++    # and .zmetadata and nothing else, and still rejects an empty directory, an
++    # unparseable .zgroup and an unsupported zarr_format. Zero chunk reads, same
++    # detection.
++    #
++    # A chunk read here would warm the page cache before any measurement, which is
++    # the mistake S1 already found in a readiness probe.
 +    #
 +    # Only the anchor. Whether any other group exists is a per-request question:
 +    # WOA23 publishes oxygen on one degree only and the nutrients on one degree and
 +    # the 'all' time span only, so a store legitimately lacking a combination must
 +    # still start and serve the rest (spec 004 section 24.1).
-+    import xarray as xr
++    import zarr
 +    _anchor = anchor_path(zarr_store_path)
 +    try:
-+        xr.open_zarr(_anchor, chunks=None)
++        _group = zarr.open_group(_anchor, mode="r")
++        list(_group.array_keys())
 +    except Exception as exc:
 +        raise RuntimeError(
 +            f"the WOA23 store's required anchor group could not be opened: "

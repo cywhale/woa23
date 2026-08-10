@@ -6,6 +6,7 @@ document authorises a candidate change.
 
 | rev | date | change |
 |---|---|---|
+| 6 | 2026-08-10 | **Correction, measured: `xr.open_zarr(chunks=None)` does read chunks** — it is lazy about data variables but materialises the coordinate arrays, which are stored as chunks (`depth/0`, `lat/0`, `lon/0`). The proposed check would have satisfied 'metadata only' as I had written it and violated the condition as stated. **Replaced with `zarr.open_group(mode="r")`: zero chunk reads, identical detection** of an empty directory, an unparseable `.zgroup` and an unsupported format; patch regenerated (185 lines) and re-checked. **Three cases move offline** on a synthetic isolated fixture that never involves production's store — D1-10 (audit hook, 0 chunk reads on all seven fixtures **including the valid one**), D1-D3, and a synthetic positive control for D1-8 (the real store still required). Conditions checklist and revised step list: steps 1-3 are now entirely offline. Holding for authorisation. |
 | 5 | 2026-08-10 | **Source citation** for the WOA23 documentation — URL, sha256 `140aa25f…`, retrieval date, page and table anchors for §23, and a note that the PDF's embedded `/Title` still says WOA18 while the body is WOA23. **`D1-D2` renamed `D1-depth-out-of-range` and marked CHARACTERIZATION PENDING**: the first measurement after implementation must pin status (JSON and CSV separately, since `C18`/`C18-csv` already differ), body/error text, and that the outcome is request-level — it may not stay unasserted. `D1-D1` renamed `D1-depth-supported`. **Proposed diff committed as `specs/patches/004-store-paths.patch`**, produced outside the repository and verified with `git apply --check` — not applied. Sandbox exercise of the patch **corrected this spec twice**: N3, an empty directory, passes the import check and is caught at lifespan, not at import as revision 3 claimed; and D1-11 is correspondingly narrower — `--check-config` fails for N2 and N4 only, succeeding for N3, N5, N6 and P1. Nothing implemented. |
 | 4 | 2026-08-10 | **Upstream availability rules recorded from the official WOA23 documentation** (NCEI, pp11-12), supplied by the PI — oxygen and the inorganic nutrients are one-degree only, so `query.py:114` reflects the dataset rather than limiting the API, and **Table 4's depth ranges vary by variable AND climatology** (seasonal nitrate 0-800 m against annual nitrate 0-5500 m). **Purpose narrowed** to: the configured store resolves and its required anchor group is a readable Zarr v2 group — with explicit non-goals, chief among them that **a missing non-anchor request-specific group is request-level and must never prevent startup**. **Structural guarantee selected by the PI**: `query.py:139` uses the shared builder too, output byte-identical including the double slash, and **C1 and C2 must be re-run** because the read path changes. **Depth stays request-level**, pinned by a supported and an unsupported case, with the unsupported case's outcome left to be measured rather than asserted. Sequencing revised so the read-path change is re-validated before validation is layered on it. Nothing implemented. |
 | 3 | 2026-08-10 | Clarifications and the candidate implementation plan — §17-22. **D1-12 split into D1-12a (real store: readiness completes, zero chunk reads) and D1-12b (invalid stores: fail before readiness is observable)**. **The reachable group set is 12, not 18** — revision 2's arithmetic ignored `query.py:114`, which restricts 0.25° to temperature and salinity, making six of the eighteen unreachable by construction. **Settled: the twelve are not a startup invariant**; only four are exercised by any contract case, so requiring twelve would require eight never observed. One stated anchor group instead, with an explicit store manifest named as the only acceptable route to wider coverage; §15 question 2 withdrawn. **D1-11 marked as an acceptance condition of the split option only.** Implementation plan added: a pure `api/store_paths.py` shared by both call sites, ~6 lines in `config.py`, ~8 in the existing `lifespan`, **`query.py` untouched** with D1-13 as an asserted equivalence rather than a structural one, and the trade stated. Empty public API diff. Test matrix extended to D1-15. Multi-worker behaviour under both `preload_app` settings. Nothing implemented. |
@@ -1151,3 +1152,93 @@ new staging directories, as every previous run has done; nothing is backfilled.
 - The sandbox used a throwaway export of `HEAD` outside the repository and touched
   nothing under `dev2026/api/`.
 - **Row order untouched** — spec 003 independent and undecided.
+
+---
+
+# Revision 6 — a measured correction, and the conditions this implementation is held to
+
+**Not applied. Not authorised. Holding.** `api/` is byte-identical to `origin/main`.
+
+## 35. Correction: `xr.open_zarr(chunks=None)` does read chunks
+
+§11.3 and revision 5 both stated that `xr.open_zarr(path, chunks=None)` "reads no
+chunk". **That is false**, and it was measured rather than reasoned:
+
+| open | rejects N3 / N5 / N6 | chunk files read |
+|---|---|---|
+| `xr.open_zarr(path, chunks=None)` | yes | **3** — `depth/0`, `lat/0`, `lon/0` |
+| `zarr.open_group(path, mode="r")` | yes | **0** |
+
+`open_zarr` is lazy about **data variables** and materialises the **coordinate
+arrays**, which are themselves stored as chunks. So the accurate statement of the old
+claim would have been "reads no *data-variable* chunk" — narrower than "metadata
+only", and narrower than the property the PI's condition asks for.
+
+**The proposal now opens the Zarr group directly.** `zarr.open_group(path, mode="r")`
+reads `.zgroup` and `.zmetadata` and nothing else, and still rejects an empty
+directory (`GroupNotFoundError`), an unparseable `.zgroup` (`JSONDecodeError`) and an
+unsupported format (`MetadataError`). **Zero chunk reads, identical detection.** The
+patch is regenerated accordingly — 185 lines — and re-checked with `git apply --check`.
+
+This is worth stating plainly: the check I proposed would have satisfied the letter of
+"metadata only" as I had written it and violated the condition as the PI stated it.
+
+## 36. Three cases move offline
+
+Measured in the sandbox, on a **synthetic isolated fixture** built with
+`xr.Dataset(...).to_zarr(...)` — a real Zarr v2 store with a real openable anchor
+group. **Production's store is not involved and is never read.**
+
+| case | was | now | how |
+|---|---|---|---|
+| **D1-10** zero chunk reads | needs the real store | **offline** | `sys.addaudithook` records every `open` event; assert no path matching a chunk key under the store |
+| **D1-D3** absent non-anchor group | needs the real store | **offline** | fixture has the anchor and deliberately lacks `1_degree/seasonal/Nutrients`; opening it raises `FileNotFoundError` — the request-level failure |
+| **D1-8** no false positive | needs the real store | **partly offline** | a synthetic *valid* store must pass both stages. **The real store remains required** — a synthetic positive is weaker evidence, and only the real store proves the check does not reject the thing it exists to accept |
+
+The whole matrix now runs offline, and every fixture — including the valid one —
+records **0 chunk reads**:
+
+| fixture | import | lifespan | chunk reads |
+|---|---|---|---|
+| N2 nonexistent | REJECT | — | 0 |
+| N3 empty directory | passes | REJECT | 0 |
+| N4 regular file | REJECT | — | 0 |
+| N5 `.zgroup` not JSON | passes | REJECT | 0 |
+| N6 `zarr_format: 99` | passes | REJECT | 0 |
+| **P1 valid (synthetic)** | **passes** | **passes** | **0** |
+
+## 37. Conditions this implementation is held to
+
+Recorded as a checklist so each is auditable rather than remembered.
+
+| # | condition | how it is verified |
+|---|---|---|
+| 1 | `query.py`'s path string preserved, **double slash included** | D1-13a — builder ≡ `f"{store}/{grid}/{subgroup}"` over trailing-slash, bare, absolute, empty and `./` stores |
+| 2 | `config.py`, `lifespan` and `query.py` share **one** builder | D1-13b — no second path expression in `query.py`; all three import `store_paths` |
+| 3 | **no data chunks read** | D1-10 — audit hook, 0 chunk reads across all seven fixtures (§36) |
+| 4 | **D1-D3 uses an isolated fixture; production's store is not modified** | synthetic store under a staging directory; the suite never writes outside it and never touches the clone, production site-packages or `~/python/woa23` |
+| 5 | `D1-depth-out-of-range` characterized on first measurement | JSON and CSV status pinned **separately**, body/error text pinned, request-level confirmed (§31) |
+| 6 | full offline suite green | all 14 suites plus the new D1 suite, by exit status |
+| 7 | **C1 and C2 re-run on the new candidate** | separate authorisations; new labels, new staging |
+| 8 | **old C1/C2 results not backfilled** | new artefacts only; §33's step list |
+| 9 | nothing before C1/C2 pass | no real-store D1 verification, no deployment validation, no performance work |
+
+## 38. Revised step list
+
+| # | step | offline? | authorisation |
+|---|---|---|---|
+| 1 | `store_paths.py` + D1-13a, D1-14, D1-15 | **yes** | implementation |
+| 2 | `query.py` → builder + D1-13b + full suite | **yes** | implementation |
+| 3 | `config.py` + `app.py` + D1-1..D1-6, D1-9/9a, D1-11, D1-12b, **D1-10**, **D1-D3**, synthetic D1-8 | **yes** | implementation |
+| 4 | **C1 re-run** — 5.2A, 64 cases | no | **its own VM24 authorisation** |
+| 5 | **C2 re-run** — three cycles, 5.2B | no | **its own VM24 authorisation** |
+| 6 | real-store D1-7, D1-8, D1-12a; `D1-depth-supported`; **`D1-depth-out-of-range` characterization** | no | after 4 and 5 |
+
+Steps 1–3 are now entirely offline — more than revision 5 expected, because §36 moved
+three cases. Step 6 waits for C1 and C2, per condition 9.
+
+## 39. Status
+
+**Holding.** The patch is a file under `specs/patches/`, checked and not applied; no
+VM24 action; production untouched; row order untouched. Awaiting explicit
+authorisation to apply.
