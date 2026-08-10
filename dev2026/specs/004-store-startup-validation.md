@@ -6,6 +6,7 @@ document authorises a candidate change.
 
 | rev | date | change |
 |---|---|---|
+| 7 | 2026-08-10 | **`source_time_span` and `climatology` separated** — §40. The WOA23 time spans (`all`, `decav`, …) are source provenance, not an API request parameter; `climatology` (`annual`/`seasonal`/`monthly`) is what a user selects. The Zarr group path carries **no source_time_span at all**, so §11.1's question about needing `all` in a path does not arise. Depth cases restated in full with source coverage 1965-2022 at fixture/documentation level and grid/parameter/climatology/depth as request dimensions. **D1's scope stated definitively** — §41. **Chunk wording corrected** — §42: 'reads Zarr metadata files only, no array data chunk including coordinate chunks'; no claim about *which* metadata files, since the audit hook observed exactly one (`.zgroup`) on a consolidated fixture and that is store-dependent; observer scope stated (it sees `open`, not `listdir`). **D1-D3's six requirements all demonstrated offline** — §43, including that the request reaches the group open rather than the upstream 400, and that a fixture too thin to serve a successful request cannot demonstrate request-level failure. **D1-11 tabulated per fixture as split-only** — §44. Builder input coverage enumerated — §45. Nothing applied. |
 | 6 | 2026-08-10 | **Correction, measured: `xr.open_zarr(chunks=None)` does read chunks** — it is lazy about data variables but materialises the coordinate arrays, which are stored as chunks (`depth/0`, `lat/0`, `lon/0`). The proposed check would have satisfied 'metadata only' as I had written it and violated the condition as stated. **Replaced with `zarr.open_group(mode="r")`: zero chunk reads, identical detection** of an empty directory, an unparseable `.zgroup` and an unsupported format; patch regenerated (185 lines) and re-checked. **Three cases move offline** on a synthetic isolated fixture that never involves production's store — D1-10 (audit hook, 0 chunk reads on all seven fixtures **including the valid one**), D1-D3, and a synthetic positive control for D1-8 (the real store still required). Conditions checklist and revised step list: steps 1-3 are now entirely offline. Holding for authorisation. |
 | 5 | 2026-08-10 | **Source citation** for the WOA23 documentation — URL, sha256 `140aa25f…`, retrieval date, page and table anchors for §23, and a note that the PDF's embedded `/Title` still says WOA18 while the body is WOA23. **`D1-D2` renamed `D1-depth-out-of-range` and marked CHARACTERIZATION PENDING**: the first measurement after implementation must pin status (JSON and CSV separately, since `C18`/`C18-csv` already differ), body/error text, and that the outcome is request-level — it may not stay unasserted. `D1-D1` renamed `D1-depth-supported`. **Proposed diff committed as `specs/patches/004-store-paths.patch`**, produced outside the repository and verified with `git apply --check` — not applied. Sandbox exercise of the patch **corrected this spec twice**: N3, an empty directory, passes the import check and is caught at lifespan, not at import as revision 3 claimed; and D1-11 is correspondingly narrower — `--check-config` fails for N2 and N4 only, succeeding for N3, N5, N6 and P1. Nothing implemented. |
 | 4 | 2026-08-10 | **Upstream availability rules recorded from the official WOA23 documentation** (NCEI, pp11-12), supplied by the PI — oxygen and the inorganic nutrients are one-degree only, so `query.py:114` reflects the dataset rather than limiting the API, and **Table 4's depth ranges vary by variable AND climatology** (seasonal nitrate 0-800 m against annual nitrate 0-5500 m). **Purpose narrowed** to: the configured store resolves and its required anchor group is a readable Zarr v2 group — with explicit non-goals, chief among them that **a missing non-anchor request-specific group is request-level and must never prevent startup**. **Structural guarantee selected by the PI**: `query.py:139` uses the shared builder too, output byte-identical including the double slash, and **C1 and C2 must be re-run** because the read path changes. **Depth stays request-level**, pinned by a supported and an unsupported case, with the unsupported case's outcome left to be measured rather than asserted. Sequencing revised so the read-path change is re-validated before validation is layered on it. Nothing implemented. |
@@ -1242,3 +1243,174 @@ three cases. Step 6 waits for C1 and C2, per condition 9.
 **Holding.** The patch is a file under `specs/patches/`, checked and not applied; no
 VM24 action; production untouched; row order untouched. Awaiting explicit
 authorisation to apply.
+
+---
+
+# Revision 7 — source_time_span vs climatology, and six review corrections
+
+**Not applied, not authorised, holding.** `api/` byte-identical to `origin/main`.
+
+## 40. `source_time_span` and `climatology` are different axes
+
+Revision 4 quoted WOA23's time-span rules beside the API's dimensions without saying
+they are not the same thing. They are not, and conflating them would put a WOA23
+internal term into the API's vocabulary.
+
+| | **`source_time_span`** | **`climatology`** |
+|---|---|---|
+| what it is | the period the source observations were averaged over — `all`, `decav`, `decav71A0`, `decav81B0`, `decav91C0`, `A5B4`, `B5C2` | the temporal aggregation the user asks for |
+| values relevant here | nutrients and oxygen: `all` = **1965–2022** | `annual`, `seasonal`, `monthly` |
+| where it lives | dataset provenance — fixture metadata and API documentation | the API's `time_period` parameter |
+| **is it an API request parameter?** | **No.** A user cannot select it and it appears in no endpoint | **Yes** — `time_period`, mapped by `determine_subgroup` |
+| in the Zarr group path | **absent** | present |
+
+**The group path carries no source_time_span at all.** `query.py:139` builds
+`{store}/{grid_path}/{subgroup}` where `subgroup` is
+`{annual|monthly|seasonal}/{TS|Oxy|Nutrients}` — grid, climatology, parameter group.
+So §11.1's open question about needing `all` in a path does not arise: nothing in the
+candidate's path construction refers to a time span. Should a future store ever
+encode one, it must be called **`source_time_span`** or **dataset coverage**, never
+`climatology` and never `time_period`.
+
+§23.1's quotations are unchanged and remain accurate — they are statements about
+**source_time_span availability**, which is what determines whether a variable exists
+on a grid at all. That is why they bear on D1: they explain why a store may
+legitimately lack a group. They are not statements about anything a user can request.
+
+### 40.1 The depth cases, described in full
+
+Neither case names `all` as a request parameter, because it is not one.
+
+| | `D1-depth-supported` | `D1-depth-out-of-range` |
+|---|---|---|
+| source coverage *(fixture metadata / documentation level)* | 1965–2022 | 1965–2022 |
+| grid *(request)* | `1_degree` | `1_degree` |
+| parameter *(request)* | `nitrate` | `nitrate` |
+| **climatology** *(request)* | **`annual`** | **`seasonal`** |
+| depth *(request)* | `dep0=0, dep1=800` | `dep0=3000, dep1=4000` |
+| Table 4 range for that pairing | annual nitrate **0–5500 m** | seasonal nitrate **0–800 m** |
+| expectation | returns data | **CHARACTERIZATION PENDING** |
+
+The distinction is carried entirely by **climatology**: the same variable on the same
+grid has a 5500 m ceiling annually and an 800 m ceiling seasonally.
+
+## 41. D1's scope, stated once and definitively
+
+> **D1 validates that the configured store resolves, and that the required anchor
+> group `1_degree/annual/TS` is a readable Zarr v2 group. Nothing else.**
+
+**D1 does not validate, and does not claim:**
+
+- that every variable / grid / source_time_span combination exists;
+- that every non-anchor group exists;
+- that every depth query is valid;
+- that the WOA store is complete in any sense.
+
+**WOA23's grid, parameter, source_time_span and depth availability are conditional**
+(§23, §40). Oxygen is one-degree only; nitrate, phosphate and silicate are one-degree
+and `all` source coverage only; depth ceilings differ by variable *and* climatology. A
+store built faithfully to WOA23 **will** lack combinations, and that is correct.
+
+**A missing non-anchor, request-specific group is handled by that request and must
+never cause startup to fail.** Demonstrated in §43.
+
+## 42. Chunk validation — wording corrected
+
+Replacing every earlier "metadata only" phrasing:
+
+> The startup check reads **Zarr metadata files only. It reads no array data chunk,
+> including coordinate chunks.**
+
+`xr.open_zarr(chunks=None)` is **not** metadata-only and is no longer proposed: it
+materialises coordinate arrays, opening `depth/0`, `lat/0`, `lon/0` on a small
+fixture.
+
+**No claim is made about which metadata files are read.** Measured with an audit hook,
+`zarr.open_group(path, mode="r")` followed by `array_keys()` opened exactly **one**
+file — `.zgroup` — on a consolidated fixture. That is an observation on one store, not
+a contract: which metadata files a store needs depends on whether it is consolidated.
+**The assertion is the property, not the file list**: no opened path is a data-array
+or coordinate chunk.
+
+**Observer scope, stated so it is not over-read:** the hook records `open` events. A
+directory listing is not an `open`, so `listdir` traffic is invisible to it. This is
+sound for the property in question — reading a chunk requires opening the chunk file —
+but the assertion is "no chunk file was opened", not "no directory was consulted".
+
+Detection is unchanged: **N2–N6 all remain identified**, and the synthetic valid Zarr
+v2 anchor (P1) passes both stages with **zero chunk reads** (§36).
+
+## 43. D1-D3 — all six requirements demonstrated offline
+
+Run against the patched candidate in a throwaway export, on a synthetic isolated
+fixture. The fixture carries the anchor group with the structure the read path
+actually needs — coordinates `lon`, `lat`, `depth`, `parameters`, `time_periods` and
+data variables from `available_vars` — and **deliberately lacks**
+`1_degree/seasonal/Nutrients`.
+
+| # | requirement | result |
+|---|---|---|
+| 1 | the missing group is a **query-reachable legal combination** | `1_degree` + `nitrate` is permitted by `query.py:114` (nutrients are one-degree, and this is one-degree) |
+| 2 | the request **reaches the group open**, not the upstream 400 | raised `FileNotFoundError`, **not** `HTTPException` — so it passed `query.py:119` and failed at the open |
+| 3 | the failure is **request-level** | an exception from that request only |
+| 4 | a **subsequent anchor request still succeeds** | returned 3 rows |
+| 5 | **lifespan did not fail** | started before, exited cleanly after |
+| 6 | **production's store is not modified** | fixture built under a temporary directory; production's store is never opened, and the suite writes nothing outside staging |
+
+Requirement 4 failed on the first attempt, against a **minimal** fixture: the real
+groups carry `parameters` and `time_periods` coordinates that `query.py` requires, and
+a fixture without them raises `KeyError: "No variable named 'parameters'"`. **The
+fixture specification is therefore part of the acceptance**, not an implementation
+detail — a fixture too thin to serve a successful request cannot demonstrate that a
+failure was request-level.
+
+## 44. D1-11 — split-only, per fixture
+
+**`D1-11` is an acceptance condition of the split option and is not a general store
+validation.** `gunicorn --check-config` imports the app and does **not** run lifespan:
+
+| fixture | `--check-config` | why |
+|---|---|---|
+| N2 nonexistent | **fails** | import-time configuration error |
+| N4 regular file | **fails** | import-time configuration error |
+| **N3 empty directory** | **succeeds** | it exists and is a directory; caught at lifespan |
+| N5 `.zgroup` not JSON | **succeeds** | lifespan does not run |
+| N6 `zarr_format: 99` | **succeeds** | lifespan does not run |
+| P1 valid | **succeeds** | — |
+
+**A passing `--check-config` says the configuration is well-formed. It says nothing
+about metadata validity**, and reading it as a store check would be reading it as
+something it is not.
+
+## 45. Shared builder — the required input coverage
+
+Unchanged in design; the test inputs are now enumerated as acceptance rather than left
+to judgement. `group_path` must equal `f"{store}/{grid}/{subgroup}"` for, at minimum:
+
+| input class | example |
+|---|---|
+| trailing slash | `data/` → `data//1_degree/annual/TS` **(double slash preserved)** |
+| bare relative | `data` |
+| absolute | `/home/odbadmin/python/woa23/data` |
+| absolute with trailing slash | `/home/odbadmin/python/woa23/data/` |
+| empty | `""` |
+| dot-relative | `./data/` |
+
+and `import api.store_paths` must perform **no filesystem I/O** (D1-14).
+
+## 46. Sequence after the patch is applied
+
+1. **full offline suite** — all existing suites plus the D1 suite;
+2. **C1 re-run** on the new candidate — its own VM24 authorisation;
+3. **C2 re-run** on the new candidate — its own VM24 authorisation;
+4. **old C1/C2 results are not backfilled** — new labels, new staging, new artefacts;
+5. **not before 2 and 3 pass**: real-store D1 characterization, deployment validation,
+   performance work.
+
+## 47. This round's limits
+
+Nothing was applied, nothing was started. No patch application, no candidate change,
+no VM24, no HTTP to production or staging, no C1/C2, no deployment or performance
+work. The measurements in §42 and §43 were made against a **throwaway export of
+`HEAD` with the patch applied inside it**, in a temporary directory, using synthetic
+fixtures; the repository's `api/` was never written to.
