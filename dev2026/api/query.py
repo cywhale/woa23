@@ -50,6 +50,7 @@ from fastapi import HTTPException
 from api.config import (
     available_vars, grid_dir, time_periods, zarr_store_path,
 )
+from api.store_paths import group_path
 
 
 def to_lowest_grid_point(lon: float, lat: float, grid_size: float) -> tuple:
@@ -136,7 +137,7 @@ async def process_woa23_data(lon0: float, lat0: float, lon1: Optional[float], la
     for param in pars:
         for period in periods:
             subgroup = determine_subgroup(param, period)
-            zarr_group_paths.add(f"{zarr_store_path}/{grid_path}/{subgroup}")
+            zarr_group_paths.add(group_path(zarr_store_path, grid_path, subgroup))
 
     if dep0 is None:
         dep0 = 0

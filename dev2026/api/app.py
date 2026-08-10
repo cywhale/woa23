@@ -19,6 +19,7 @@ untouched and the VM24 cluster keeps running — `tide_app` and `mhw_app` depend
 it; only this app's client is removed.
 """
 
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from tempfile import NamedTemporaryFile
@@ -29,8 +30,9 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, ORJSONResponse, FileResponse
 
-from api.config import available_vars
+from api.config import available_vars, zarr_store_path
 from api.query import process_woa23_data
+from api.store_paths import anchor_path, describe
 
 
 def generate_custom_openapi():
@@ -56,6 +58,41 @@ def generate_custom_openapi():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("App start at ", datetime.now())
+    # Spec 004: the required anchor group must open as Zarr v2 metadata before this
+    # worker serves anything. Raising here fails ASGI startup, so the worker exits
+    # and never becomes ready — which is the point: an unusable store must not reach
+    # the first data request.
+    #
+    # Reads Zarr METADATA FILES ONLY. No array data chunk is read, and that
+    # includes coordinate chunks.
+    #
+    # Measured, not assumed. `xr.open_zarr(path, chunks=None)` is lazy about data
+    # variables but materialises the COORDINATE arrays, which are themselves stored
+    # as chunks: on a small fixture it opens depth/0, lat/0 and lon/0. It is
+    # therefore not metadata-only and is not used here.
+    #
+    # What this opens instead is observed with an audit hook rather than claimed
+    # from the API surface: on that fixture the call below opened exactly one file,
+    # `.zgroup`. The assertion the tests make is the property, not the file list —
+    # no opened path is a data-array or coordinate chunk — because which metadata
+    # files a store needs depends on the store (consolidated or not).
+    #
+    # A chunk read here would warm the page cache before any measurement, which is
+    # the mistake S1 already found in a readiness probe.
+    #
+    # Only the anchor. Whether any other group exists is a per-request question:
+    # WOA23 publishes oxygen on one degree only and the nutrients on one degree and
+    # the 'all' time span only, so a store legitimately lacking a combination must
+    # still start and serve the rest (spec 004 section 24.1).
+    import zarr
+    _anchor = anchor_path(zarr_store_path)
+    try:
+        _group = zarr.open_group(_anchor, mode="r")
+        list(_group.array_keys())
+    except Exception as exc:
+        raise RuntimeError(
+            f"the WOA23 store's required anchor group could not be opened: "
+            f"{_anchor} — store {describe(zarr_store_path, os.getcwd())}") from exc
     yield
     # below code to execute when app is shutting down
     print("App end at ", datetime.now())
