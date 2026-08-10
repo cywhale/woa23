@@ -26,7 +26,7 @@
 #   WOA23_S2_C2_GRANTED=yes ./scripts/run_c2_cycles.sh \
 #       --python-binary /home/odbadmin/.pyenv/versions/py311/bin/python3.11 \
 #       --package-clone /home/odbadmin/woa23-s2-package-clone/dist \
-#       --clone-manifest /home/odbadmin/woa23-s2-package-clone/manifest/SHA256SUMS \
+#       --clone-manifest /home/odbadmin/woa23-s2-package-clone/clone.manifest \
 #       --workdir-base /home/odbadmin/woa23-s2-c2-work \
 #       --candidate-port 18071 --reference-port 18072 --scheduler-port 18798
 
@@ -61,6 +61,12 @@ usage: run_c2_cycles.sh --python-binary PATH --package-clone PATH
 
 Runs exactly three --c2-cycle invocations and reports the 5.2B verdict, the seed
 diversity observed across them, and order stability. Never runs a fourth.
+
+--clone-manifest is the FOUR-COLUMN manifest written when the clone was built,
+normally <clone-root>/clone.manifest. It is NOT the clone root's SHA256SUMS: that
+file lists the digests of the manifest files and cannot verify a tree. An earlier
+version of the usage example above named a manifest/SHA256SUMS path that does not
+exist, and a C2 run was launched against the wrong file because of it.
 
 Requires WOA23_S2_C2_GRANTED=yes. WOA23_D2B_GRANTED does not authorise this.
 USAGE

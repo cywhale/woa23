@@ -34,6 +34,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import stat
 import sys
 import time
@@ -140,15 +141,50 @@ def classify(chain: list[dict], uid: int | None = None) -> dict:
     return {"problems": problems, "residual_exposure": exposures, "chain": chain}
 
 
+_SHA256SUM_LINE = re.compile(r"^[0-9a-fA-F]{64} [ *]\S")
+
+
+def _wrong_file_diagnosis(path: str, line: str) -> str | None:
+    """Name the mistake if this looks like a file someone would pass by mistake.
+
+    One file has actually been passed here in place of the manifest, and it is the
+    obvious one to reach for: the clone root holds both `clone.manifest` and a
+    `SHA256SUMS` that is a sha256sum-style digest list of the manifest FILES. The
+    names are similar, `SHA256SUMS` is the conventional name for exactly this kind
+    of check elsewhere, and `run_c2_cycles.sh`'s usage example pointed at a
+    `manifest/SHA256SUMS` path that does not exist.
+
+    "expected 4 tab-separated fields, got 1" is true and tells the reader nothing
+    about which file to use instead. This does.
+    """
+    if _SHA256SUM_LINE.match(line):
+        return (
+            f"{path} is a sha256sum-style digest list (`<sha256>  <name>`), not a "
+            f"package manifest. It records digests of a few named FILES; it does "
+            f"not list the clone's contents, so nothing in it can verify a tree. "
+            f"The manifest is the four-column file written when the clone was "
+            f"built — normally <clone-root>/clone.manifest — whose columns are "
+            f"relpath, sha256, size, mtime_ns, tab-separated. Pass that.")
+    return None
+
+
 def read_manifest(path: str) -> tuple[dict, str | None]:
     """`relpath\\tsha256\\tsize\\tmtime_ns` per line."""
     want: dict = {}
     try:
         with open(path, "rb") as fh:
             for n, line in enumerate(fh, 1):
-                parts = line.decode().rstrip("\n").split("\t")
+                text = line.decode().rstrip("\n")
+                parts = text.split("\t")
                 if len(parts) != 4:
-                    return {}, f"{path}:{n}: expected 4 tab-separated fields, got {len(parts)}"
+                    diagnosis = _wrong_file_diagnosis(path, text)
+                    if diagnosis:
+                        return {}, diagnosis
+                    return {}, (f"{path}:{n}: expected 4 tab-separated fields "
+                                f"(relpath, sha256, size, mtime_ns), got "
+                                f"{len(parts)}. This is not the manifest written "
+                                f"when the clone was built; that file is normally "
+                                f"<clone-root>/clone.manifest.")
                 rel, digest, size, mtime = parts
                 try:
                     want[rel] = (digest, int(size), int(mtime))

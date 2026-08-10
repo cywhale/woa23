@@ -208,7 +208,10 @@ echo "the S2 arguments are required by the S2 modes and refused outside them"
 # argument shape.
 S2FIX="$(mktemp -d)"
 mkdir -p "$S2FIX/clone" "$S2FIX/work-clone"
-: > "$S2FIX/manifest"
+# A real four-column line: relpath, sha256, size, mtime_ns. The runner rejects
+# anything else before the grant, so an empty file here would stop every case that
+# is meant to reach further.
+printf 'a.py\t%s\t12\t1722906835056193900\n' "$(printf 'f%.0s' $(seq 64))" > "$S2FIX/manifest"
 cp /bin/echo "$S2FIX/binary" 2>/dev/null || printf '#!/bin/sh\ntrue\n' > "$S2FIX/binary"
 chmod +x "$S2FIX/binary"
 chmod a-w "$S2FIX/clone" "$S2FIX/work-clone"
@@ -294,7 +297,11 @@ echo "the three named artefacts must exist, and the clone must be read-only"
 # and behind the host gate none of these refusals could be exercised off VM24 at all.
 S2D="$(mktemp -d)"
 mkdir -p "$S2D/clone" "$S2D/rwclone"
-: > "$S2D/manifest"
+printf 'a.py\t%s\t12\t1722906835056193900\n' "$(printf 'f%.0s' $(seq 64))" > "$S2D/manifest"
+# The two files that get passed by mistake, side by side, as they are on VM24.
+: > "$S2D/empty-manifest"
+printf '3c14cfe70369d081b9b10467d258892654299cba360a3852b886274550630407  source.manifest\n' \
+  > "$S2D/SHA256SUMS"
 : > "$S2D/notabinary"
 cp /bin/echo "$S2D/binary" 2>/dev/null || printf '#!/bin/sh\ntrue\n' > "$S2D/binary"
 chmod +x "$S2D/binary"
@@ -332,6 +339,28 @@ check "a nonexistent --clone-manifest is refused" "2" \
       "$(ok_c1 "$S2D/binary" "$S2D/clone" "$S2D/no-such-manifest")"
 check "a directory given as --clone-manifest is refused" "2" \
       "$(ok_c1 "$S2D/binary" "$S2D/clone" "$S2D/clone")"
+
+# The failure of 2026-08-10: the clone root's SHA256SUMS was passed instead of
+# clone.manifest. It exists and is readable, so every check up to here passed it,
+# and the run got as far as bootstrapping a venv and building an environment
+# record before the integrity stage finally read the file. It is now refused in
+# the same second the argument is read, and refused by NAME.
+check "the clone root's SHA256SUMS is refused" "2" \
+      "$(ok_c1 "$S2D/binary" "$S2D/clone" "$S2D/SHA256SUMS")"
+out="$(ok_c1_run "$S2D/binary" "$S2D/clone" "$S2D/SHA256SUMS")"
+check "and is identified as a digest list" "yes" \
+      "$(has_text "$out" "sha256sum-style digest list")"
+check "and the right file is named" "yes" "$(has_text "$out" "clone.manifest")"
+check "and its four columns are spelled out" "yes" \
+      "$(has_text "$out" "relpath, sha256, size, mtime_ns")"
+check "and the field count it actually found is reported" "yes" \
+      "$(has_text "$out" "1 tab-separated field")"
+
+check "an empty file is refused too" "2" \
+      "$(ok_c1 "$S2D/binary" "$S2D/clone" "$S2D/empty-manifest")"
+check "without calling it a digest list" "no" \
+      "$(has_text "$(ok_c1_run "$S2D/binary" "$S2D/clone" "$S2D/empty-manifest")" \
+         "digest list")"
 
 # The clone must be the immutable artefact. A writable one may already have been
 # modified, and this run could modify it further.

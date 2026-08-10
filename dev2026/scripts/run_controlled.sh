@@ -114,7 +114,12 @@ usage: run_controlled.sh [--contract-only | --cleanup-only | --c1 | --c2-cycle]
                          own venv would answer a question nobody asked.
   --package-clone PATH   root of the read-only production package-tree clone.
   --clone-manifest PATH  the manifest written when that clone was built and
-                         verified. Its digest anchors the environment record.
+                         verified — the FOUR-COLUMN file, normally
+                         <clone-root>/clone.manifest, whose columns are
+                         relpath, sha256, size, mtime_ns. NOT the clone root's
+                         SHA256SUMS, which lists the digests of the manifest
+                         files and cannot verify a tree. Its digest anchors the
+                         environment record.
   --expected-workers N   ASSERT production's worker count. This does NOT set the
                          arms' worker count — that is read from production's own
                          argv at run time. If the two disagree the run aborts
@@ -384,6 +389,29 @@ if [ "$S2_MODE" != none ]; then
     echo "--package-clone $PKG_CLONE is not a directory" >&2; exit 2; }
   [ -f "$CLONE_MANIFEST" ] || {
     echo "--clone-manifest $CLONE_MANIFEST is not a readable file" >&2; exit 2; }
+  # Shape, not just existence, and checked HERE rather than at the integrity stage.
+  #
+  # The clone root holds both `clone.manifest` and a `SHA256SUMS` that lists the
+  # digests of the manifest FILES. The names are similar, SHA256SUMS is the
+  # conventional name for this kind of check everywhere else, and this script's own
+  # usage example pointed at a path that does not exist — so the wrong one was
+  # passed, and the run bootstrapped a venv and built an environment record before
+  # anything looked at the file. A one-line check costs nothing and fails in the
+  # same second the argument is read.
+  manifest_nf="$(head -1 "$CLONE_MANIFEST" | awk -F'\t' '{print NF}')"
+  if [ "${manifest_nf:-0}" != 4 ]; then
+    echo "--clone-manifest $CLONE_MANIFEST is not a package manifest: its first" >&2
+    echo "  line has ${manifest_nf:-0} tab-separated field(s), not 4." >&2
+    if head -1 "$CLONE_MANIFEST" | grep -qE '^[0-9a-fA-F]{64} [ *]'; then
+      echo "  It is a sha256sum-style digest list. That file records digests of a" >&2
+      echo "  few named FILES; it does not list the clone's contents, so nothing" >&2
+      echo "  in it can verify a tree." >&2
+    fi
+    echo "  The manifest is the four-column file written when the clone was built" >&2
+    echo "  — normally <clone-root>/clone.manifest — with the columns" >&2
+    echo "  relpath, sha256, size, mtime_ns." >&2
+    exit 2
+  fi
   # The clone is meant to be immutable. If this run can write to it, it is not the
   # artefact that was built and verified — and a stray .pyc would change it.
   #

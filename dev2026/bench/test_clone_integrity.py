@@ -137,6 +137,63 @@ with tempfile.TemporaryDirectory() as td:
     check("and reports the error rather than a match", True, "error" in v)
 
 
+print()
+print("the digest list next door is named as the wrong file, not just miscounted")
+# The clone root holds `clone.manifest` AND a `SHA256SUMS` listing the digests of
+# the manifest files. On 2026-08-10 a C2 run was launched against the second: the
+# error said "expected 4 tab-separated fields, got 1", which is true and does not
+# tell anyone which file to use. These assert that it now does.
+with tempfile.TemporaryDirectory() as td:
+    root = Path(td)
+    SUMS = ("3c14cfe70369d081b9b10467d258892654299cba360a3852b886274550630407  "
+            "source.manifest\n"
+            "f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4  "
+            "clone.manifest\n")
+    (root / "SHA256SUMS").write_text(SUMS)
+    _, err = read_manifest(str(root / "SHA256SUMS"))
+    check("VM24's actual SHA256SUMS is rejected", True, err is not None)
+    check("and is identified as a digest list", True, "digest list" in err)
+    check("and the right file is named", True, "clone.manifest" in err)
+    check("with its four columns spelled out", True,
+          all(c in err for c in ("relpath", "sha256", "size", "mtime_ns")))
+    check("and it says why the wrong file cannot do the job", True,
+          "verify a tree" in err)
+
+    # `sha256sum --binary` writes an asterisk instead of the second space.
+    (root / "binary.sums").write_text(
+        "3c14cfe70369d081b9b10467d258892654299cba360a3852b886274550630407 *x.tar\n")
+    _, err = read_manifest(str(root / "binary.sums"))
+    check("the binary-mode spelling is caught too", True, "digest list" in err)
+
+    # A four-column manifest whose first field happens to be a digest-shaped name
+    # must not be mistaken for one: the tabs decide, and it parses.
+    ok_line = ("3c14cfe70369d081b9b10467d258892654299cba360a3852b886274550630407\t"
+               "f3b66c493b40ed399a08add5742dce2dd0ad5fb51cf76f6fe083128df0e771f4\t"
+               "12\t1722906835056193900\n")
+    (root / "odd.manifest").write_text(ok_line)
+    want, err = read_manifest(str(root / "odd.manifest"))
+    check("a real manifest is not misdiagnosed", None, err)
+    check("and it parses", 1, len(want))
+
+    # A plain wrong file gets the generic message, and that message must still say
+    # where the real manifest is — the whole failure was not knowing.
+    (root / "notes.txt").write_text("just some prose\n")
+    _, err = read_manifest(str(root / "notes.txt"))
+    check("an unrelated file is rejected", True, err is not None)
+    check("without claiming to be a digest list", False, "digest list" in err)
+    check("but still naming clone.manifest", True, "clone.manifest" in err)
+
+    # The real shape, taken from VM24's clone.manifest line 1.
+    (root / "clone.manifest").write_text(
+        "_cffi_backend.cpython-311-x86_64-linux-gnu.so\t"
+        "39056b969418bf05203dcf9e35fe60f116e3fbb68216bec0a47bd5d72d40808a\t"
+        "1064368\t1722906835056193900\n")
+    want, err = read_manifest(str(root / "clone.manifest"))
+    check("VM24's actual manifest shape is accepted", None, err)
+    check("and yields the file it names", True,
+          "_cffi_backend.cpython-311-x86_64-linux-gnu.so" in want)
+
+
 # ---------------------------------------------------------- ancestor chain ---
 print()
 print("the ancestor chain is walked, resolved, and classified by remediability")
