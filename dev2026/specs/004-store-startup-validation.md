@@ -6,6 +6,7 @@ document authorises a candidate change.
 
 | rev | date | change |
 |---|---|---|
+| 3 | 2026-08-10 | Clarifications and the candidate implementation plan — §17-22. **D1-12 split into D1-12a (real store: readiness completes, zero chunk reads) and D1-12b (invalid stores: fail before readiness is observable)**. **The reachable group set is 12, not 18** — revision 2's arithmetic ignored `query.py:114`, which restricts 0.25° to temperature and salinity, making six of the eighteen unreachable by construction. **Settled: the twelve are not a startup invariant**; only four are exercised by any contract case, so requiring twelve would require eight never observed. One stated anchor group instead, with an explicit store manifest named as the only acceptable route to wider coverage; §15 question 2 withdrawn. **D1-11 marked as an acceptance condition of the split option only.** Implementation plan added: a pure `api/store_paths.py` shared by both call sites, ~6 lines in `config.py`, ~8 in the existing `lifespan`, **`query.py` untouched** with D1-13 as an asserted equivalence rather than a structural one, and the trade stated. Empty public API diff. Test matrix extended to D1-15. Multi-worker behaviour under both `preload_app` settings. Nothing implemented. |
 | 2 | 2026-08-10 | Implementation proposal added — §9-16. Purpose restated as *fail before ready, not on first request*. Zarr v2 metadata scope; relative-path resolution and what a message must name; **metadata only, never a chunk**, with an acceptance case that asserts it; where validation runs under `-w 2` and what `preload_app` changes; the startup / readiness / data-path boundary. Import-time and lifespan compared, with a split recommendation and the case for lifespan-alone if one change is preferred. Four read-only questions listed as prerequisites. Nothing implemented. |
 | 1 | 2026-08-09 | First draft. Measured behaviour carried over from spec 002 §7 D1; acceptance cases, test plan and authorisation boundaries added. |
 
@@ -462,3 +463,295 @@ Read-only, and **not requested or authorised by this document**:
 - **No performance claim**, and no measurement of §11.4's cost.
 - **Readiness is not redefined** and no store read is added to a health check.
 - The four items in §15 are questions, not planned actions.
+
+---
+
+# Revision 3 — clarifications and the candidate implementation plan
+
+**Still a plan. No candidate file is modified, `api/` remains byte-identical to
+`origin/main`, and nothing here is executed.**
+
+## 17. Three clarifications
+
+### 17.1 D1-12 applies to the real-store control only
+
+D1-12 was written as though it were general. It is not, and split into the two
+statements it was conflating:
+
+| case | store | required |
+|---|---|---|
+| **D1-12a** | **P1, the real store** | process readiness completes — the OpenAPI endpoint answers 200 — **and no data chunk has been read** at any point during startup or readiness |
+| **D1-12b** | **N2–N6, every invalid store** | the process **fails before readiness can be observed**. There is no readiness to check, because there is no serving process |
+
+D1-12a is the only one that asserts anything about a 200. Asserting readiness for an
+invalid store would be asserting a state the design exists to prevent — and under the
+split, N2–N6 never reach the point where an OpenAPI request could be made.
+
+N1 remains as it is today: it already fails at import, before either.
+
+### 17.2 The reachable group paths are **12, not 18** — and none is a startup invariant
+
+**Revision 2 said 18. That was wrong**, and the error was arithmetic over the code's
+combinatorial space rather than over what the code can reach. `api/query.py:114`
+restricts the parameter set at 0.25°:
+
+```
+available_pars = ['temperature', 'salinity'] if gridSz == 0.25 else [... eight ...]
+```
+
+so `025_degree/*/Oxy` and `025_degree/*/Nutrients` — six of the eighteen — are
+rejected with a 400 at `query.py:119` **before any store access**. They are
+unreachable by construction. The reachable set is **twelve**:
+
+```
+1_degree/{annual,monthly,seasonal}/{TS,Oxy,Nutrients}      9
+025_degree/{annual,monthly,seasonal}/TS                    3
+```
+
+**Of those twelve, the 64 contract cases exercise four.** Derived from
+`bench/contract_cases.py` and `determine_subgroup`:
+
+| group path | contract cases touching it |
+|---|---|
+| `1_degree/annual/TS` | 22 |
+| `025_degree/annual/TS` | 4 |
+| `1_degree/seasonal/Oxy` | 2 |
+| `1_degree/seasonal/TS` | 2 |
+| the other **eight** reachable paths | **0** |
+
+**Decision: the twelve are not a required startup invariant, and validation must not
+enumerate them.** Three reasons, in order of force:
+
+1. **We have positive evidence that four exist.** Nothing we have run has ever read
+   the other eight. Requiring twelve at startup would require eight things never
+   observed — which is not thoroughness, it is the false failure D1-8 forbids, and it
+   would be discovered on a deployment rather than here.
+2. **Even if all twelve existed, coupling startup to data completeness is wrong.**
+   The group is chosen per request from the query parameters. A store legitimately
+   missing one combination should fail *those* requests, not refuse to start and take
+   down the other eleven.
+3. The set is derived from a combinatorial expansion of code constants. It changes
+   whenever `grid_dir`, `time_periods` or `determine_subgroup` changes, so a startup
+   invariant defined this way silently redefines itself with an unrelated edit.
+
+**What the invariant is instead.** The narrowest thing that distinguishes "a readable
+Zarr v2 store" from "not one": **one stated anchor group opens as Zarr v2 metadata**.
+
+The anchor is **`<store>/1_degree/annual/TS`**, stated as a constant and not derived:
+it is the API's default combination (grid `01`, period `0`, `temperature`/`salinity`),
+it carries 22 of the exercised contract cases, and it is already the group named in
+the `FileNotFoundError` that N2, N3 and N4 produce today.
+
+**If wider coverage is ever wanted it must come from an explicit store schema or
+manifest** — a declared list of required groups, versioned with the store and
+justified against it — never from re-expanding the code's combinatorial space. That
+would be its own spec. It is **not proposed here**, and §15's question 2 is therefore
+withdrawn as a prerequisite: the answer no longer gates the design, because the
+design does not depend on it.
+
+### 17.3 D1-11 belongs to the split, not to every option
+
+D1-11 — `gunicorn --check-config` fails for N2–N4 and succeeds for N5, N6 and P1 — is
+an acceptance condition **of the split option only**. It is a consequence of putting
+existence and shape at import time while the metadata open is in lifespan, and it is
+false for the others:
+
+| option | `--check-config` behaviour | is D1-11 applicable? |
+|---|---|---|
+| A do nothing | succeeds for N2–N6 | **no** |
+| B import-time only | fails for N2–N4, and for N5/N6 if it opens metadata | **no** — different expectation |
+| C lifespan only | succeeds for **all** of N2–N6 | **no** — lifespan does not run |
+| **split (recommended, and now selected)** | fails N2–N4, succeeds N5/N6/P1 | **yes** |
+
+Stated because the reverse reading is available and wrong: D1-11 is not evidence that
+`--check-config` is a good store check. It is a precise statement of **what the config
+check does and does not cover under this design** — it covers configuration, not the
+store's contents, and it says so.
+
+---
+
+## 18. Candidate implementation plan
+
+Per the PI's direction: import-time checks configuration, resolution and required
+type; lifespan checks Zarr v2 metadata; both share **one pure resolver/path builder**;
+**metadata only, never a chunk**.
+
+### 18.1 Files
+
+| file | change | why |
+|---|---|---|
+| **`api/store_paths.py`** | **new**, pure | the shared resolver and path builder. Pure — no filesystem access, no store access, no imports from `api.config` — so it is testable with no environment and no store, and so importing it has no side effect |
+| **`api/config.py`** | ~6 lines added | after `zarr_store_path` is read, resolve it and check existence and type |
+| **`api/app.py`** | ~8 lines added inside the existing `lifespan` | open the anchor group's metadata |
+| `api/query.py` | **unchanged** — see §18.4 | the read path is what C1 and C2 just validated |
+
+### 18.2 The shared pure module — interface only
+
+```python
+# api/store_paths.py — pure: no I/O, no env, no api.config import
+ANCHOR_GROUP: str                       # "1_degree/annual/TS", stated not derived
+
+def group_path(store: str, grid_path: str, subgroup: str) -> str: ...
+    # EXACTLY query.py:139's expression: f"{store}/{grid_path}/{subgroup}"
+    # including the double slash a trailing-slash store produces.
+
+def resolve(store: str, cwd: str) -> str: ...
+    # the absolute path the read path will use. Does NOT change resolution —
+    # it reports it. os.path.join(cwd, store) semantics, no normalisation
+    # beyond making it absolute.
+
+def describe(store: str, cwd: str) -> str: ...
+    # "<resolved absolute path> (WOA23_ZARR_STORE=<value!r>, cwd=<cwd>)"
+    # the one string every failure message must contain — D1-9a.
+```
+
+Nothing in it touches the filesystem, so `import api.store_paths` is free of side
+effects and the offline tests need neither a store nor an environment variable.
+
+### 18.3 The two call sites — behaviour, not code
+
+**`api/config.py`, at import**, immediately after line 31:
+
+- resolve the configured value against the cwd;
+- require the resolved path to **exist** and to be a **directory**;
+- on failure raise with `describe(...)` in the message.
+
+Catches N2, N3, N4 — the three that are indistinguishable today. Reads no store
+metadata and opens nothing.
+
+**`api/app.py`, inside the existing `lifespan`**, before `yield`:
+
+- build `group_path(store, *ANCHOR_GROUP.split("/", 1))`;
+- open it for **metadata only** — `xr.open_zarr(path, chunks=None)`, which is lazy —
+  and discard the handle;
+- on failure raise with `describe(...)` **and the anchor group path** in the message,
+  chaining the original `JSONDecodeError` / `MetadataError` rather than replacing it.
+
+Catches N5 and N6. Raising inside `lifespan` fails ASGI startup, so the worker exits
+and never serves — which is the stated purpose.
+
+### 18.4 The public API diff is empty, and `query.py` is not touched
+
+**No endpoint, parameter, response schema or status code changes.** The OpenAPI
+document is unchanged. The only externally visible difference is that a
+**misconfigured** deployment fails to start instead of starting and returning errors.
+For a correctly configured deployment there is **no observable difference at all** —
+which is what D1-8 and D1-12a assert.
+
+`api/query.py` is deliberately left alone. Two ways to guarantee D1-13 — that
+validation builds the path the read path uses:
+
+| | guarantee | cost |
+|---|---|---|
+| **(i) chosen** | validation calls `group_path`; `query.py:139` keeps its literal expression; **a test asserts the two produce identical strings** over a table of inputs | read path untouched, so C1 and C2 remain valid without re-running |
+| (ii) not chosen | `query.py:139` calls `group_path` too — structural, not asserted | **changes the read path**, so C1's byte-exact result would have to be re-established before it could be relied on |
+
+(i) is chosen because the read path is precisely what C1 and C2 just validated, and a
+test that compares two expressions is cheap. **It is the weaker guarantee** — a future
+edit to `query.py:139` breaks the equivalence and only the test catches it. That is
+the trade, stated rather than hidden. If the PI prefers (ii), it needs a C1 re-run in
+the same change.
+
+### 18.5 What this does *not* do
+
+- **No readiness change.** The OpenAPI endpoint still reads nothing from the store,
+  and no store check is added to any polled path.
+- **No chunk read.** `open_zarr(..., chunks=None)` is lazy; nothing indexes,
+  `.compute()`s, `.load()`s or selects.
+- **No change to path resolution**, only to whether it is reported.
+- **No enumeration of the twelve.** One stated anchor.
+- **The reference is untouched.** It ignores the variable (§3), so these are
+  candidate-only cases and must never be run as a two-arm contract.
+
+## 19. Test matrix
+
+All offline. Every run asserts the whole matrix, not the changed cells.
+
+### 19.1 The seven fixtures × three stages, under the split
+
+| case | fixture | import | lifespan | first data request |
+|---|---|---|---|---|
+| D1-1 | N1 unset | **fail** (today, unchanged) | not reached | not reached |
+| D1-2 | N2 nonexistent | **fail** | not reached | not reached |
+| D1-3 | N3 empty dir | **fail** | not reached | not reached |
+| D1-4 | N4 regular file | **fail** | not reached | not reached |
+| D1-5 | N5 `.zgroup` not JSON | pass | **fail** | not reached |
+| D1-6 | N6 `zarr_format: 99` | pass | **fail** | not reached |
+| D1-7 | P1 real store | pass | pass | **returns data** |
+
+### 19.2 The additional cases
+
+| case | assertion |
+|---|---|
+| D1-8 | the real store is **not** rejected at either stage, under the arms' own launch (`-S`, clone on `PYTHONPATH`) |
+| D1-9 / D1-9a | every failure message contains `describe(...)` — resolved absolute path, configured value, cwd — and the lifespan failures additionally name the anchor group |
+| D1-10 | **zero chunk reads.** A store wrapper records every key read during import, lifespan and an OpenAPI request; assert no key matches a chunk-key pattern. Asserted, not trusted |
+| D1-11 | *(split only — §17.3)* `--check-config` **fails** for N2–N4, **succeeds** for N5, N6, P1 |
+| D1-12a | P1: OpenAPI answers 200 **and** the chunk-read count is zero |
+| D1-12b | N2–N6: the process never reaches a state where readiness could be observed |
+| D1-13 | `group_path(...)` equals `query.py:139`'s expression over a table of (store, grid, subgroup), including a trailing-slash store producing the double slash |
+| D1-14 | `import api.store_paths` performs no filesystem access — the module is pure |
+| D1-15 | the anchor is a **stated constant**, not derived from `grid_dir` / `time_periods` / `determine_subgroup` |
+
+### 19.3 How each stage is exercised
+
+| stage | invocation |
+|---|---|
+| import | `python -S -c "import api.config"` and `... import api.app` |
+| `--check-config` | `gunicorn api.app:app --check-config` — imports, does **not** run lifespan |
+| lifespan | the ASGI lifespan protocol driven directly, or `TestClient` as a context manager; **no socket bound** |
+| first data request | the query coroutine in-process; no socket, no HTTP |
+
+Fixtures are rebuilt per run under a staging directory and are **never** placed inside
+the package clone, production's site-packages or `~/python/woa23`.
+
+## 20. Multi-worker behaviour
+
+Production runs `-w 2`. What each worker does under the split:
+
+| | `preload_app` **off** (gunicorn default) | `preload_app` **on** |
+|---|---|---|
+| import-time check | **once per worker** — 2 filesystem stats total | **once in the arbiter**, before fork |
+| lifespan check | **once per worker** — 2 metadata opens total | **once per worker** — still 2 |
+| where a bad **configuration** fails | each worker fails to boot; gunicorn gives up after repeated failures | the **arbiter** fails before any worker exists |
+| where a bad **store** fails | each worker's ASGI startup fails; worker exits | same — lifespan is per worker regardless |
+| net effect | **no service, either way** | **no service, either way** |
+
+Three things follow, and the third is the one to design for:
+
+1. **Cost is bounded and small**: per worker, a `stat` plus one group's metadata open.
+   No chunk read, no scan of the store, and nothing proportional to its size. **No
+   figure is claimed** — none has been measured, and measuring it belongs to whichever
+   change is approved.
+2. **Neither setting changes the outcome**, only which process reports it and how many
+   times. Both end with the service not running.
+3. **Workers fail independently and identically.** The check is deterministic and
+   depends on nothing per-process — no hash seed, no ordering, no shared state — so
+   two workers cannot disagree. A partial failure, where one worker serves and another
+   does not, is not reachable by this design; if it were ever observed it would mean
+   the store changed between the two workers' startups, which is a different fault.
+
+**Whether production passes `--preload` is still not established** (§15 question 3),
+and under this design it does not change the outcome — only the log. It stays a
+question for deployment validation rather than a prerequisite for this change.
+
+## 21. Sequencing, if approved
+
+1. `api/store_paths.py` plus its offline tests — pure, no store, no environment. **No
+   behaviour change**, so it can land and be reviewed on its own.
+2. The `api/config.py` call site and D1-1 to D1-4, D1-9a, D1-11, D1-14.
+3. The `api/app.py` lifespan call site and D1-5, D1-6, D1-10, D1-12a/b.
+4. The full 7-fixture matrix and D1-8 as a regression run.
+5. **A C1 re-run is not required by (i)** — the read path is unchanged — but the PI
+   may want one anyway as evidence that the contract is unaffected. That would be a
+   separate authorisation.
+
+## 22. Boundaries, restated
+
+- **Nothing implemented.** `api/` is byte-identical to `origin/main`.
+- **No VM24 action**, no production contact, no PM2, no systemd, no deployment
+  validation, no performance measurement.
+- **Row order is untouched** — no sorting, no pinned seed. Spec 003 stays independent
+  and undecided.
+- §15's questions 1, 3 and 4 stand; **question 2 is withdrawn** — §17.2 removes the
+  design's dependence on it.
