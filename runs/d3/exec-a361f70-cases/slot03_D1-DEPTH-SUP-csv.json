@@ -1,0 +1,26 @@
+{
+  "attempt_number": 3,
+  "body_b64_full": "bG9uLGxhdCxkZXB0aCx0aW1lX3BlcmlvZCxuaXRyYXRlCjEzNS41LDE1LjUsMC4wLDAsCjEzNS41LDE1LjUsNS4wLDAsCjEzNS41LDE1LjUsMTAuMCwwLAoxMzUuNSwxNS41LDE1LjAsMCwKMTM1LjUsMTUuNSwyMC4wLDAsCjEzNS41LDE1LjUsMjUuMCwwLAoxMzUuNSwxNS41LDMwLjAsMCwKMTM1LjUsMTUuNSwzNS4wLDAsCjEzNS41LDE1LjUsNDAuMCwwLAoxMzUuNSwxNS41LDQ1LjAsMCwKMTM1LjUsMTUuNSw1MC4wLDAsCjEzNS41LDE1LjUsNTUuMCwwLAoxMzUuNSwxNS41LDYwLjAsMCwKMTM1LjUsMTUuNSw2NS4wLDAsCjEzNS41LDE1LjUsNzAuMCwwLAoxMzUuNSwxNS41LDc1LjAsMCwKMTM1LjUsMTUuNSw4MC4wLDAsCjEzNS41LDE1LjUsODUuMCwwLAoxMzUuNSwxNS41LDkwLjAsMCwKMTM1LjUsMTUuNSw5NS4wLDAsCjEzNS41LDE1LjUsMTAwLjAsMCwKMTM1LjUsMTUuNSwxMjUuMCwwLAoxMzUuNSwxNS41LDE1MC4wLDAsCjEzNS41LDE1LjUsMTc1LjAsMCwKMTM1LjUsMTUuNSwyMDAuMCwwLAoxMzUuNSwxNS41LDIyNS4wLDAsCjEzNS41LDE1LjUsMjUwLjAsMCwKMTM1LjUsMTUuNSwyNzUuMCwwLAoxMzUuNSwxNS41LDMwMC4wLDAsCjEzNS41LDE1LjUsMzI1LjAsMCwKMTM1LjUsMTUuNSwzNTAuMCwwLAoxMzUuNSwxNS41LDM3NS4wLDAsCjEzNS41LDE1LjUsNDAwLjAsMCwKMTM1LjUsMTUuNSw0MjUuMCwwLAoxMzUuNSwxNS41LDQ1MC4wLDAsCjEzNS41LDE1LjUsNDc1LjAsMCwKMTM1LjUsMTUuNSw1MDAuMCwwLAoxMzUuNSwxNS41LDU1MC4wLDAsCjEzNS41LDE1LjUsNjAwLjAsMCwKMTM1LjUsMTUuNSw2NTAuMCwwLAoxMzUuNSwxNS41LDcwMC4wLDAsCjEzNS41LDE1LjUsNzUwLjAsMCwKMTM1LjUsMTUuNSw4MDAuMCwwLAo=",
+  "body_bytes": 872,
+  "body_sha256": "68b04203e1899a628f2936d87db51c147218645addf3f8acb8ddd6dd035fd14e",
+  "case_id": "D1-DEPTH-SUP-csv",
+  "content_disposition": "attachment; filename=\"woa23_from_ODB_2026-09-02.csv\"",
+  "content_type": "text/csv; charset=utf-8",
+  "elapsed_seconds": 0.0833,
+  "endpoint": "/api/woa23/csv",
+  "group": "1_degree/annual/Nutrients",
+  "http_status": 200,
+  "identity": "D1-DEPTH-SUP-csv",
+  "params": {
+    "dep0": 0,
+    "dep1": 800,
+    "grid": "1",
+    "lat0": 15,
+    "lon0": 135,
+    "parameter": "nitrate",
+    "time_period": "0"
+  },
+  "slot": 3,
+  "transport_error": null,
+  "url": "http://127.0.0.1:19387/api/woa23/csv?lon0=135&lat0=15&grid=1&parameter=nitrate&time_period=0&dep0=0&dep1=800"
+}

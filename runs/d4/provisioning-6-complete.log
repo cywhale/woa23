@@ -1,0 +1,106 @@
+
+===== A. RE-CONFIRM PRECONDITIONS =====
+  archive sha256 : 49e99461d9c4ea3ee80ff0e5d00afa197f9d4c00ebf5fab51e70e507f330003a
+  archive digest : MATCHES approved value
+  /home/odbadmin/python/uv-pythons exists; contents:
+      total 8
+      -rw-rw-r-- 1 odbadmin odbadmin    1 Sep  2 22:32 .gitignore
+      -rw-rw-rw- 1 odbadmin odbadmin    0 Sep  2 22:32 .lock
+      drwxrwxr-x 2 odbadmin odbadmin 4096 Sep  2 22:32 .temp
+  no interpreter present: OK (bookkeeping only)
+  absent  /home/odbadmin/python/cpython-3.11.14-20251217
+  absent  /home/odbadmin/python/woa23-143bf8c
+  absent  /home/odbadmin/python/woa23-143bf8c/.venv
+  uv             : uv 0.9.22  (/home/odbadmin/.local/bin/uv)
+  cache dir      : /home/odbadmin/.cache/uv
+  cache files BEFORE: 40320
+
+===== B. STEP 3 — install standalone CPython (manual ONLY for this one command) =====
+  Downloading cpython-3.11.14-linux-x86_64-gnu (download) (29.1MiB)
+   Downloaded cpython-3.11.14-linux-x86_64-gnu (download)
+  Installed Python 3.11.14 in 952ms
+   + cpython-3.11.14-linux-x86_64-gnu (python3.11)
+  warning: `/home/odbadmin/.local/bin` is not on your PATH. To use installed Python executables, run `export PATH="/home/odbadmin/.local/bin:$PATH"` or `uv python update-shell`.
+  uv python install TRUE exit code = 0
+  UV_PYTHON_DOWNLOADS=manual applied to that command ONLY; it is not exported.
+  every later uv call below uses UV_PYTHON_DOWNLOADS=never.
+
+===== C. STEP 4 — real directory, and the approved symlink alias =====
+  UV_PYTHON_REAL_ROOT = /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  drwxrwxr-x 6 odbadmin odbadmin 4096 Sep  3 08:35 /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  lrwxrwxrwx 1 odbadmin odbadmin 65 Sep  3 08:35 /home/odbadmin/python/cpython-3.11.14-20251217 -> /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  alias -> real root: VERIFIED
+
+===== D. STEP 5 — interpreter verification, as odbadmin =====
+  -VV            : Python 3.11.14 (main, Dec 17 2025, 21:07:37) [Clang 21.1.4 ]
+  realpath       : /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+  binary sha256  : 96d1b01675f2492922ec6f6ed8445791d2d3231ccae727cda521db30494b751e
+  -rwxrwxr-x 1 odbadmin odbadmin 21333768 Sep  3 08:35 /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+  inside real root: OK
+  no pyenv, no woa23c1ro: OK
+
+===== E. STEP 6 — APP_ROOT, subject extraction, file-list verification =====
+  subject archive sha256: 0873a9708a992aaad373ec4ec4999b631deae30a5b0787d72d11dfbbf5c58d17
+  files     : 262   (authorised 262)
+  file-list : c436362ae4918d67e59c61b1a4d3328160d877d5da41f770bbb99aba78d74497
+  authorised: c436362ae4918d67e59c61b1a4d3328160d877d5da41f770bbb99aba78d74497
+  SUBJECT VERIFIED
+
+===== F. STEP 7 — create the venv EXPLICITLY at $VENV =====
+  Using CPython 3.11.14 interpreter at: python/cpython-3.11.14-20251217/bin/python3.11
+  Creating virtual environment at: python/woa23-143bf8c/.venv
+  Activate with: source python/woa23-143bf8c/.venv/bin/activate
+  uv venv TRUE exit code = 0
+
+===== G. STEP 8 — offline locked package installation =====
+  lock sha256 BEFORE: 0d2980a5928d4d0964d6cb3b78bffae14aa11a70d3b51ca00f4cf39073dccc69
+   + wrapt==2.3.0
+   + xarray==2025.3.1
+   + xyzservices==2026.3.0
+   + zarr==2.18.6
+   + zict==3.0.0
+   + zipp==4.1.0
+  uv sync TRUE exit code = 0
+
+===== H. STEP 9 — SUCCESS CONDITIONS =====
+  1 uv sync exit              : 0
+  2 lock sha256 AFTER         : 0d2980a5928d4d0964d6cb3b78bffae14aa11a70d3b51ca00f4cf39073dccc69
+    lock UNCHANGED            : OK
+  3 WOA23_PYTHON              : /home/odbadmin/python/woa23-143bf8c/.venv/bin/python3.11 (exists, executable)
+  4 sys.prefix                : /home/odbadmin/python/woa23-143bf8c/.venv
+  5 sys.base_prefix           : /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+    realpath(base_prefix)     : /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+    venv active               : True
+    version                   : 3.11.14 (main, Dec 17 2025, 21:07:37) [Clang 21.1.4 ]
+    base_prefix realpath == UV_PYTHON_REAL_ROOT : OK
+    sys.prefix == \$VENV       : OK
+  6 dev2026/.venv             : absent
+  7 installed distributions   : 58 (expected 58)
+  ALL SUCCESS CONDITIONS MET
+
+===== I. RECORDED STATE — after =====
+  cache files AFTER : 40323
+  drwxrwxr-x 4 odbadmin odbadmin 4096 Sep  3 08:35 /home/odbadmin/python/uv-pythons
+  drwxrwxr-x 6 odbadmin odbadmin 4096 Sep  3 08:35 /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  lrwxrwxrwx 1 odbadmin odbadmin 65 Sep  3 08:35 /home/odbadmin/python/cpython-3.11.14-20251217 -> /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  drwxrwxr-x 4 odbadmin odbadmin 4096 Sep  3 08:35 /home/odbadmin/python/woa23-143bf8c
+  drwxrwxr-x 5 odbadmin odbadmin 4096 Sep  3 08:35 /home/odbadmin/python/woa23-143bf8c/.venv
+  du real python : 91M
+  du APP_ROOT    : 505M
+  du VENV        : 500M
+
+===== J. PRODUCTION UNTOUCHED =====
+  pm2 daemon pid : 3459
+  LISTEN 0      2048       127.0.0.1:8050       0.0.0.0:*    users:(("gunicorn",pid=1828409,fd=6),("gunicorn",pid=1828389,fd=6),("gunicorn",pid=1828352,fd=6))      
+  pid 1828352 starttime 131297235
+  pid 1828389 starttime 131297318
+  pid 1828409 starttime 131297327
+  ecosystem.config.js : ed5dec6ca064bd54cfe4a45f33fd416871859e959671164292b21549b96f2159
+  -rw-r--r-- 1 odbadmin odbadmin 5603 Jun 18  2024 /home/odbadmin/python/woa23/conf/fullchain.pem
+  -rw-r--r-- 1 odbadmin odbadmin 1704 Jun 18  2024 /home/odbadmin/python/woa23/conf/privkey.pem
+  new-app PM2_HOME created? no
+  store symlink created?    no
+
+===== PROVISIONING COMPLETE =====
+  no PM2/app started, no PM2_HOME, no store symlink, no Nginx/TLS/config change,
+  no reload, no purge, no API request, no retained-state cleanup, no cutover

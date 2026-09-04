@@ -1,0 +1,159 @@
+{
+  "gate": "G1",
+  "subject": "143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d",
+  "offline": true,
+  "vm24_contacted": false,
+  "production_store_used": false,
+  "requests_to_8050": 0,
+  "performance_measured": false,
+  "passed": 48,
+  "failed": 0,
+  "records": [
+    {
+      "shape": "S1  one parameter  / one statistic",
+      "query": "?lon0=135&lat0=15&grid=1&parameter=temperature&time_period=0",
+      "canonical_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature"
+      ],
+      "empty_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature"
+      ],
+      "headers_identical": true,
+      "non_empty_rows": 3,
+      "empty_rows": 0,
+      "json_empty_status": 200,
+      "csv_empty_status": 200,
+      "csv_content_type": "text/csv; charset=utf-8",
+      "value_columns": [
+        "temperature"
+      ],
+      "missing_value_columns": []
+    },
+    {
+      "shape": "S2  two parameters / one statistic",
+      "query": "?lon0=135&lat0=15&grid=1&parameter=temperature,salinity&time_period=0",
+      "canonical_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature",
+        "salinity"
+      ],
+      "empty_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature",
+        "salinity"
+      ],
+      "headers_identical": true,
+      "non_empty_rows": 3,
+      "empty_rows": 0,
+      "json_empty_status": 200,
+      "csv_empty_status": 200,
+      "csv_content_type": "text/csv; charset=utf-8",
+      "value_columns": [
+        "temperature",
+        "salinity"
+      ],
+      "missing_value_columns": []
+    },
+    {
+      "shape": "S3  one parameter  / two statistics",
+      "query": "?lon0=135&lat0=15&grid=1&parameter=temperature&append=mn,an&time_period=0",
+      "canonical_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature_an",
+        "temperature"
+      ],
+      "empty_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature_an",
+        "temperature"
+      ],
+      "headers_identical": true,
+      "non_empty_rows": 3,
+      "empty_rows": 0,
+      "json_empty_status": 200,
+      "csv_empty_status": 200,
+      "csv_content_type": "text/csv; charset=utf-8",
+      "value_columns": [
+        "temperature_an",
+        "temperature"
+      ],
+      "missing_value_columns": []
+    },
+    {
+      "shape": "S4  two parameters / two statistics",
+      "query": "?lon0=135&lat0=15&grid=1&parameter=temperature,salinity&append=mn,an&time_period=0",
+      "canonical_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature_an",
+        "temperature",
+        "salinity_an",
+        "salinity"
+      ],
+      "empty_header": [
+        "lon",
+        "lat",
+        "depth",
+        "time_period",
+        "temperature_an",
+        "temperature",
+        "salinity_an",
+        "salinity"
+      ],
+      "headers_identical": true,
+      "non_empty_rows": 3,
+      "empty_rows": 0,
+      "json_empty_status": 200,
+      "csv_empty_status": 200,
+      "csv_content_type": "text/csv; charset=utf-8",
+      "value_columns": [
+        "temperature_an",
+        "temperature",
+        "salinity_an",
+        "salinity"
+      ],
+      "missing_value_columns": []
+    },
+    {
+      "error_case": "a parameter with no data array",
+      "json_status": 500,
+      "csv_status": 500
+    },
+    {
+      "error_case": "an unsupported time_period",
+      "json_status": 400,
+      "csv_status": 400
+    },
+    {
+      "error_case": "malformed request (lon0 missing)",
+      "json_status": 422,
+      "csv_status": 422
+    },
+    {
+      "error_case": "store failure (dir is not a store)",
+      "csv_status": 500
+    }
+  ]
+}

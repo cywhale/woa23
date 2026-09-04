@@ -1,0 +1,34 @@
+
+===== 1. remove this session's own probe files (nothing pre-existing) =====
+  removed /tmp/woa23probe/pyproject.toml
+  removed /tmp/woa23probe/uv.lock
+  removed /tmp/woa23probe
+  still present? no
+
+===== 2. TARGET PATHS — must still all be absent =====
+  /home/odbadmin/python/uv-pythons                     absent
+  /home/odbadmin/python/cpython-3.11.14-20251217       absent
+  /home/odbadmin/python/woa23-143bf8c                  absent
+
+===== 3. PRODUCTION UNTOUCHED — after all probes =====
+  pm2 daemon pid   : 3459
+  pm2 starttime    : 11
+  --- 8050 listener (must be the SAME pids as the baseline) ---
+  LISTEN 0      2048       127.0.0.1:8050       0.0.0.0:*    users:(("gunicorn",pid=1828409,fd=6),("gunicorn",pid=1828389,fd=6),("gunicorn",pid=1828352,fd=6))      
+  --- woa23 master + workers, pid and starttime ---
+  pid 1828352 starttime 131297235 : /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/od
+  pid 1828389 starttime 131297318 : /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/od
+  pid 1828409 starttime 131297327 : /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/od
+  --- nginx master ---
+  1088337 root     nginx: master process /usr/sbin/nginx -c /etc/nginx/nginx.conf
+  --- production config + TLS, unmodified check ---
+  ed5dec6ca064bd54cfe4a45f33fd416871859e959671164292b21549b96f2159  /home/odbadmin/python/woa23/conf/ecosystem.config.js
+  -rw-r--r-- 1 odbadmin odbadmin 5603 Jun 18  2024 /home/odbadmin/python/woa23/conf/fullchain.pem
+  -rw-r--r-- 1 odbadmin odbadmin 1704 Jun 18  2024 /home/odbadmin/python/woa23/conf/privkey.pem
+
+===== 4. cache, final count =====
+  UV_CACHE_DIR files: 40320
+
+===== 5. not done =====
+  no PM2 start/stop, no PM2_HOME created, no store symlink, no Nginx/TLS change,
+  no reload, no purge, no API request, no cleanup of pre-existing retained state

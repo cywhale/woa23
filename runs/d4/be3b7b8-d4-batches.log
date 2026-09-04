@@ -1,0 +1,68 @@
+subject : be3b7b8de88cadbe5afc9ce59d503beaf98ac39e
+worktree: /home/odbadmin/python/woa23-be3b7b8-val
+venv interpreter (REAL path, not the alias): /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+
+########## D4 BATCH 1 of 3 ##########
+precheck  HEAD=be3b7b8de88cadbe5afc9ce59d503beaf98ac39e == subject   OK
+precheck  tracked dirty : 0
+precheck  untracked     : 0
+runtime pin: uv sync exit=0  home=/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin
+batch 1 TRUE exit status: 1
+postcheck HEAD=be3b7b8de88cadbe5afc9ce59d503beaf98ac39e == subject   OK
+postcheck tracked dirty : 0
+postcheck untracked     : 2
+  REQUIRED_PASS passed   : 48
+  REQUIRED_PASS FAILED   : 1
+  REQUIRED_FAIL held     : 0
+  REQUIRED_FAIL BROKEN   : 0
+  NOT_APPLICABLE         : 4    (skipped before launch, never a PASS)
+  ENVIRONMENT_BLOCKED    : 6    (skipped before launch, never a PASS)
+  UNRESOLVED             : 0
+D4_VALIDATION: FAIL
+suite lines recorded: 49
+flaky watch — test_s2_provenance.py: exit=0   test_s2_provenance.py                 0s  all passed (98 assertions)   [98 assertions]
+
+########## D4 BATCH 2 of 3 ##########
+precheck  HEAD=be3b7b8de88cadbe5afc9ce59d503beaf98ac39e == subject   OK
+precheck  tracked dirty : 0
+precheck  untracked     : 2
+runtime pin: uv sync exit=0  home=/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin
+batch 2 TRUE exit status: 0
+postcheck HEAD=be3b7b8de88cadbe5afc9ce59d503beaf98ac39e == subject   OK
+postcheck tracked dirty : 0
+postcheck untracked     : 2
+  REQUIRED_PASS passed   : 49
+  REQUIRED_PASS FAILED   : 0
+  REQUIRED_FAIL held     : 0
+  REQUIRED_FAIL BROKEN   : 0
+  NOT_APPLICABLE         : 4    (skipped before launch, never a PASS)
+  ENVIRONMENT_BLOCKED    : 6    (skipped before launch, never a PASS)
+  UNRESOLVED             : 0
+D4_VALIDATION: PASS
+suite lines recorded: 49
+flaky watch — test_s2_provenance.py: exit=0   test_s2_provenance.py                 1s  all passed (98 assertions)   [98 assertions]
+
+########## D4 BATCH 3 of 3 ##########
+precheck  HEAD=be3b7b8de88cadbe5afc9ce59d503beaf98ac39e == subject   OK
+precheck  tracked dirty : 0
+precheck  untracked     : 2
+runtime pin: uv sync exit=0  home=/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin
+batch 3 TRUE exit status: 0
+postcheck HEAD=be3b7b8de88cadbe5afc9ce59d503beaf98ac39e == subject   OK
+postcheck tracked dirty : 0
+postcheck untracked     : 2
+  REQUIRED_PASS passed   : 49
+  REQUIRED_PASS FAILED   : 0
+  REQUIRED_FAIL held     : 0
+  REQUIRED_FAIL BROKEN   : 0
+  NOT_APPLICABLE         : 4    (skipped before launch, never a PASS)
+  ENVIRONMENT_BLOCKED    : 6    (skipped before launch, never a PASS)
+  UNRESOLVED             : 0
+D4_VALIDATION: PASS
+suite lines recorded: 49
+flaky watch — test_s2_provenance.py: exit=0   test_s2_provenance.py                 1s  all passed (98 assertions)   [98 assertions]
+
+batches completed : 3 of 3
+batches failed    : 1
+aborted           : no
+NO SENTINEL — this run is not clean.

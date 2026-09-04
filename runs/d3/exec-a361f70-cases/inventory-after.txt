@@ -1,0 +1,72 @@
+=== canonical process inventory ===
+host            : odb24
+user            : woa23c1ro   (uid 994)
+timestamp UTC   : 2026-09-02 01:51:17
+script sha256   : e17944b71034aa53b8e013383f04552352e39a30c8b49f30b4f4c32647fa0351   (from the subject archive)
+library sha256  : 4e5b7106001bbf6ad716db094cb9534985e2c8b51b2b00c8197a17b43acde989   (from the subject archive)
+kernel          : Linux 6.8.0-124-generic x86_64
+
+-- method --
+field order     : pid TAB starttime TAB ppid TAB pgid TAB ruid TAB args
+separator       : single TAB between fields, single LF after each row
+sort            : LC_ALL=C sort over the whole canonical row
+included        : all processes of woa23c1ro that are not observer rows
+excluded        : observer rows, by PID/PGID identity only, never by command match
+digest input    : the sorted canonical rows, nothing else
+digest algorithm: sha256, all 64 hex characters
+
+-- exclusion identity --
+observer pid    : 2041091
+observer pgid   : 2041091
+observer ppid   : 2041090
+observer start  : lin-162889832
+
+-- raw excluded rows (4) --
+  2041090 2041007 2041007   994 sshd: woa23c1ro@notty
+  2041091 2041090 2041091   994 bash -s
+  2041093 2041091 2041091   994 bash -s
+  2041094 2041093 2041091   994 ps -o pid=,ppid=,pgid=,ruid=,args= -u woa23c1ro
+
+-- raw included rows (16) --
+  1708514       1 1708514   994 /usr/lib/systemd/systemd --user
+  1708519 1708514 1708514   994 (sd-pam)
+  1708530 1708514 1708530   994 /usr/bin/pipewire
+  1708531 1708514 1708531   994 /usr/bin/pipewire -c filter-chain.conf
+  1708533 1708514 1708533   994 /snap/snapd-desktop-integration/391/usr/bin/user-session-helper /snap/snapd-desktop-integration/391/usr/bin/snapd-desktop-integration
+  1708536 1708514 1708536   994 /usr/bin/wireplumber
+  1708537 1708514 1708537   994 /usr/bin/pipewire-pulse
+  1708562 1708514 1708562   994 /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+  1708635 1708514 1708635   994 /usr/libexec/xdg-document-portal
+  1708651 1708514 1708651   994 /usr/libexec/xdg-permission-store
+  1709473       1 1709473   994 PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-bs3v1-pm2)
+  1761143       1 1761143   994 PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-b1s1-pm2)
+  2035966       1 2035966   994 PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-dep3s-pm2)
+  2035977 2035966 2035977   994 /home/woa23c1ro/woa23-dep3s/dev2026/.venv/bin/python -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:19387 --timeout 120 --graceful-timeout 10
+  2035986 2035977 2035977   994 /home/woa23c1ro/woa23-dep3s/dev2026/.venv/bin/python -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:19387 --timeout 120 --graceful-timeout 10
+  2035987 2035977 2035977   994 /home/woa23c1ro/woa23-dep3s/dev2026/.venv/bin/python -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:19387 --timeout 120 --graceful-timeout 10
+
+-- canonical rows, sorted (16) --
+  1708514	lin-114971132	1	1708514	994	/usr/lib/systemd/systemd --user
+  1708519	lin-114971133	1708514	1708514	994	(sd-pam)
+  1708530	lin-114971159	1708514	1708530	994	/usr/bin/pipewire
+  1708531	lin-114971159	1708514	1708531	994	/usr/bin/pipewire -c filter-chain.conf
+  1708533	lin-114971159	1708514	1708533	994	/snap/snapd-desktop-integration/391/usr/bin/user-session-helper /snap/snapd-desktop-integration/391/usr/bin/snapd-desktop-integration
+  1708536	lin-114971159	1708514	1708536	994	/usr/bin/wireplumber
+  1708537	lin-114971159	1708514	1708537	994	/usr/bin/pipewire-pulse
+  1708562	lin-114971161	1708514	1708562	994	/usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+  1708635	lin-114971170	1708514	1708635	994	/usr/libexec/xdg-document-portal
+  1708651	lin-114971171	1708514	1708651	994	/usr/libexec/xdg-permission-store
+  1709473	lin-114971541	1	1709473	994	PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-bs3v1-pm2)
+  1761143	lin-124827409	1	1761143	994	PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-b1s1-pm2)
+  2035966	lin-162712408	1	2035966	994	PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-dep3s-pm2)
+  2035977	lin-162712475	2035966	2035977	994	/home/woa23c1ro/woa23-dep3s/dev2026/.venv/bin/python -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:19387 --timeout 120 --graceful-timeout 10
+  2035986	lin-162712520	2035977	2035977	994	/home/woa23c1ro/woa23-dep3s/dev2026/.venv/bin/python -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:19387 --timeout 120 --graceful-timeout 10
+  2035987	lin-162712525	2035977	2035977	994	/home/woa23c1ro/woa23-dep3s/dev2026/.venv/bin/python -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:19387 --timeout 120 --graceful-timeout 10
+
+-- assertions --
+excluded rows carrying a daemon signature : 0   (must be 0)
+included rows carrying a daemon signature : 6   (informational)
+rows whose args contain a TAB            : 0   (must be 0)
+
+ROWS=16
+PROC_INVENTORY_SHA256=7b09f8f61810a6a58b97404e5bc689d4a373996fced040db8d75e2b396b15420

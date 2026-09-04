@@ -1,0 +1,359 @@
+batch root : /tmp/woa23-suites-ye6lOy
+concurrency: serial
+repeats    : 1
+git head   : 0d96f7a64b0538bc132eba23270638d9223290f0
+git subject: dev2026: successor subject swaps polars for polars-lts-cpu; adds a focused suite
+tracked dirty : 0   (0 means every tracked file matches the commit)
+untracked     : 0
+
+exit=0   test_api_surface_ordering.py          0s  all passed (34 assertions)   [34 assertions]
+exit=0   test_c1_decided_differences.py        0s  all passed (49 assertions)   [49 assertions]
+exit=0   test_c2_expected_docs.py              0s  all passed (63 assertions)   [63 assertions]
+exit=0   test_c2_summary.py                    0s  all passed (106 assertions)   [106 assertions]
+exit=1   test_clone_integrity.py               0s  4 FAILED, 72 passed   [76 assertions, 4 failed]
+         --- failing assertions, in full ---
+           FAIL an unwritable parent raises no problem
+                expected []
+                got      ['/tmp is group-writable (drwxrwxrwt) and owned by uid 121, not 1000 — an ancestor 9 levels up']
+           ok   higher writable ancestors are recorded as exposure
+         --
+           FAIL a clean clone with an unwritable parent exits 0
+                expected 0
+                got      1
+           ok   the stage is recorded
+         --
+           FAIL no problems
+                expected []
+                got      ['/tmp is group-writable (drwxrwxrwt) and owned by uid 121, not 1000 — an ancestor 7 levels up']
+           ok   the detection limit travels with the record
+         --
+           FAIL --chain-only skips the re-hash
+                expected 0
+                got      1
+           ok   and does not claim a verification it did not do
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_clone_integrity.py ---
+exit=0   test_column_contract.py               2s  test_column_contract.py: 46 tests, 146 assertions, 0 failed   [146 assertions]
+exit=0   test_column_order.py                 13s  all passed (42 assertions)   [42 assertions]
+         NOTE: this suite left processes behind:
+           1 bash -c OUT=/home/odbadmin/python/woa23-0d96f7a-val-runs for i in 1 2 3 4 5 6 7 8 9 10; do if ! kill -0 2094087 2>/dev/null; then echo " driver finished"; break; fi sleep 55 done echo "=== driver alive? ==="; kill -0 2094087 2>/dev/null && echo " STILL RUNNING" || echo " done" echo "=== progress ==="; grep -E "BATCH|exit status|non-zero|completed|SENTINEL|DONE" "$OUT/driver.out" | tail -20
+           1 sleep 55
+exit=1   test_compare_arms.py                  0s  1 FAILED, 78 passed   [79 assertions, 1 failed]
+         --- failing assertions, in full ---
+           FAIL and that is exactly two problems, one per arm
+                expected 2
+                got      0
+           ok   both of them the unreachable staging cwd
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_compare_arms.py ---
+exit=0   test_contract.py                      1s  all passed (61 assertions)   [61 assertions]
+exit=0   test_contract_row_order.py            0s  all passed (69 assertions)   [69 assertions]
+exit=0   test_csv_empty_result.py              3s  all passed (60 assertions)   [60 assertions]
+exit=0   test_d1_cases.py                      1s  all passed (98 assertions)   [98 assertions]
+exit=0   test_d1_evidence.py                   0s  all passed (59 assertions)   [59 assertions]
+exit=0   test_d1_integration.py                4s  all passed (64 assertions)   [64 assertions]
+exit=0   test_d1_store_validation.py           5s  all passed (55 assertions)   [55 assertions]
+exit=0   test_docs_only_diff.py                0s  all passed (27 assertions)   [27 assertions]
+exit=1   test_environment.py                   0s  1 FAILED, 78 passed   [79 assertions, 1 failed]
+         --- failing assertions, in full ---
+           FAIL polars is the pinned 1.27.1  got None
+           ok   xarray is the pinned 2025.3.1
+           ok   zarr is the pinned 2.18.6
+           ok   a distributions digest is produced
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_environment.py ---
+exit=0   test_paired_stats.py                  3s  all passed (29 assertions)   [29 assertions]
+exit=0   test_perf_counts.py                   0s  all passed (84 assertions)   [84 assertions]
+exit=0   test_polars_lts_cpu.py                1s  all passed (43 assertions)   [43 assertions]
+exit=0   test_provenance.py                    0s  all passed (297 assertions)   [297 assertions]
+exit=0   test_request_log.py                   7s  all passed (61 assertions)   [61 assertions]
+exit=0   test_row_order.py                     5s  all passed (26 assertions)   [26 assertions]
+exit=0   test_s2_integration.py               45s  all passed (72 assertions)   [72 assertions]
+exit=1   test_s2perf_integration.py          116s  SUMMARY CONTRACT VIOLATION: no ASSERTIONS=<n> FAILED=<m> summary line
+         --- last 3 stdout lines ---
+           FAIL s2p_workers.json is not empty
+                expected True
+                got      False
+         --- stderr (last 20 lines) ---
+             self.handle_one_request()
+           File "/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/lib/python3.11/http/server.py", line 424, in handle_one_request
+             method()
+           File "/home/odbadmin/python/woa23-0d96f7a-val/dev2026/bench/test_s2perf_integration.py", line 154, in do_GET
+             self.wfile.write(body)
+           File "/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/lib/python3.11/socketserver.py", line 834, in write
+             self._sock.sendall(b)
+         BrokenPipeError: [Errno 32] Broken pipe
+         ----------------------------------------
+         Traceback (most recent call last):
+           File "/home/odbadmin/python/woa23-0d96f7a-val/dev2026/bench/test_s2perf_integration.py", line 691, in <module>
+             json.loads((FINAL / name).read_text()), dict))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^
+           File "/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/lib/python3.11/pathlib.py", line 1058, in read_text
+             with self.open(mode='r', encoding=encoding, errors=errors) as f:
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           File "/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/lib/python3.11/pathlib.py", line 1044, in open
+             return io.open(self, mode, buffering, encoding, errors, newline)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_s2perf_integration.py/tmp/s2perf-final-ie0ktod1/s2p_workers.json'
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_s2perf_integration.py ---
+exit=1   test_s2_provenance.py                 1s  4 FAILED, 94 passed   [98 assertions, 4 failed]
+         --- failing assertions, in full ---
+           FAIL allowing the interpreter's own stdlib clears it
+                expected []
+                got      ["sys.path entry '/home/odbadmin/python/cpython-3.11.14-20251217/lib/python3.11/lib-dynload' resolves (abs) to /home/odbadmin/python/cpython-3.11.14-20251217/lib/python3.11/lib-dynload, which is under none of the allowed roots ['/tmp/woa23-suites-ye6lOy/iter1/test_s2_provenance.py/tmp/tmpwwpimuj4/clone', '/tmp/woa23-suites-ye6lOy/iter1/test_s2_provenance.py/tmp/tmpwwpimuj4/arm', '/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/lib']"]
+           ok   two pinned starts have the same seed digest
+         --
+           FAIL it exits 0 when isolation holds
+                expected 0
+                got      1
+           ok   the record was written
+         --
+           FAIL the record carries no problems
+                expected []
+                got      ["sys.path entry '/home/odbadmin/python/cpython-3.11.14-20251217/lib/python3.11/lib-dynload' resolves (abs) to /home/odbadmin/python/cpython-3.11.14-20251217/lib/python3.11/lib-dynload, which is under none of the allowed roots ['/tmp/woa23-suites-ye6lOy/iter1/test_s2_provenance.py/tmp/tmpuf1y4_a6/clone', '/tmp/woa23-suites-ye6lOy/iter1/test_s2_provenance.py/tmp/tmpuf1y4_a6', '/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/lib']"]
+           ok   the record carries the binary's digest
+         --
+           FAIL a readable PID passes when nothing production is mapped
+                expected 0
+                got      1
+           ok   the mapped-file count is recorded
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_s2_provenance.py ---
+exit=0   test_staging_store.py                 2s  all passed (24 assertions)   [24 assertions]
+exit=0   test_store_survey.py                  4s  all passed (165 assertions)   [165 assertions]
+exit=0   test_symmetric_warmup.py              4s  all passed (50 assertions)   [50 assertions]
+exit=0   test_bootstrap_delivery.sh            0s  all passed (100 assertions)   [100 assertions]
+exit=1   test_c1_readonly_account.sh          29s  2 FAILED, 143 passed   [145 assertions, 2 failed]
+         --- failing assertions, in full ---
+           FAIL a readable, non-writable tree passes — expected [0], got [5]
+           FAIL   and it says the whole tree was checked — expected [yes], got [no]
+           ok     and reports which scan mode it used
+           ok   a tree THIS account can write is refused
+           ok     and says so before scanning further
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_c1_readonly_account.sh ---
+exit=0   test_c2_driver.sh                     1s  all passed (90 assertions)   [90 assertions]
+exit=0   test_clean_archive.sh                12s  all passed (21 assertions)   [21 assertions]
+exit=0   test_cleanup_semantics.sh            13s  all passed (76 assertions)   [76 assertions]
+exit=1   test_cli.sh                          25s  6 FAILED, 299 passed   [305 assertions, 6 failed]
+         --- failing assertions, in full ---
+           FAIL and with the grant, as far as the host check — expected [4], got [1]
+         
+         the arms never fall back to dev2026/.venv — structurally, not just by message
+           ok   the C1 and C2 arm launches never mention $VENV
+         --
+           FAIL no backticks survive inside the embedded python — expected [0], got [190]
+           ok   the heredocs read their values from the environment
+         
+         an option value that begins with a dash is passed unambiguously
+         --
+           FAIL no candidate/reference/scheduler process was left behind — expected [0], got [9]
+           FAIL no staging workdir was created — expected [no], got [yes]
+         
+         --d1 is its own mode, with its own grant and its own gate
+           ok   an unknown flag near it is still exit 2
+         --
+           FAIL with the D1 grant it reaches the host check — expected [4], got [1]
+           ok   a D1 grant does not authorise a D2b mode
+         
+         the D1 mode's own wiring, read out of the runner
+         --
+           FAIL with its own grant it reaches the host check — expected [4], got [1]
+           ok   the ceiling is stated as 496 per arm
+           ok   and 992 in total
+           ok   the pilot is budgeted per case, not per arm
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_cli.sh ---
+exit=1   test_d1_finalize.sh                   2s  14 FAILED, 42 passed   [56 assertions, 14 failed]
+         --- failing assertions, in full ---
+           FAIL it returns success — expected [0], got [6]
+           FAIL workers.json exists and is NOT empty — expected [yes], got [no]
+           ok   requests.json exists and is NOT empty
+           FAIL no classification file was written — expected [no], got [yes]
+           FAIL workers.json says one worker per arm — expected [1], got []
+           FAIL and that it was not derived from a production measurement — expected [False], got []
+           FAIL the count is read from the candidate's own argv — expected [1], got []
+           FAIL and the reference's — expected [1], got []
+           FAIL the full launch argv is carried, not just the count — expected [yes], got [no]
+           FAIL the sentence that separates D1 from C2 travels with it — expected [yes], got [no]
+           FAIL and it says the flag asserts rather than sets — expected [yes], got [no]
+           ok   requests.json counts attempts, not successes
+           ok   the readiness attempts differ per arm, as measured
+           ok   each arm's countable total is its stages
+         --
+           FAIL finalisation succeeds with LABEL unset — expected [0], got [6]
+           FAIL and the file names the label it was given — expected [d1y], got []
+           FAIL the artefact is not empty — expected [yes], got [no]
+         
+         3. a failure is CLASSIFIED, not left as a bare exit code
+           ok   it returns the finalisation status, not 1
+         --
+           FAIL workers.json is still written, with the problem in it — expected [yes], got [no]
+         
+         5. the runner calls this, and classifies what it returns
+           ok   the runner sources the finalisation library
+         --- stderr (last 20 lines) ---
+           File "<string>", line 1, in <module>
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh/tmp/tmp.YsrR9KlaJk/ok/d1x_workers.json'
+         Traceback (most recent call last):
+           File "<string>", line 1, in <module>
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh/tmp/tmp.YsrR9KlaJk/ok/d1x_workers.json'
+         Traceback (most recent call last):
+           File "<string>", line 1, in <module>
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh/tmp/tmp.YsrR9KlaJk/ok/d1x_workers.json'
+         Traceback (most recent call last):
+           File "<string>", line 1, in <module>
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh/tmp/tmp.YsrR9KlaJk/ok/d1x_workers.json'
+         Traceback (most recent call last):
+           File "<string>", line 1, in <module>
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh/tmp/tmp.YsrR9KlaJk/ok/d1x_workers.json'
+         Traceback (most recent call last):
+           File "<string>", line 1, in <module>
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh/tmp/tmp.YsrR9KlaJk/ok/d1x_workers.json'
+         Traceback (most recent call last):
+           File "<string>", line 1, in <module>
+         FileNotFoundError: [Errno 2] No such file or directory: '/tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh/tmp/tmp.YsrR9KlaJk/noenv/d1y_workers.json'
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_d1_finalize.sh ---
+exit=0   test_labels.sh                        0s  all passed (30 assertions)   [30 assertions]
+exit=1   test_manifest.sh                      1s  3 FAILED, 38 passed   [41 assertions, 3 failed]
+         --- failing assertions, in full ---
+           FAIL CORE polars matches uv.lock (NOT-IN-LOCK) — expected [NOT-IN-LOCK], got [ABSENT]
+           ok   CORE orjson matches uv.lock (3.11.4)
+           ok   CORE fastapi matches uv.lock (0.115.12)
+           ok   CORE uvicorn matches uv.lock (0.34.1)
+         --
+           FAIL polars is mainline 1.27.1, per the B6 decision — expected [1.27.1], got [ABSENT]
+           FAIL polars-lts-cpu is NOT installed — expected [no], got [yes]
+         
+         --core-only omits the full listing but keeps the core
+           ok   the CORE section is still there
+         --- stderr (last 20 lines) ---
+         scripts/test_manifest.sh: line 61: [: 0
+         0: integer expression expected
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_manifest.sh ---
+exit=1   test_ports.sh                         0s  1 FAILED, 32 passed   [33 assertions, 1 failed]
+         --- failing assertions, in full ---
+           FAIL every non-comment row starts with a port and a tab — expected [0], got [88]
+           ok   and no port is listed twice
+         
+         1 FAILED, 32 passed
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_ports.sh ---
+exit=0   test_probe_host_capability.sh         0s  all passed (58 assertions)   [58 assertions]
+exit=0   test_probe_pm2_discovery.sh           0s  all passed (101 assertions)   [101 assertions]
+exit=0   test_proc_inventory.sh                8s  all passed (69 assertions)   [69 assertions]
+exit=0   test_procs.sh                        30s  all passed (181 assertions)   [181 assertions]
+exit=1   test_production_launcher.sh           0s  1 FAILED, 112 passed   [113 assertions, 1 failed]
+         --- failing assertions, in full ---
+           FAIL this host's bash really is the strict one (3.2) — expected [3], got [5]
+         
+         1 FAILED, 112 passed
+         ASSERTIONS=113 FAILED=1
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_production_launcher.sh ---
+exit=1   test_production_stop.sh              11s  1 FAILED, 65 passed   [66 assertions, 1 failed]
+         --- failing assertions, in full ---
+           FAIL it reads starttime from /proc stat — expected [yes], got [no]
+           ok   the production config is present to be checked at all
+           ok     it is non-empty
+           ok     and it still defines the woa23 app (so we are reading the right file)
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_production_stop.sh ---
+exit=0   test_real_store_mode.sh               0s  all passed (82 assertions)   [82 assertions]
+exit=0   test_requests.sh                     11s  all passed (67 assertions)   [67 assertions]
+         NOTE: this suite left processes behind:
+           5 python3 -
+           1 (sd-pam)
+           1 sh -c export NODE_ENV=production && node --watch ./src/index.mjs
+           1 sh -c export PORT=3033 && export NODE_ENV=production && sirv build --cors --single --port 3033 --http2 --cert ./config/fullchain.pem --key ./config/privkey.pem
+           1 sleep 55
+           1 /snap/snapd-desktop-integration/391/usr/bin/user-session-helper /snap/snapd-desktop-integration/391/usr/bin/snapd-desktop-integration
+           1 sshd: odbadmin@notty
+           1 sshd: odbadmin@pts/1
+           1 sshd: odbadmin@pts/2
+           1 uniq -c
+exit=0   test_run_suites.sh                    1s  all passed (59 assertions)   [59 assertions]
+exit=0   test_s2perf_driver.sh              1084s  all passed (221 assertions)   [221 assertions]
+         NOTE: this suite left processes behind:
+           1 bash -c OUT=/home/odbadmin/python/woa23-0d96f7a-val-runs for i in $(seq 1 10); do kill -0 2094087 2>/dev/null || break sleep 58 done kill -0 2094087 2>/dev/null && echo " STILL RUNNING" || echo " driver done" grep -E "BATCH|exit status|non-zero suites|batches completed" "$OUT/driver.out" | tail -12 echo "--- suites finished so far in the current batch ---" for f in "$OUT"/ltsb1.batch*.log; do [ -e "$f" ] && echo " $(basename $f): $(grep -c "^exit=" "$f") suites"; done
+           1 sleep 58
+exit=0   test_sentinel.sh                      2s  all passed (77 assertions)   [77 assertions]
+         NOTE: this suite left processes behind:
+           1 sleep 30
+exit=1   test_staging_bootstrap.sh             1s  1 FAILED, 105 passed   [106 assertions, 1 failed]
+         --- failing assertions, in full ---
+         FAIL CLOSED — bootstrap colliding with the identity
+           ok   bootstrap at the root is REFUSED
+           ok     and says a bootstrap must be outside the identity
+           ok     and nothing was created there
+         --
+           FAIL   and it is refused as a symlinked PARENT, explicitly — expected [yes], got [no]
+           ok   a bootstrap path that IS a symlink is refused (it already exists)
+         
+         ARCHIVE MEMBER — unique, expected path, REGULAR FILE only
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_staging_bootstrap.sh ---
+exit=1   test_staging_entry.sh                50s  1 FAILED, 147 passed   [148 assertions, 1 failed]
+         --- failing assertions, in full ---
+           FAIL   no /home/odbadmin path survived into it at all — expected [0], got [1]
+           ok     the capture is a REAL environment, not an empty file
+           ok   and the entry SAYS it unset them
+           ok   CONTROL: an exported path DOES reach an ordinary child
+         --- stderr (last 20 lines) ---
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         scripts/test_staging_entry.sh: line 118: root: unbound variable
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_staging_entry.sh ---
+exit=1   test_staging_launcher.sh              0s  7 FAILED, 95 passed   [102 assertions, 7 failed]
+         --- failing assertions, in full ---
+           FAIL and gets as far as the interpreter, proving it was accepted — expected [yes], got [no]
+           ok   the refusal names the ledger, so the rule is checkable
+           ok   and the launcher hard-codes NO spent-port list
+           FAIL a port ABSENT from the ledger passes the port rule — expected [yes], got [no]
+           FAIL and fails later, on the interpreter, not on the ledger — expected [yes], got [no]
+           ok   the SAME port is refused once written into the ledger
+           ok   so the rule is read from the ledger, not hard-coded
+           ok   a second arbitrary ledgered port is refused too
+           FAIL while an unledgered neighbour still passes — expected [yes], got [no]
+           ok   an ABSENT ledger stops the run rather than allowing anything
+         
+         the ledger is consulted, and spent ports stay spent
+         --
+           FAIL validation is passed — expected [yes], got [no]
+           FAIL and the resolved store is echoed — expected [yes], got [no]
+           FAIL it fails on the interpreter, not on validation — expected [yes], got [no]
+           ok   the interpreter is NAMED, not taken from PATH
+           ok   it runs python -m gunicorn from the venv
+         
+         --- stderr (last 20 lines) ---
+         --- evidence kept at: /tmp/woa23-suites-ye6lOy/iter1/test_staging_launcher.sh ---
+exit=0   test_staging_override.sh              2s  all passed (84 assertions)   [84 assertions]
+exit=0   test_stop_jlist_parser.sh             2s  all passed (61 assertions)   [61 assertions]
+exit=0   test_stop_multiworker.sh             12s  all passed (37 assertions)   [37 assertions]
+exit=0   test_stop_proc_parsing.sh             2s  all passed (100 assertions)   [100 assertions]
+exit=0   test_summary_contract.sh             12s  all passed (92 assertions)   [92 assertions]
+exit=0   test_tls_off_omission.sh              1s  all passed (67 assertions)   [67 assertions]
+exit=0   test_tracked.sh                       1s  all passed (19 assertions)   [19 assertions]
+
+manifest   : /tmp/woa23-suites-ye6lOy/manifest.tsv
+batch root : /tmp/woa23-suites-ye6lOy   (nothing deleted)
+=== TOTAL: 60 | NON-ZERO: 15 ===
+=== ASSERTIONS: 4923 | ASSERTION FAILURES: 47 | CONTRACT-VIOLATIONS: 1 ===
+=== CONTRACT VIOLATIONS: test_s2perf_integration.py(iter1) ===
+=== FAILED: test_clone_integrity.py(iter1) test_compare_arms.py(iter1) test_environment.py(iter1) test_s2perf_integration.py(iter1) test_s2_provenance.py(iter1) test_c1_readonly_account.sh(iter1) test_cli.sh(iter1) test_d1_finalize.sh(iter1) test_manifest.sh(iter1) test_ports.sh(iter1) test_production_launcher.sh(iter1) test_production_stop.sh(iter1) test_staging_bootstrap.sh(iter1) test_staging_entry.sh(iter1) test_staging_launcher.sh(iter1) ===

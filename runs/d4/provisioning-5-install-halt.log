@@ -1,0 +1,19 @@
+
+===== A. PRECONDITIONS =====
+  absent  /home/odbadmin/python/uv-pythons
+  absent  /home/odbadmin/python/cpython-3.11.14-20251217
+  absent  /home/odbadmin/python/woa23-143bf8c
+  archive sha256: 49e99461d9c4ea3ee80ff0e5d00afa197f9d4c00ebf5fab51e70e507f330003a
+  archive digest MATCHES approved value
+  uv: uv 0.9.22  (/home/odbadmin/.local/bin/uv)
+  cache dir: /home/odbadmin/.cache/uv
+  cache files BEFORE: 40320
+
+===== B. STEP 3 — install standalone CPython, offline, through the file:// mirror =====
+  Python downloads are not allowed (`python-downloads = "never"`). Change to `python-downloads = "manual"` to allow explicit installs.
+  install rc=0
+
+===== C. STEP 4 — the real directory uv created, and the approved symlink alias =====
+
+*** HALT: no cpython-3.11.14 directory under /home/odbadmin/python/uv-pythons
+*** scene PRESERVED, no retry, no cleanup, no fallback

@@ -1,0 +1,92 @@
+===== ENVIRONMENT FACTS =====
+  uid/gid      : 1000 / 1000 (odbadmin)
+  groups       : odbadmin root adm cdrom sudo dip plugdev staff lpadmin sambashare docker shiny-apps
+  worktree     : /home/odbadmin/python/woa23-143bf8c-val/dev2026
+  worktree owner/mode : odbadmin:odbadmin 775
+  HOME         : /home/odbadmin (odbadmin:odbadmin 755)
+  TMPDIR       : <unset>
+  /tmp         : nginx:root 1777  uid=121
+  /var/tmp     : root:root 1777  uid=0
+  ancestors of the worktree:
+    /home/odbadmin/python/woa23-143bf8c-val/dev2026      odbadmin:odbadmin 775
+    /home/odbadmin/python/woa23-143bf8c-val              odbadmin:odbadmin 775
+    /home/odbadmin/python                                odbadmin:odbadmin 775
+    /home/odbadmin                                       odbadmin:odbadmin 755
+    /home                                                root:root 755
+    /                                                    root:root 755
+
+===== PER-SUITE FAILURE CONDITIONS =====
+--- bench/test_clone_integrity.py ---
+      FAIL an unwritable parent raises no problem
+           expected []
+           got      ['/tmp is group-writable (drwxrwxrwt) and owned by uid 121, not 1000 — an ancestor 5 levels up']
+      FAIL a clean clone with an unwritable parent exits 0
+           expected 0
+           got      1
+      FAIL no problems
+           expected []
+           got      ['/tmp is group-writable (drwxrwxrwt) and owned by uid 121, not 1000 — an ancestor 3 levels up']
+      FAIL --chain-only skips the re-hash
+           expected 0
+           got      1
+--- bench/test_compare_arms.py ---
+      FAIL and that is exactly two problems, one per arm
+           expected 2
+           got      0
+--- bench/test_s2perf_integration.py ---
+      FAIL the latency gate exits 0
+           expected 0
+           got      1
+      FAIL each ratio came from that case's own samples
+           expected True
+           got      False
+      FAIL the run's single top-level verdict is a gate, not a number
+           expected 'PASS'
+           got      'FAIL_NO_ESTABLISHED_IMPROVEMENT'
+      FAIL gate PASS
+           expected 'PASS'
+           got      'FAIL_NO_ESTABLISHED_IMPROVEMENT'
+--- scripts/test_c1_readonly_account.sh ---
+      ok   zero processes checked is a FAILURE, not a pass
+      FAIL a readable, non-writable tree passes — expected [0], got [5]
+      FAIL   and it says the whole tree was checked — expected [yes], got [no]
+    2 FAILED, 143 passed
+    ASSERTIONS=145 FAILED=2
+--- scripts/test_cli.sh ---
+      FAIL no backticks survive inside the embedded python — expected [0], got [190]
+      FAIL no candidate/reference/scheduler process was left behind — expected [0], got [9]
+      FAIL no staging workdir was created — expected [no], got [yes]
+    3 FAILED, 302 passed
+    ASSERTIONS=305 FAILED=3
+--- scripts/test_d1_finalize.sh ---
+--- scripts/test_ports.sh ---
+      FAIL every non-comment row starts with a port and a tab — expected [0], got [88]
+    1 FAILED, 32 passed
+    ASSERTIONS=33 FAILED=1
+--- scripts/test_production_launcher.sh ---
+      FAIL this host's bash really is the strict one (3.2) — expected [3], got [5]
+    1 FAILED, 112 passed
+    ASSERTIONS=113 FAILED=1
+--- scripts/test_production_stop.sh ---
+      ok     it exits 8 — indeterminate, distinct from CLEANUP_FAIL's 7
+    fail closed: a survivor is CLEANUP_FAIL, never an escalation
+      ok   it says CLEANUP_FAIL
+    ASSERTIONS=66 FAILED=0
+--- scripts/test_staging_bootstrap.sh ---
+    FAIL CLOSED — bootstrap colliding with the identity
+      FAIL   and it is refused as a symlinked PARENT, explicitly — expected [yes], got [no]
+    1 FAILED, 105 passed
+    ASSERTIONS=106 FAILED=1
+--- scripts/test_staging_entry.sh ---
+      FAIL   no /home/odbadmin path survived into it at all — expected [0], got [1]
+    1 FAILED, 147 passed
+    ASSERTIONS=148 FAILED=1
+--- scripts/test_staging_launcher.sh ---
+      FAIL and gets as far as the interpreter, proving it was accepted — expected [yes], got [no]
+      FAIL a port ABSENT from the ledger passes the port rule — expected [yes], got [no]
+      FAIL and fails later, on the interpreter, not on the ledger — expected [yes], got [no]
+      FAIL while an unledgered neighbour still passes — expected [yes], got [no]
+      FAIL validation is passed — expected [yes], got [no]
+      FAIL and the resolved store is echoed — expected [yes], got [no]
+      FAIL it fails on the interpreter, not on validation — expected [yes], got [no]
+    7 FAILED, 95 passed

@@ -1,0 +1,118 @@
+{
+  "attempts": 8,
+  "base_url": "http://127.0.0.1:19387",
+  "manifest": [
+    {
+      "case_id": "D1-DEPTH-SUP",
+      "endpoint": "/api/woa23",
+      "group": "1_degree/annual/Nutrients",
+      "identity": "D1-DEPTH-SUP",
+      "params": {
+        "dep0": 0,
+        "dep1": 800,
+        "grid": "1",
+        "lat0": 15,
+        "lon0": 135,
+        "parameter": "nitrate",
+        "time_period": "0"
+      },
+      "slot": 1
+    },
+    {
+      "case_id": "D1-ANCHOR-RECOVER",
+      "endpoint": "/api/woa23",
+      "group": "1_degree/annual/TS",
+      "identity": "D1-ANCHOR-RECOVER #1",
+      "params": {
+        "lat0": 15,
+        "lon0": 135
+      },
+      "slot": 2
+    },
+    {
+      "case_id": "D1-DEPTH-SUP-csv",
+      "endpoint": "/api/woa23/csv",
+      "group": "1_degree/annual/Nutrients",
+      "identity": "D1-DEPTH-SUP-csv",
+      "params": {
+        "dep0": 0,
+        "dep1": 800,
+        "grid": "1",
+        "lat0": 15,
+        "lon0": 135,
+        "parameter": "nitrate",
+        "time_period": "0"
+      },
+      "slot": 3
+    },
+    {
+      "case_id": "D1-ANCHOR-RECOVER",
+      "endpoint": "/api/woa23",
+      "group": "1_degree/annual/TS",
+      "identity": "D1-ANCHOR-RECOVER #2",
+      "params": {
+        "lat0": 15,
+        "lon0": 135
+      },
+      "slot": 4
+    },
+    {
+      "case_id": "D1-DEPTH-OOR-tp13",
+      "endpoint": "/api/woa23",
+      "group": "1_degree/seasonal/Nutrients",
+      "identity": "D1-DEPTH-OOR-tp13",
+      "params": {
+        "dep0": 3000,
+        "dep1": 4000,
+        "grid": "1",
+        "lat0": 15,
+        "lon0": 135,
+        "parameter": "nitrate",
+        "time_period": "13"
+      },
+      "slot": 5
+    },
+    {
+      "case_id": "D1-ANCHOR-RECOVER",
+      "endpoint": "/api/woa23",
+      "group": "1_degree/annual/TS",
+      "identity": "D1-ANCHOR-RECOVER #3",
+      "params": {
+        "lat0": 15,
+        "lon0": 135
+      },
+      "slot": 6
+    },
+    {
+      "case_id": "D1-DEPTH-OOR-tp13-csv",
+      "endpoint": "/api/woa23/csv",
+      "group": "1_degree/seasonal/Nutrients",
+      "identity": "D1-DEPTH-OOR-tp13-csv",
+      "params": {
+        "dep0": 3000,
+        "dep1": 4000,
+        "grid": "1",
+        "lat0": 15,
+        "lon0": 135,
+        "parameter": "nitrate",
+        "time_period": "13"
+      },
+      "slot": 7
+    },
+    {
+      "case_id": "D1-ANCHOR-RECOVER",
+      "endpoint": "/api/woa23",
+      "group": "1_degree/annual/TS",
+      "identity": "D1-ANCHOR-RECOVER #4",
+      "params": {
+        "lat0": 15,
+        "lon0": 135
+      },
+      "slot": 8
+    }
+  ],
+  "sources": {
+    "d1_cases.py": "504761ed13439d3b78e47c1c8ef38976f1a33e9976da5f75c68e93b4874b338a",
+    "d1_probe.py": "8abc5d5708e3035ece912420f0da042e06faa08d4285af6e4d1b815b159edd32"
+  }
+}

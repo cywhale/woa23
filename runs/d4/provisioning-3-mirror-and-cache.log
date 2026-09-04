@@ -1,0 +1,76 @@
+
+===== 0. uv, by absolute path =====
+  uv 0.9.22
+  uv cache dir : /home/odbadmin/.cache/uv
+  uv python dir: /home/odbadmin/.local/share/uv/python
+
+===== 1. CACHE INVENTORY — BEFORE =====
+  archive-v0        26598 files
+  builds-v0           609 files
+  interpreter-v4       31 files
+  sdists-v9         12699 files
+  simple-v18           98 files
+  wheels-v5           281 files
+  TOTAL            40319 files
+
+===== 2. WHAT FILENAME does uv 0.9.22 ask for? (throwaway dirs only) =====
+  error: Failed to install cpython-3.11.14-linux-x86_64-gnu
+    Caused by: failed to query metadata of file `/tmp/tmp.uBnfHUJxLf/mirror/20251217/cpython-3.11.14+20251217-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz`: No such file or directory (os error 2)
+  installed anything? NO
+
+===== 3. the ALREADY-PRESENT uv-managed 3.11.14 (NOT at the decided path) =====
+  drwxrwxr-x 6 odbadmin odbadmin 4096 Aug 20 11:04 /home/odbadmin/.local/share/uv/python/cpython-3.11.14-linux-x86_64-gnu
+  -VV        : Python 3.11.14 (main, Dec 17 2025, 21:07:37) [Clang 21.1.4 ]
+  realpath   : /home/odbadmin/.local/share/uv/python/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+  bin sha256 : 96d1b01675f2492922ec6f6ed8445791d2d3231ccae727cda521db30494b751e
+  -rwxrwxr-x 1 odbadmin odbadmin 21333768 Aug 20 11:03 /home/odbadmin/.local/share/uv/python/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+  --- uv's own listing ---
+  cpython-3.11.14-linux-x86_64-gnu                  .local/share/uv/python/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+  --- build stamp, if recorded in the install metadata ---
+    (no PYTHON.json)
+
+===== 4. CACHE COMPLETENESS PROBE — throwaway tree, offline, target paths untouched =====
+  lock sha256 (before): 0d2980a5928d4d0964d6cb3b78bffae14aa11a70d3b51ca00f4cf39073dccc69
+   + polars==1.27.1
+   + psutil==7.2.2
+   + pyarrow==25.0.0
+   + pydantic==2.11.3
+   + pydantic-core==2.33.1
+   + python-dateutil==2.9.0.post0
+   + pytz==2026.3.post1
+   + pyyaml==6.0.3
+   + six==1.17.0
+   + sortedcontainers==2.4.0
+   + starlette==0.46.2
+   + tblib==3.2.2
+   + toolz==1.1.0
+   + tornado==6.5.7
+   + typing-extensions==4.16.0
+   + typing-inspection==0.4.2
+   + tzdata==2026.3
+   + urllib3==2.7.0
+   + uvicorn==0.34.1
+   + wrapt==2.3.0
+   + xarray==2025.3.1
+   + xyzservices==2026.3.0
+   + zarr==2.18.6
+   + zict==3.0.0
+   + zipp==4.1.0
+  --- probe exit=0 ---
+  lock sha256 (after) : 0d2980a5928d4d0964d6cb3b78bffae14aa11a70d3b51ca00f4cf39073dccc69
+  installed dists     : 58
+  dev2026/.venv leaked? no
+
+===== 5. CACHE INVENTORY — AFTER (did the probe change the cache?) =====
+  archive-v0        26598 files
+  builds-v0           609 files
+  interpreter-v4       32 files
+  sdists-v9         12699 files
+  simple-v18           98 files
+  wheels-v5           281 files
+  TOTAL            40320 files
+
+===== 6. target paths still absent? =====
+  /home/odbadmin/python/uv-pythons                     absent
+  /home/odbadmin/python/cpython-3.11.14-20251217       absent
+  /home/odbadmin/python/woa23-143bf8c                  absent
