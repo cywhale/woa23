@@ -1,12 +1,22 @@
-// PROPOSED replacement for conf/ecosystem.config.js. NOT INSTALLED, NOT IN USE.
+// THE PRODUCTION PM2 CONFIG — INSTALLED AND IN USE since the D-4 cutover.
 //
-// Kept in dev2026/deploy/ because writing it into conf/ would be a production change,
-// and that needs its own authorisation. Spec 011 covers the cutover this belongs to.
+// The header here used to read "PROPOSED ... NOT INSTALLED, NOT IN USE". That stopped
+// being true at the cutover, and this revision says so rather than leaving a reviewer to
+// discover it from the host.
+//
+// It stays in dev2026/deploy/ rather than conf/ because conf/ecosystem.config.js is the
+// PRE-CUTOVER config and doubles as the rollback artifact: it has to keep describing the
+// old application, so it is not touched. Spec 011 covers the cutover this belongs to.
+//
+// The copy on VM24 was edited IN PLACE during the cutover, to take the app off TLS and to
+// name the standalone interpreter. This revision reconciles the repository to that host
+// state; the executable fields below are the ones production is actually running.
 //
 // ---------------------------------------------------------------------------------
 // THE ONE THING THIS REMOVES: `pre_stop` (blocker B1)
 //
-// Production's config carries:
+// The pre-cutover config carried (it has since been removed from the host copy too, so
+// this is history, not a live defect):
 //
 //   pre_stop: "ps -ef | grep -w 'woa23_app' | grep -v grep | awk '{print $2}'
 //              | xargs -r kill -9"
@@ -78,21 +88,33 @@ module.exports = {
         WOA23_PORT: '8050',
         WOA23_ZARR_STORE: '/home/odbadmin/python/woa23/data',
 
-        // ABSOLUTE, and that is a consequence of `cwd` above. These used to be
-        // `conf/privkey.pem`, relative — which resolved against production's old cwd
-        // (the repository root). With cwd now `dev2026/`, the same relative path would
-        // point at `dev2026/conf/privkey.pem`, which does not exist, and the launcher
-        // would refuse to start with a TLS error.
+        // THE APP NO LONGER TERMINATES TLS.
         //
-        // The launcher refusing is the correct behaviour and is exactly why it checks
-        // certificate readability BEFORE claiming the port — but the right fix is to say
-        // which files are meant rather than to rely on where PM2 happened to be started.
+        // Under the A-move architecture adopted at the D-4 cutover, nginx holds the
+        // public certificate for eco.odb.ntu.edu.tw and proxies to this app in plaintext
+        // over loopback 8050; both /api/woa23 and /api/swagger/woa23 proxy_pass to
+        // http://woa23api. The internal hop is plaintext BY DESIGN, and that is a
+        // property of the deployment a reviewer should see stated here rather than infer.
         //
-        // THE PATH BELOW IS A PLACEHOLDER FOR THE INSTALL LOCATION and must be confirmed
-        // against the host before any cutover; it is not confirmed today. `pm2C` runs
-        // with WOA23_TLS=off and never reads these.
-        WOA23_TLS_KEYFILE: '/home/odbadmin/python/woa23/conf/privkey.pem',
-        WOA23_TLS_CERTFILE: '/home/odbadmin/python/woa23/conf/fullchain.pem',
+        // WOA23_TLS_KEYFILE and WOA23_TLS_CERTFILE are REMOVED rather than corrected.
+        // They are not merely unused: leaving them would let a future operator flip
+        // WOA23_TLS back on and have the app claim 8050 with its own certificate while
+        // nginx is already terminating TLS in front of it.
+        //
+        // The old in-app pair still exists on the host, at
+        // /home/odbadmin/python/woa23/conf/{privkey,fullchain}.pem with mode 644, because
+        // it belongs to the rollback path. That readability is a known, accepted and
+        // UNRESOLVED finding (S2). Removing these variables does not resolve it, and this
+        // file must not be read as claiming otherwise.
+        WOA23_TLS: 'off',
+
+        // Absolute, and it has to be: production_app.sh resolves no interpreter from
+        // PATH. This names the standalone uv CPython venv under $APP_ROOT, so the service
+        // cannot silently fall back to /home/odbadmin/.pyenv. The discriminating check
+        // after a start is ZERO .pyenv entries in /proc/<pid>/maps, for the master and
+        // for every worker — not `sys.base_prefix` and not /proc/<pid>/exe, both of which
+        // correctly report the BASE install because the venv python is a symlink.
+        WOA23_PYTHON: '/home/odbadmin/python/woa23-f66ddd8/.venv/bin/python3.11',
         WOA23_WORKERS: '2',
       },
 
