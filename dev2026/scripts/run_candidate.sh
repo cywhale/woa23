@@ -157,8 +157,15 @@ stop_candidate() {
 # aborts above and leaves it alone.
 trap stop_candidate EXIT INT TERM
 
+# --graceful-timeout is passed for the same reason run_controlled.sh passes it:
+# gunicorn's default is 30 s, STOP_WAIT_SECS is 20, and a stop that gives up before
+# the arbiter is obliged to finish reports a survivor that was merely still within
+# its budget. This runner launches one worker rather than two, which is why it never
+# hit the failure C2 did — not a reason the relationship was ever right here.
+assert_shutdown_budget || exit 4
 PYTHONHASHSEED=0 WOA23_ZARR_STORE="$STORE" \
   nohup .venv/bin/gunicorn api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
+  --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
   -b "127.0.0.1:${PORT}" --timeout 120 > "$LOG" 2>&1 &
 CANDIDATE_PID=$!
 echo "$CANDIDATE_PID" > "$PIDFILE"
@@ -211,6 +218,7 @@ echo "candidate ${CAND_SEED:-PYTHONHASHSEED=<unset>}"
 echo "== provenance =="
 uv run python -m bench.collect_backend_meta --port "$PORT" --manifest candidate \
   --expect-argv-contains api.app:app --lockfile uv.lock \
+  --expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
   --out results/meta_candidate.json
 uv run python -m bench.collect_backend_meta --port "$PROD_PORT" --manifest reference \
   --expect-argv-contains woa23_app:app \

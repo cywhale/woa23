@@ -20,8 +20,10 @@ from bench.collect_backend_meta import (
     parse_ss_listeners, resolve_store, zmetadata_fingerprints)
 from bench.provenance import (
     REQUIRED_META_FIELDS, load_meta, validate_meta, validate_store_agreement,
+    ENVIRONMENT_RECORD_FIELDS, S2_ENVIRONMENT_RECORD_FIELDS,
     verify_environment_match, verify_environment_record,
     verify_group_path_agreement, verify_prior_contract, verify_prior_rung)
+from bench.suite_summary import summary, summary_line   # noqa: E402
 
 failures: list[str] = []
 
@@ -110,7 +112,7 @@ def good_meta(label: str = "candidate", cwd: Path | None = None) -> dict:
                 "mtime_ns": 1754400000123456789, "size": 4096, "sha256": "c" * 64},
         },
         "dependencies": {"lockfile_sha256": "b" * 64,
-                         "distributions_sha256": "d" * 64,
+                         "name_version_set_sha256": "d" * 64,
                          "python_version": "3.11.4"},
     }
 
@@ -883,7 +885,7 @@ def test_verify_environment_match() -> None:
     this compares the digest of the whole distribution list.
     """
     arm = {"env_python_version": "3.11.4", "env_python": "/v/bin/python",
-           "dependencies": {"distributions_sha256": "a" * 64,
+           "dependencies": {"name_version_set_sha256": "a" * 64,
                             "lockfile_sha256": "b" * 64,
                             "distributions": ["fsspec==2026.7.0", "anyio==4.14.2"]}}
     check("identical arms match", verify_environment_match(arm, arm) == [])
@@ -896,13 +898,13 @@ def test_verify_environment_match() -> None:
           has(verify_environment_match(arm, dict(arm, env_python="/other/python")),
               "package environment path differs"))
 
-    other = dict(arm, dependencies={"distributions_sha256": "c" * 64,
+    other = dict(arm, dependencies={"name_version_set_sha256": "c" * 64,
                                     "lockfile_sha256": "b" * 64,
                                     "distributions": ["fsspec==2025.10.0",
                                                       "anyio==4.14.2"]})
     out = verify_environment_match(arm, other)
     check("a differing distribution set is caught",
-          has(out, "installed distribution set differs"))
+          has(out, "installed name==version set differs"))
     check("the differing package is named, not just the digest",
           has(out, "fsspec: candidate 2026.7.0 vs reference 2025.10.0"),
           '"the sets differ" is not actionable')
@@ -927,9 +929,9 @@ def test_verify_environment_record() -> None:
     """
     record = {"kind": "controlled_environment", "python_version": "3.11.4",
               "env_python": "/w/.venv/bin/python", "lockfile_sha256": "b" * 64,
-              "distributions_sha256": "a" * 64}
+              "name_version_set_sha256": "a" * 64}
     arm = {"env_python_version": "3.11.4", "env_python": "/w/.venv/bin/python",
-           "dependencies": {"distributions_sha256": "a" * 64,
+           "dependencies": {"name_version_set_sha256": "a" * 64,
                             "lockfile_sha256": "b" * 64}}
     check("an arm running the recorded environment passes",
           verify_environment_record(record, arm, "candidate") == [])
@@ -937,7 +939,7 @@ def test_verify_environment_record() -> None:
     # The case the digest-only check missed: both arms on a stale venv agree with
     # each other, so verify_environment_match passes and proves nothing.
     stale = {"env_python_version": "3.11.4", "env_python": "/old/.venv/bin/python",
-             "dependencies": {"distributions_sha256": "a" * 64,
+             "dependencies": {"name_version_set_sha256": "a" * 64,
                               "lockfile_sha256": "b" * 64}}
     check("two arms on a stale venv still satisfy the arms-agree check",
           verify_environment_match(stale, stale) == [],
@@ -958,9 +960,9 @@ def test_verify_environment_record() -> None:
     check("a mismatched distribution digest is caught",
           has(verify_environment_record(
               record, dict(arm, dependencies={**arm["dependencies"],
-                                              "distributions_sha256": "z" * 64}),
+                                              "name_version_set_sha256": "z" * 64}),
               "candidate"),
-              "installed distribution set digest is not the environment"))
+              "installed name==version set digest is not the environment"))
     check("the failing arm is named",
           has(verify_environment_record(record, stale, "reference"), "reference:"))
 
@@ -972,7 +974,7 @@ def test_verify_environment_record() -> None:
           has(verify_environment_record(record, None, "candidate"),
               "metadata missing"))
     for key in ("env_python", "python_version", "lockfile_sha256",
-                "distributions_sha256"):
+                "name_version_set_sha256"):
         holed = {k: v for k, v in record.items() if k != key}
         check(f"a record missing {key} is reported",
               has(verify_environment_record(holed, arm, "candidate"),
@@ -980,16 +982,88 @@ def test_verify_environment_record() -> None:
     check("metadata with a null digest is reported, not skipped",
           has(verify_environment_record(
               record, dict(arm, dependencies={**arm["dependencies"],
-                                              "distributions_sha256": None}),
-              "candidate"), "no usable 'dependencies.distributions_sha256'"))
+                                              "name_version_set_sha256": None}),
+              "candidate"), "no usable 'dependencies.name_version_set_sha256'"))
     check("a non-string value is not compared as equal",
           verify_environment_record(record, dict(arm, env_python=None),
                                     "candidate") != [])
     check("every field is checked, so a wholly wrong arm reports all four",
           len(verify_environment_record(
               {**record, "python_version": "9", "env_python": "/x",
-               "lockfile_sha256": "c" * 64, "distributions_sha256": "d" * 64},
+               "lockfile_sha256": "c" * 64, "name_version_set_sha256": "d" * 64},
               arm, "candidate")) == 4)
+
+
+def test_verify_environment_record_s2_fields() -> None:
+    """The S2 anchor is the clone's manifest, in the position the lockfile holds.
+
+    C1 and C2 have no lockfile: the arms do not run an environment this campaign
+    resolved and installed, they run a read-only copy of production's package tree.
+    What distinguishes *the* clone from a directory with the right name is the
+    manifest written when it was built and verified, so its digest is compared with
+    exactly the strictness `lockfile_sha256` gets under D2b.
+    """
+    record = {"kind": "s2_package_clone_environment", "python_version": "3.11.4",
+              "env_python": "/home/odbadmin/.pyenv/versions/py311/bin/python3.11",
+              "clone_manifest_sha256": "m" * 64,
+              "package_tree_digest": "p" * 64,
+              "runtime_distribution_digest": "r" * 64,
+              "name_version_set_sha256": "a" * 64}
+    arm = {"env_python_version": "3.11.4",
+           "env_python": "/home/odbadmin/.pyenv/versions/py311/bin/python3.11",
+           "dependencies": {"name_version_set_sha256": "a" * 64,
+                            "clone_manifest_sha256": "m" * 64,
+                            "package_tree_digest": "p" * 64,
+                            "runtime_distribution_digest": "r" * 64}}
+    check("an arm running the recorded clone passes",
+          verify_environment_record(record, arm, "candidate",
+                                    S2_ENVIRONMENT_RECORD_FIELDS) == [])
+    check("a different clone manifest is caught",
+          has(verify_environment_record(
+              record, dict(arm, dependencies={**arm["dependencies"],
+                                              "clone_manifest_sha256": "z" * 64}),
+              "candidate", S2_ENVIRONMENT_RECORD_FIELDS),
+              "package-tree clone manifest digest is not the environment"))
+    check("a different interpreter is caught",
+          has(verify_environment_record(record, dict(arm, env_python="/other/python"),
+                                        "reference", S2_ENVIRONMENT_RECORD_FIELDS),
+              "package environment interpreter is not the environment"))
+
+    # The failure that matters most: an S2 arm whose packages came from a lockfile
+    # environment would carry lockfile_sha256 and no manifest digest at all. Judged
+    # by the D2b field list it looks like a missing lockfile; judged by the S2 list
+    # it is reported as the missing anchor, which is what it is.
+    lockfile_arm = {"env_python_version": "3.11.4",
+                    "env_python": record["env_python"],
+                    "dependencies": {"name_version_set_sha256": "a" * 64,
+                                     "lockfile_sha256": "b" * 64}}
+    check("an arm with no manifest digest fails the S2 check",
+          has(verify_environment_record(record, lockfile_arm, "candidate",
+                                        S2_ENVIRONMENT_RECORD_FIELDS),
+              "no usable 'dependencies.clone_manifest_sha256'"))
+    check("and the D2b field list would have missed the substitution",
+          verify_environment_record(record, lockfile_arm, "candidate") != [])
+
+    # An empty field list would pass every environment, including the wrong one.
+    check("an empty field list is refused rather than passing everything",
+          has(verify_environment_record(record, arm, "candidate", ()),
+              "no fields to compare"))
+    check("the two field lists are different, and neither is a subset by accident",
+          ENVIRONMENT_RECORD_FIELDS != S2_ENVIRONMENT_RECORD_FIELDS
+          and len(ENVIRONMENT_RECORD_FIELDS) == 4
+          and len(S2_ENVIRONMENT_RECORD_FIELDS) == 6)
+    # The three digests over the same tree must each be checked, or two of them
+    # could drift while the record still validated on the third.
+    check("the S2 list checks all three clone digests",
+          {"clone_manifest_sha256", "package_tree_digest",
+           "runtime_distribution_digest"}.issubset(
+               {k for k, _, _ in S2_ENVIRONMENT_RECORD_FIELDS}))
+    for key in ("package_tree_digest", "runtime_distribution_digest"):
+        holed = {k: v for k, v in record.items() if k != key}
+        check(f"an S2 record missing {key} is reported",
+              has(verify_environment_record(holed, arm, "candidate",
+                                            S2_ENVIRONMENT_RECORD_FIELDS),
+                  f"no usable {key!r}"))
 
 
 def test_gate_precedence() -> None:
@@ -1109,10 +1183,10 @@ def test_hash_seed_requirement_is_per_arm() -> None:
         check("an unpinned seed fails when the caller requires one",
               has(validate_meta(m, "reference"), "PYTHONHASHSEED"))
         check("an unpinned seed passes when the caller waives it",
-              not has(validate_meta(m, "reference", require_pinned_seed=False),
+              not has(validate_meta(m, "reference", seed_requirement="any"),
                       "PYTHONHASHSEED"))
         check("waiving the seed does not waive anything else",
-              validate_meta({"env": {}}, "reference", require_pinned_seed=False) != [])
+              validate_meta({"env": {}}, "reference", seed_requirement="any") != [])
 
 
 def test_hash_seed() -> None:
@@ -1125,7 +1199,7 @@ def test_hash_seed() -> None:
 def test_dependencies() -> None:
     m = good_meta(); m["dependencies"] = {"lockfile": "/x/uv.lock"}
     check("dependencies without a distribution digest are rejected",
-          has(validate_meta(m, "candidate"), "no distribution digest"))
+          has(validate_meta(m, "candidate"), "no name==version set digest"))
     m = good_meta(); m["dependencies"] = {"distributions_error": "no such file"}
     check("a failed distribution listing is rejected",
           has(validate_meta(m, "candidate"), "could not be listed"))
@@ -1320,6 +1394,7 @@ def main() -> int:
                test_against_validates_both_records,
                test_verify_prior_rung, test_verify_prior_contract,
                test_verify_environment_match, test_verify_environment_record,
+               test_verify_environment_record_s2_fields,
                test_verify_group_path_agreement,
                test_canonical_store_fingerprint_integration,
                test_gate_precedence,
@@ -1337,13 +1412,10 @@ def main() -> int:
         print(f"\n{fn.__name__}")
         fn()
     total = len(passed) + len(failures)
-    if failures:
-        print(f"\nFAILED {len(failures)}/{total}: {', '.join(failures)}")
-    else:
-        # Reported rather than written into prose: every hand-maintained count in
-        # the spec has gone stale within a revision or two.
-        print(f"\nall passed ({total} assertions)")
-    return 1 if failures else 0
+    # Reported rather than written into prose: every hand-maintained count in
+    # the spec has gone stale within a revision or two.
+    print()
+    return summary(total - len(failures), len(failures))
 
 
 if __name__ == "__main__":

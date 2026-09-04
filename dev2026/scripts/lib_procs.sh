@@ -14,7 +14,59 @@
 # released. The runners leave it at the default; scripts/test_procs.sh shortens it,
 # because several of its cases are *designed* never to drain and would otherwise
 # spend the full wait each time.
+# Must exceed the arms' own shutdown budget, and that relationship is the point.
+#
+# C2 cycle 1 on 2026-08-10 failed cleanup because it did not. gunicorn's
+# `graceful_timeout` defaults to **30 s** and the arms did not set it, so the arbiter
+# was entitled to take 30 s to exit while this waited 20 — the harness gave up before
+# the library was obliged to finish. The arms now pass `--graceful-timeout 10`
+# explicitly, so the longest a well-behaved arbiter may take is a number this
+# repository chooses rather than one a dependency defaults to.
+#
+# 20 > 10 with room to spare. The margin also covers the case that made C2 fail: if
+# gunicorn's SIGCHLD-vs-buffered-stderr reentrancy recurs and a worker is never
+# reaped, the arbiter now gives up at its own 10 s rather than at 30, and this wait
+# still outlasts it. scripts/test_stop_multiworker.sh asserts the inequality.
+#
+# Where the value came from is decided BEFORE the default is applied, because the
+# two cases are not equally trustworthy and a run has to be able to say which it
+# had. An exported STOP_WAIT_SECS left in an interactive shell is exactly the kind
+# of thing that would silently reintroduce the C2 failure, and "the default is 20"
+# is not a statement about what a particular run actually used.
+if [ -n "${STOP_WAIT_SECS:-}" ]; then STOP_WAIT_SOURCE=environment
+else STOP_WAIT_SOURCE=default; fi
 : "${STOP_WAIT_SECS:=20}"
+
+# The other half of the invariant, and deliberately NOT overridable from the
+# environment: these two numbers are one relationship, and a relationship whose
+# sides can both be moved from outside is not one this repository controls. The
+# arms are launched with `--graceful-timeout "$ARM_GRACEFUL_TIMEOUT"` — every one
+# of them, from this single definition, so the six launch lines cannot drift apart
+# and no reader has to check whether they did.
+ARM_GRACEFUL_TIMEOUT=10
+
+# Assert the invariant at RUN TIME rather than trusting the defaults, and do it
+# before anything is started. A static assertion in the test suite says the values
+# in the source are consistent; it says nothing about the environment a particular
+# invocation inherited, which is where the value can actually be wrong.
+assert_shutdown_budget() {
+  case "$STOP_WAIT_SECS" in
+    ''|*[!0-9]*)
+      echo "STOP_WAIT_SECS is ${STOP_WAIT_SECS:-<empty>}, which is not a number of" >&2
+      echo "  seconds (source: $STOP_WAIT_SOURCE). Refusing to start: the stop" >&2
+      echo "  window would be whatever \`seq\` made of it." >&2
+      return 1 ;;
+  esac
+  if [ "$STOP_WAIT_SECS" -le "$ARM_GRACEFUL_TIMEOUT" ]; then
+    echo "STOP_WAIT_SECS=$STOP_WAIT_SECS (source: $STOP_WAIT_SOURCE) does not exceed" >&2
+    echo "  the arms' --graceful-timeout=$ARM_GRACEFUL_TIMEOUT. Cleanup would give up" >&2
+    echo "  before the arbiters were obliged to finish, and every stop would be at" >&2
+    echo "  risk of reporting a survivor that was merely still within its budget." >&2
+    echo "  This is the exact shape that failed C2 cycle 1 on 2026-08-10." >&2
+    return 1
+  fi
+  return 0
+}
 
 # The PID's start time — an identity token that PID number alone is not, because
 # PIDs are recycled. Field 22 of /proc/<pid>/stat, parsed past the parenthesised
@@ -162,10 +214,37 @@ boot_id() {
     cat /proc/sys/kernel/random/boot_id
     return 0
   fi
-  # No procfs — the offline tests. Boot time is a stable per-boot token.
+  # No procfs — the offline tests. Boot time is a stable per-boot token ONLY IF the
+  # sub-second field is discarded, and this used to keep it.
+  #
+  # macOS does not store the boot instant; it DERIVES it as (now - uptime), so the
+  # `usec` field moves as the clock is slewed. Two reads within one boot:
+  #
+  #     { sec = 1784274218, usec = 605425 } Fri Jul 17 15:43:38 2026   <- recorded 14:49
+  #     { sec = 1784274218, usec = 551909 } Fri Jul 17 15:43:38 2026   <- read at 15:08
+  #
+  # Same boot, same second, 53ms apart in the microsecond field. The whole string was
+  # being used as the token, so a tree recorded before an adjustment no longer matched
+  # the kernel after it. `tree_boot_matches` then returned 2, cleanup REFUSED TO ACT —
+  # correctly, given what it was told — and the fixture arms survived. That is a
+  # 5-assertion failure in test_s2perf_driver.sh that looks exactly like a flake, and
+  # it is likelier the longer the suite runs, because the window for an adjustment is
+  # wider. Batch 1 of three hit it; batches 2 and 3 did not.
+  #
+  # The seconds field is the actual per-boot identity, so that is what is used.
+  #
+  # THE LINUX PATH ABOVE IS UNAFFECTED: /proc/sys/kernel/random/boot_id is a UUID
+  # generated once per boot and cannot drift. VM24 takes that path, so no VM24 result
+  # depended on this and none is invalidated by the fix.
   raw="$(sysctl -n kern.boottime 2>/dev/null)" || return 1
   [ -n "$raw" ] || return 1
-  printf '%s\n' "$raw" | tr -s ' ' '_'
+  # `^[^0-9]*` anchors the capture to the FIRST number in the string. Without it the
+  # greedy match runs to `usec = …` and returns the microseconds — the exact field
+  # being excluded.
+  sec="$(printf '%s\n' "$raw" \
+         | sed -n 's/^[^0-9]*sec[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p')"
+  [ -n "$sec" ] || return 1
+  printf 'kern.boottime.sec=%s\n' "$sec"
 }
 
 # `pid ppid` for every process. On Linux this reads procfs directly and never
@@ -366,6 +445,150 @@ tree_pids() {               # tree_pids <name>
     | sed 's/ $//'
 }
 
+# ------------------------------------------------------- WHO IS ACTUALLY RUNNING THIS
+# The UID of every process in a recorded tree, read from /proc, asserted against the UID
+# the run is supposed to be using.
+#
+# C1 reads the production store through a read-only ACL granted to ONE account
+# (`woa23c1ro`, uid 994). That guarantee is worth exactly as much as the claim that the
+# arms actually run as it -- and "the SSH shell was 994" is a different claim from "every
+# gunicorn worker is 994". A launcher can be one uid and its children another; that is
+# what a privilege-dropping wrapper is FOR, and it is what a misconfigured one gets
+# wrong. So this reads the tree the run already records -- master and every worker,
+# including workers gunicorn respawned -- and checks them one at a time.
+#
+# /proc/<pid>/status Uid: gives four values -- real, effective, saved-set, filesystem.
+# ALL FOUR are compared. A process whose effective uid is 994 while its real uid is 0 has
+# not dropped privilege, it is wearing it lightly, and the filesystem uid is the one that
+# actually decides whether a write to the store succeeds.
+#
+# A pid that vanished between recording and checking is NOT an error: gunicorn reaps and
+# respawns workers, and a worker that exited cannot violate anything. A pid that is alive
+# and has the wrong uid is a hard failure.
+tree_uids() {               # tree_uids <name>   -> "pid uid_real uid_eff uid_saved uid_fs" per line
+  local name="$1" p line
+  for p in $(tree_pids "$name"); do
+    [ -r "/proc/$p/status" ] || continue          # exited between record and read
+    line="$(awk '/^Uid:/ {print $2, $3, $4, $5; exit}' "/proc/$p/status" 2>/dev/null)" || continue
+    [ -n "$line" ] || continue
+    printf '%s %s\n' "$p" "$line"
+  done
+}
+
+assert_tree_uid() {         # assert_tree_uid <name> <expected-uid>
+  local name="$1" want="$2" bad=0 checked=0 p r e sv fs
+  [ -f "$RUN/$name.tree" ] || {
+    echo "$name: no recorded tree, so no UID can be asserted" >&2; return 1; }
+  while read -r p r e sv fs; do
+    [ -n "$p" ] || continue
+    checked=$((checked + 1))
+    if [ "$r" != "$want" ] || [ "$e" != "$want" ] || \
+       [ "$sv" != "$want" ] || [ "$fs" != "$want" ]; then
+      echo "$name: pid $p runs as uid real=$r eff=$e saved=$sv fs=$fs, expected all $want" >&2
+      bad=$((bad + 1))
+    fi
+  done <<EOF
+$(tree_uids "$name")
+EOF
+  # ZERO CHECKED IS A FAILURE, not a pass. An empty tree, an unreadable /proc or a
+  # mistyped name would otherwise report "no violations found" about nothing -- the
+  # shape of vacuous success this project has been bitten by before.
+  if [ "$checked" -eq 0 ]; then
+    echo "$name: NO process could be checked for its UID. Refusing to report an" >&2
+    echo "  unverified identity as verified." >&2
+    return 1
+  fi
+  if [ "$bad" -gt 0 ]; then
+    echo "$name: $bad of $checked process(es) do not run as uid $want." >&2
+    return 1
+  fi
+  echo "  $name: $checked process(es), all uid $want (real, effective, saved, fs)"
+  return 0
+}
+
+# ------------------------------------------ PRODUCTION'S IDENTITY, WITHOUT PRIVILEGE
+# c1n stopped on "production is not listening on 8050" while production was listening
+# the whole time. The old check called `pids_on_port`, which greps `ss` output for
+# `pid=` -- and `ss -p` prints a pid only for sockets the CALLER OWNS, or to root. As
+# uid 994, `ss -ltn` and `ss -ltnp` return the identical line for :8050, the second
+# with no pid=. The port was visible; the owner was not.
+#
+# The check it replaced was not wrong to want production's identity. Its own comment is
+# right: "someone is still listening" is not "production is the process it was", and a
+# restart mid-run would leave the port occupied while every comparison described a
+# different backend. It simply cannot learn that as a non-owner.
+#
+# So the two questions are asked separately, each by a means an unprivileged account
+# actually has:
+#
+#   is the port listening?      `ss -ltn` -- no -p, no ownership needed
+#   is it the expected process? the SUPPLIED pids, validated against /proc, which is
+#                               world-readable for stat, cmdline and exe
+#
+# That preserves exactly the property the original wanted: if production restarts, the
+# supplied pids die or their starttimes change, and this refuses.
+
+# Is anything listening on this port? Ownership is NOT consulted.
+port_is_listening() {       # port_is_listening <port>
+  local port="$1" out
+  out="$(ss -ltn 2>/dev/null)" || return 2
+  printf '%s\n' "$out" | awk -v pp=":$port\$" '$4 ~ pp { f = 1 } END { exit !f }'
+}
+
+# "<pid> <starttime>" for a live process, or non-zero. $PROC_ROOT is the same test seam
+# the rest of this file uses.
+proc_pid_identity() {       # proc_pid_identity <pid>
+  local pid="$1" root="${PROC_ROOT:-/proc}" st
+  [ -r "$root/$pid/stat" ] || return 1
+  st="$(starttime_of "$pid")" || return 1
+  [ -n "$st" ] || return 1
+  printf '%s %s' "$pid" "$st"
+}
+
+# Everything about one production pid that can be checked without privilege. Prints a
+# problem and returns non-zero, or prints the identity and returns 0.
+#
+# PID REUSE is why starttime is carried everywhere: a pid alone is not an identity, and
+# after a restart the same number can belong to something else entirely. The caller
+# compares the starttime it recorded against the one seen later, and a difference is a
+# refusal rather than a note.
+verify_prod_pid() {         # verify_prod_pid <pid> <exe-substr> <cmdline-substr>
+  local pid="$1" want_exe="$2" want_cmd="$3" root="${PROC_ROOT:-/proc}" st cmd exe
+  case "$pid" in
+    ''|*[!0-9]*) printf 'not a pid: %s' "$pid"; return 1 ;;
+  esac
+  if [ ! -r "$root/$pid/stat" ]; then
+    printf 'pid %s: no readable %s/%s/stat -- the process is gone or was never there' \
+      "$pid" "$root" "$pid"
+    return 1
+  fi
+  st="$(starttime_of "$pid")" || { printf 'pid %s: starttime unreadable' "$pid"; return 1; }
+  [ -n "$st" ] || { printf 'pid %s: starttime empty' "$pid"; return 1; }
+
+  cmd="$(tr '\0' ' ' < "$root/$pid/cmdline" 2>/dev/null)" || cmd=""
+  if [ -z "$cmd" ]; then
+    printf 'pid %s: cmdline unreadable' "$pid"; return 1
+  fi
+  case "$cmd" in
+    *"$want_cmd"*) ;;
+    *) printf 'pid %s: cmdline does not identify production (want %s): %s' \
+         "$pid" "$want_cmd" "$cmd"; return 1 ;;
+  esac
+
+  # /proc/<pid>/exe is a symlink only the owner and root may READ THROUGH, so a failure
+  # here is not evidence of anything and must not be reported as one. Checked when it is
+  # readable, and said to be skipped when it is not.
+  if exe="$(readlink "$root/$pid/exe" 2>/dev/null)" && [ -n "$exe" ]; then
+    case "$exe" in
+      *"$want_exe"*) ;;
+      *) printf 'pid %s: exe is %s, expected to contain %s' "$pid" "$exe" "$want_exe"
+         return 1 ;;
+    esac
+  fi
+  printf '%s %s' "$pid" "$st"
+  return 0
+}
+
 # Merge any children that appeared since the snapshot. gunicorn respawns a worker
 # that died, so the tree recorded after startup can be stale by the time the run
 # ends; a respawned worker is just as much ours as the one it replaced.
@@ -558,6 +781,21 @@ stop_tracked() {            # stop_tracked <name> <port|"">
   # different process — someone else's. Killing on that basis is the worst thing
   # this script could do, so a mismatch stops it here, with nothing signalled and
   # nothing deleted.
+  # Asked first and separately. `tree_boot_matches` returns the same status for an
+  # uncertain tree as for a boot mismatch, so the message below named three causes,
+  # none of which was this one. A refusal whose stated reason is wrong is worse than
+  # one with no reason at all: it sends the reader to check the boot id.
+  if _is_uncertain "$name"; then
+    _diag "$name" "pre-signal" "tree-uncertain" \
+      "the tree's completeness was never confirmed, so it cannot be interpreted" \
+      || true
+    echo "$name: REFUSING TO ACT — this tree's completeness was never confirmed," >&2
+    echo "  so what it contains cannot be interpreted and the PIDs in it cannot be" >&2
+    echo "  trusted to be ours. This is NOT a boot-id mismatch: see" >&2
+    echo "  $RUN/$name.uncertain and $RUN/$name.diag. Nothing signalled, nothing" >&2
+    echo "  removed; state left for inspection." >&2
+    return 1
+  fi
   st=0; tree_boot_matches "$name" || st=$?
   if [ "$st" -ne 0 ]; then
     # Re-run through tree_survivors purely to record *why*: this is before any
@@ -608,7 +846,72 @@ stop_tracked() {            # stop_tracked <name> <port|"">
     fi
     kill "$pid" 2>/dev/null || true
   else
-    echo "$name: PID $pid is already gone; its children are still accounted for" >&2
+    # THE IDENTITY READ FAILED. Under this project's fail-closed rule that ends the
+    # stop, whether or not the PID happens to be absent.
+    #
+    # POLICY, decided 2026-08-18 after the clnA cleanup regression on VM24 (spec 002
+    # section on cleanup outcomes). `kill -0` reporting ESRCH proves that THIS PID
+    # NUMBER does not exist right now. It does not confirm that the process this run
+    # recorded is the one that exited: without the start time there is nothing tying
+    # the number to the process, and a PID that has been recycled and has since
+    # exited looks identical. "The number is absent" is not "the tracked process was
+    # identified and is gone".
+    #
+    # So the four outcomes are:
+    #
+    #   identity confirmed   + tree gone     -> PASS, state removed
+    #   identity confirmed   + survivor      -> FAIL, state kept
+    #   identity UNCONFIRMED + process gone  -> FAIL, state kept   <- this branch
+    #   identity UNCONFIRMED + process alive -> FAIL, state kept, nothing signalled
+    #
+    # The clnA run reported this branch as a clean stop on Linux and as a failure on
+    # macOS — the same scenario, two answers, because the outcome was being decided
+    # by which predicate happened to settle first. It is decided by policy now, and
+    # the policy is the same on both.
+    local pa=0
+    pid_alive "$pid" || pa=$?
+    local liveness
+    case "$pa" in
+      0) liveness=alive ;;
+      1) liveness=gone ;;
+      *) liveness=indeterminate ;;
+    esac
+    _diag "$name" "identity" "starttime-unreadable-pid-$liveness" \
+      "PID $pid: starttime_of returned nothing; pid_alive=$pa ($liveness). NOT signalled; state kept" \
+      || true
+    echo "$name: CLEANUP FAILED — the start time of PID $pid could not be read, so" >&2
+    echo "  the process this run recorded was never identified. kill -0 says the" >&2
+    echo "  PID is $liveness." >&2
+    if [ "$pa" -eq 1 ]; then
+      echo "  An absent PID NUMBER is not a confirmed exit of the tracked process:" >&2
+      echo "  without the start time nothing ties the number to what this run" >&2
+      echo "  started, and a recycled PID that has since exited looks the same." >&2
+    else
+      echo "  An unreadable identity is not evidence that the process has gone," >&2
+      echo "  and signalling on an identity this function could not confirm is the" >&2
+      echo "  one thing cleanup must never do." >&2
+    fi
+    # The policy forbids SIGNALLING and REMOVING on an unconfirmed identity. It does
+    # not forbid LOOKING: a gunicorn arbiter that exited while a worker it forked
+    # kept running is exactly this shape, and naming the survivor is the single most
+    # useful thing this message can carry. Read-only, no signal.
+    local unconf_surv
+    unconf_surv="$(tree_survivors "$name" "identity-unconfirmed" 2>/dev/null)" || true
+    if [ -n "$unconf_surv" ]; then
+      echo "  STILL RUNNING after stop: PID(s) $unconf_surv" >&2
+      echo "  These were NOT signalled — the master's identity could not be" >&2
+      echo "  confirmed, so nothing here may be signalled. Do not start another" >&2
+      echo "  instance while they are alive." >&2
+    fi
+    echo "  Nothing was signalled and nothing was removed. This run FAILS." >&2
+    echo "  The tree is NOT marked uncertain and no .uncertain file is written:" >&2
+    echo "  what failed is one PID's identity read, which may be transient, and" >&2
+    echo "  that flag would make every later stop of this service refuse too. A" >&2
+    echo "  retry that CAN read the identity is entitled to succeed on its own" >&2
+    echo "  evidence; it is this attempt that is refused, not the service." >&2
+    echo "  State left for inspection:" >&2
+    echo "    $RUN/$name.pid $RUN/$name.starttime $RUN/$name.tree $RUN/$name.diag" >&2
+    return 1
   fi
 
   for i in $(seq 1 "$STOP_WAIT_SECS"); do

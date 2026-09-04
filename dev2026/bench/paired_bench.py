@@ -38,6 +38,7 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from bench.request_log import RequestLog, read_counts as read_journal  # noqa: E402
 from bench.paired_stats import (  # noqa: E402
     DEFAULT_SEED, ESCALATION_LADDER, PRACTICAL_MARGIN, WARMUP_REQUESTS,
     bootstrap_ratio, improvement_verdict, next_rung, plan_rung,
@@ -250,7 +251,7 @@ def main() -> int:
                          "incomplete and says so.")
     ap.add_argument("--reference-meta", type=Path, default=None,
                     help="the same, for the reference backend")
-    ap.add_argument("--gate-variant", choices=("5.2A", "5.2B"), required=True,
+    ap.add_argument("--gate-variant", choices=("5.2A", "5.2B", "5.2C"), required=True,
                     help="which contract-gate variant is in force (spec 001): 5.2A "
                          "byte-exact against a controlled reference, 5.2B semantic "
                          "against live production. The number means different things "
@@ -258,6 +259,12 @@ def main() -> int:
     ap.add_argument("--expect-status", type=int, default=200,
                     help="status every request must return; anything else invalidates "
                          "the case rather than being timed")
+    ap.add_argument("--request-log", type=Path, default=None,
+                    help="append one line per request attempt BEFORE it is issued, "
+                         "so a stage killed by a transport failure still has "
+                         "a record of the attempts it made. Under abrupt\n"
+                         "termination that record is not a bound on what\n"
+                         "reached the host")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -285,7 +292,8 @@ def main() -> int:
         # required to be pinned.
         pinned = not (args.gate_variant == "5.2B" and label == "reference")
         meta_problems.extend(
-            errs if errs else validate_meta(meta, label, require_pinned_seed=pinned))
+            errs if errs else validate_meta(
+                meta, label, seed_requirement="pinned" if pinned else "any"))
         if not pinned:
             seed = ((meta or {}).get("env") or {}).get("PYTHONHASHSEED")
             unpinned_note.append(
@@ -295,8 +303,8 @@ def main() -> int:
                 f"variant compares semantically rather than byte for byte.")
     cand_meta, ref_meta = metas["candidate"], metas["reference"]
     meta_problems.extend(validate_store_agreement(cand_meta, ref_meta))
-    if args.gate_variant == "5.2A":
-        # 5.2A only. Under 5.2B the reference is live production, whose store
+    if args.gate_variant in ("5.2A", "5.2C"):
+        # Not 5.2B. There the reference is live production, whose store
         # literal is whatever it is and cannot be aligned — which is the reason that
         # variant compares semantically in the first place.
         #
@@ -333,7 +341,12 @@ def main() -> int:
 
     results = []
     verify = not args.insecure
+    # Written before each request leaves, and read back by `bench.perf_counts` when
+    # this process does not survive to write its artefact.
+    journal = RequestLog(args.request_log, "latency")
+    aborted: dict | None = None
     with httpx.Client(verify=verify, follow_redirects=True) as client:
+      try:
         for q in queries:
             a_samples, b_samples = [], []
             a_status, b_status = set(), set()
@@ -348,6 +361,8 @@ def main() -> int:
                     pair = pair[::-1]
                 order_log.append("AB" if i % 2 == 0 else "BA")
                 for base, bucket, seen in pair:
+                    journal.attempt("candidate" if base == args.candidate
+                                    else "reference", q.id)
                     ms, code, _ = request_once(client, base, q.params(), args.timeout)
                     bucket.append(ms)
                     seen.add(code)
@@ -399,6 +414,74 @@ def main() -> int:
             print(f"{q.id:26s} ratio {stats['median_ratio']:6.3f} "
                   f"CI [{stats['ci95_low']:.3f}, {stats['ci95_high']:.3f}]  "
                   f"{reg:14s} {imp:14s}{hint}")
+      except Exception as exc:                     # noqa: BLE001
+        # A refused connection or a timeout. Every request already issued is in the
+        # journal, and the cases already finished are in `results` — both are kept
+        # and BOTH are marked partial. The alternative, which is what this replaced,
+        # was to die with no artefact at all and leave the run unable to say how
+        # many requests it had sent.
+        aborted = {
+            "classification": "STAGE_ABORTED_TRANSPORT_FAILURE",
+            "stage": "latency",
+            "case": q.id,
+            "error": f"{type(exc).__name__}: {exc}",
+            "cases_completed": len(results),
+            "cases_planned": len(queries),
+            "meaning": ("the latency stage stopped on a transport failure. The cases "
+                        "below completed; the rest were never measured"),
+            "not": ("NOT a latency result and NOT a gate verdict. No case here may "
+                    "be quoted as performance, and the run's request total is not "
+                    "exact — report the observed count and the authorised ceiling"),
+            "request_journal": str(args.request_log) if args.request_log else None,
+        }
+        print(f"\nSTAGE_ABORTED_TRANSPORT_FAILURE at {q.id}: "
+              f"{type(exc).__name__}: {exc}")
+      finally:
+        # Closed on every path out, including the ones no handler here catches.
+        journal.close()
+
+    if aborted is not None:
+        # No gate. A run that could not finish sampling has no verdict to give, and
+        # `decide_gate` would happily compute one from the cases that did finish.
+        observed, jproblems = ({"candidate": 0, "reference": 0}, [])
+        if args.request_log:
+            observed, jproblems = read_journal(args.request_log)
+        payload = {
+            "kind": "paired_latency",
+            "gate": "INVALID_TRANSPORT_FAILURE",
+            "complete": False,
+            "request_total_exact": False,
+            "journaled_attempts_per_arm": observed,
+            # This stage CAUGHT its own failure and is writing this
+            # file, so its process was alive to close the journal:
+            # every attempt() that returned was followed by a call
+            # that completed or raised. The attempt count is exact;
+            # the MEASUREMENT is what is incomplete.
+            "host_attempt_count_exact": True,
+            "attempt_evidence": "journal_writer_exited_normally",
+            "request_journal_problems": jproblems,
+            "reporting_rule": ("the MEASUREMENT is incomplete. The attempt count "
+                               "above is exact — this process closed its own "
+                               "journal — but no latency figure may be quoted, and "
+                               "the authorised ceiling must be reported with it"),
+            "aborted": aborted,
+            "candidate_url": args.candidate,
+            "reference_url": args.reference,
+            "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "warm_samples_per_arm": args.warm,
+            "warmup_discarded": WARMUP_REQUESTS,
+            "gate_variant": args.gate_variant,
+            "practical_margin": args.margin,
+            "harness_invocation": sys.argv,
+            # The cases that DID complete, with their raw samples. They are evidence
+            # of what was issued, not of how the change performs.
+            "results": results,
+        }
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(json.dumps(payload, indent=2))
+            print(f"wrote {args.out} (partial: {len(results)}/{len(queries)} cases)")
+        return 1
 
     invalid = [r for r in results if not r["status_ok"]]
     # The window the pre-run records cannot see. Folded into this run's verdict so

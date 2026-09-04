@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import platform
 import re
 import subprocess
@@ -168,6 +169,113 @@ def cmdline(pid: int) -> tuple[list[str] | None, str | None]:
         return None, None
     argv = [a for a in raw.split("\0") if a]
     return argv, " ".join(argv)
+
+
+def argv_of(pid: int) -> tuple[list[str] | None, str | None]:
+    """argv as a list, split on NUL and nothing else.
+
+    `/proc/<pid>/cmdline` is NUL-separated because an argument may contain anything
+    except NUL — spaces, quotes, backticks, newlines. Converting it to
+    newline-delimited text and reading it line by line, which is what this used to
+    do, silently turns one argument containing a newline into two, and every
+    position after it shifts. For a scan that pairs `-w` with the token following
+    it, a shift is not a cosmetic problem: it makes the *next* argument look like
+    the worker count.
+
+    Returns (argv, error). Never raises, never guesses.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError as exc:
+        return None, f"cannot read /proc/{pid}/cmdline: {exc!r}"
+    if not raw:
+        return None, f"/proc/{pid}/cmdline is empty"
+    # A trailing NUL is conventional and would otherwise yield a final empty item.
+    parts = raw.split(b"\0")
+    if parts and parts[-1] == b"":
+        parts.pop()
+    return [p.decode("utf-8", "surrogateescape") for p in parts], None
+
+
+def worker_count(argv: list[str]) -> tuple[int | None, str | None]:
+    """gunicorn's worker count from its argv: `-w N`, `--workers N`, `--workers=N`.
+
+    Pure, so the parsing can be tested against argv shapes a live process would be
+    tedious to produce — an argument containing a newline, a quote, a backtick, or
+    the literal text `-w` inside an unrelated value.
+
+    Returns (count, error). Ambiguity is an error, not a choice: if the flag appears
+    twice with different values, gunicorn's own precedence is not something to
+    reimplement from memory when the answer decides how many processes this run is
+    authorised to start.
+    """
+    found: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-w", "--workers"):
+            if i + 1 >= len(argv):
+                return None, f"{a} is the last argument, with no value after it"
+            found.append(argv[i + 1])
+            i += 2
+            continue
+        if a.startswith("--workers="):
+            found.append(a[len("--workers="):])
+        i += 1
+
+    if not found:
+        return None, "no -w/--workers in argv"
+    distinct = set(found)
+    if len(distinct) > 1:
+        return None, (f"argv specifies the worker count more than once, with "
+                      f"different values: {sorted(distinct)}")
+    value = found[0]
+    if not value.isdigit():
+        return None, f"worker count {value!r} is not a decimal integer"
+    return int(value), None
+
+
+def graceful_timeout(argv: list[str]) -> tuple[int | None, str | None]:
+    """gunicorn's `--graceful-timeout` from its argv, in seconds.
+
+    Same shape as `worker_count` and pure for the same reason, but it answers a
+    different question. The worker count decides how many processes a run is
+    authorised to start; this decides **how long the arbiter is entitled to take to
+    stop**, which is the number `STOP_WAIT_SECS` has to exceed.
+
+    C2 cycle 1 on 2026-08-10 failed cleanup because nobody had ever read this value:
+    the arms did not pass the flag, gunicorn's default is 30 s, and the harness
+    waited 20. Recording the launch argv was not enough — it was recorded then, and
+    the absence of the flag in it went unnoticed, because nothing looked.
+
+    Returns (seconds, error). `None` with an error means the flag is not there or
+    cannot be read as one value; that is never silently treated as the default.
+    """
+    found: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--graceful-timeout":
+            if i + 1 >= len(argv):
+                return None, f"{a} is the last argument, with no value after it"
+            found.append(argv[i + 1])
+            i += 2
+            continue
+        if a.startswith("--graceful-timeout="):
+            found.append(a[len("--graceful-timeout="):])
+        i += 1
+
+    if not found:
+        return None, ("no --graceful-timeout in argv; gunicorn would use its own "
+                      "default, which this harness does not choose")
+    distinct = set(found)
+    if len(distinct) > 1:
+        return None, (f"argv specifies --graceful-timeout more than once, with "
+                      f"different values: {sorted(distinct)}")
+    value = found[0]
+    if not value.isdigit():
+        return None, f"--graceful-timeout {value!r} is not a decimal integer"
+    return int(value), None
 
 
 def whitelisted_env(pid: int) -> dict:
@@ -350,7 +458,8 @@ def zmetadata_fingerprints(store: str | None) -> dict | None:
     return out
 
 
-def resolve_env_python(cwd: Path, argv: list[str], env: dict) -> dict:
+def resolve_env_python(cwd: Path, argv: list[str], env: dict,
+                       override: str | None = None) -> dict:
     """The interpreter whose *packages* the process is using — not `/proc/<pid>/exe`.
 
     `/proc/<pid>/exe` follows the venv's symlink to the base binary, so it names a
@@ -361,7 +470,17 @@ def resolve_env_python(cwd: Path, argv: list[str], env: dict) -> dict:
 
     So the environment is derived from what the process was told to use, in order of
     directness, and the method is recorded alongside the answer.
+
+    `override` outranks both heuristics, and the S2 modes need it. There the arm is
+    started as `<production binary> -S -m gunicorn` with the package clone on
+    PYTHONPATH: `VIRTUAL_ENV` is deliberately unset, and the argv0 sibling of
+    `~/.pyenv/versions/py311/bin/python3.11` is `~/.pyenv/versions/py311/bin/python`
+    — *production's own environment*, whose packages are the one thing the arm is
+    arranged not to use. Guessing there would answer confidently about the wrong
+    interpreter, which is the exact failure this function exists to have fixed.
     """
+    if override:
+        return {"env_python": override, "env_python_source": "explicit"}
     venv = env.get("VIRTUAL_ENV")
     if venv and (Path(venv) / "bin" / "python").exists():
         return {"env_python": str(Path(venv) / "bin" / "python"),
@@ -373,14 +492,56 @@ def resolve_env_python(cwd: Path, argv: list[str], env: dict) -> dict:
     return {"env_python": None, "env_python_source": "unresolved"}
 
 
-def dependencies(env_python: str | None, lockfile: Path | None) -> dict:
+def dependencies(env_python: str | None, lockfile: Path | None,
+                 *, interp_args: tuple[str, ...] = (),
+                 env: dict | None = None,
+                 clone_manifest: Path | None = None,
+                 clone_root: str | None = None) -> dict:
     """Installed distributions of the environment actually in use.
 
     `importlib.metadata` rather than `pip freeze`: a uv-created venv has no pip, so
     the pip call would fail or — worse, as it did — silently answer for a different
     interpreter.
+
+    `interp_args` and `env` exist for the S2 modes. There the package set is not a
+    property of the binary — the same binary lists production's 236 distributions
+    normally and the clone's under `-S` with the clone on PYTHONPATH — so listing it
+    without reproducing the arm's launch would describe production's environment
+    while claiming to describe the clone's. Both are recorded in the output so the
+    answer cannot be read without the question it answers.
     """
     out: dict = {}
+    if clone_manifest is not None:
+        # The S2 anchor. There is no lockfile to point at, so what stands in its
+        # place is the manifest produced when the clone was built and verified
+        # against production — the artefact that distinguishes *this* clone from a
+        # directory that merely has the right name.
+        if not clone_manifest.exists():
+            out["clone_manifest_error"] = f"{clone_manifest} does not exist"
+        else:
+            out["clone_manifest"] = str(clone_manifest)
+            out["clone_manifest_sha256"] = hashlib.sha256(
+                clone_manifest.read_bytes()).hexdigest()
+    if clone_root is not None:
+        # The two dist-info-keyed digests of spec 002 s4.1.2b, read from the tree
+        # itself. Recorded alongside the name-keyed one so all three appear together
+        # with their canonicalizations and none can stand in for another.
+        try:
+            from bench.package_digests import digests as _dd
+            d = _dd(clone_root)
+            out["package_tree_digest"] = d["package_tree_digest"]
+            out["runtime_distribution_digest"] = d["runtime_distribution_digest"]
+            out["n_dist_info_directories"] = d["n_dist_info_directories"]
+            out["n_runtime_distributions"] = d["n_runtime_distributions"]
+        except Exception as exc:
+            out["clone_digest_error"] = repr(exc)
+    if interp_args:
+        out["interpreter_args"] = list(interp_args)
+    if env is not None:
+        out["interpreter_env"] = {k: env.get(k) for k in
+                                  ("PYTHONPATH", "PYTHONNOUSERSITE",
+                                   "PYTHONDONTWRITEBYTECODE", "PYTHONHOME",
+                                   "VIRTUAL_ENV")}
     if lockfile and lockfile.exists():
         out["lockfile"] = str(lockfile)
         out["lockfile_sha256"] = hashlib.sha256(lockfile.read_bytes()).hexdigest()
@@ -403,15 +564,27 @@ def dependencies(env_python: str | None, lockfile: Path | None) -> dict:
         """
     )
     try:
-        r = subprocess.run([env_python, "-c", code],
-                           capture_output=True, text=True, timeout=60)
+        r = subprocess.run([env_python, *interp_args, "-c", code],
+                           capture_output=True, text=True, timeout=60,
+                           env=env)
         if r.returncode != 0:
             out["distributions_error"] = r.stderr.strip()[:300]
             return out
         payload = json.loads(r.stdout)
         listed = "\n".join(payload["dists"])
         out["python_version"] = payload["version"]
-        out["distributions_sha256"] = hashlib.sha256(listed.encode()).hexdigest()
+        # Named for what it hashes. It was `distributions_sha256`, which says
+        # nothing about the canonicalization, and its value for the package clone
+        # is byte-identical to the SUPERSEDED rev 1-5 "runtime distribution
+        # digest" — because it is that digest, recomputed live. Two different
+        # digests over the same tree must not share a name that fits both.
+        out["name_version_set_sha256"] = hashlib.sha256(listed.encode()).hexdigest()
+        out["name_version_set_canonicalization"] = (
+            "sorted set of '<Name>==<Version>' over "
+            "importlib.metadata.distributions() with a usable Name, joined with "
+            "newlines, UTF-8, SHA-256. Keyed on name and version, NOT on dist-info "
+            "directory. This is the superseded rev 1-5 canonicalization and is not "
+            "the runtime_distribution_digest (spec 002 s4.1.2b).")
         out["distributions"] = payload["dists"]
     except Exception as exc:
         out["distributions_error"] = repr(exc)
@@ -470,9 +643,16 @@ def compare_store(before: dict, after: dict) -> list[str]:
 def build_meta(*, manifest: str, port: int, pid: int, listeners: list[int],
                port_verified: bool, cwd: Path, exe: str | None,
                argv: list[str], argv_str: str | None, env: dict, store: dict,
-               lockfile: Path | None, expect_argv: list[str]) -> dict:
-    env_py = resolve_env_python(cwd, argv, env)
-    deps = dependencies(env_py["env_python"], lockfile)
+               lockfile: Path | None, expect_argv: list[str],
+               env_python_override: str | None = None,
+               interp_args: tuple[str, ...] = (),
+               interp_env: dict | None = None,
+               clone_manifest: Path | None = None,
+               clone_root: str | None = None) -> dict:
+    env_py = resolve_env_python(cwd, argv, env, override=env_python_override)
+    deps = dependencies(env_py["env_python"], lockfile,
+                        interp_args=interp_args, env=interp_env,
+                        clone_manifest=clone_manifest, clone_root=clone_root)
     """Assemble the provenance record.
 
     Split out of `main()` so a test can build one without a live process and assert
@@ -541,13 +721,62 @@ def main() -> int:
                          "is not collected at all without it. For the candidate: "
                          "--expect-argv-contains api.app:app; for the reference: "
                          "--expect-argv-contains woa23_app:app")
+    ap.add_argument("--expect-worker-count", type=int, default=None,
+                    help="ASSERT that the arm was launched with this many gunicorn "
+                         "workers, read from its own /proc/<pid>/cmdline. **This "
+                         "sets nothing.** The worker count is set by the runner's "
+                         "mode — D1 and C1 launch `-w 1`, C2 launches at the count "
+                         "it measured from production — and this flag only refuses "
+                         "to record provenance for an arm that does not have it. "
+                         "Optional, because this collector is also pointed at "
+                         "production, whose count is measured rather than chosen.")
+    ap.add_argument("--expect-graceful-timeout", type=int, default=None,
+                    help="assert that the process was launched with this "
+                         "--graceful-timeout, in seconds. Optional, because this "
+                         "collector is also pointed at production, whose command "
+                         "line this campaign does not choose. The runners pass it "
+                         "for every arm THEY launch: the launch argv was already "
+                         "being recorded when C2 cycle 1 failed, and what was "
+                         "missing was anything that read it.")
     ap.add_argument("--against", type=Path, default=None,
                     help="a backend_meta file collected earlier. The freshly read "
                          "store fingerprints are compared against it and any drift "
                          "is reported non-zero. Run this AFTER the gate to cover the "
                          "sampling window, which the pre-run collections cannot.")
+    ap.add_argument("--env-python", default=None,
+                    help="name the interpreter whose packages this backend uses, "
+                         "instead of deriving it. Required by the S2 modes, where the "
+                         "arm runs production's binary against a package clone and "
+                         "both heuristics would resolve to production's own "
+                         "environment.")
+    ap.add_argument("--env-python-arg", action="append", default=[],
+                    help="argument passed to --env-python when listing distributions "
+                         "(repeatable). The S2 modes pass -S, without which the "
+                         "listing describes production's site-packages rather than "
+                         "the clone's.")
+    ap.add_argument("--env-python-pythonpath", default=None,
+                    help="PYTHONPATH for the distribution listing. Must be the same "
+                         "value the arm was started with, or the record answers for "
+                         "an environment no arm ran under.")
+    ap.add_argument("--clone-manifest", type=Path, default=None,
+                    help="the manifest produced when the package-tree clone was "
+                         "built and verified against production. Its digest is the "
+                         "S2 anchor, in the position --lockfile holds under D2b: "
+                         "without it, nothing distinguishes the verified clone from "
+                         "a directory with the right name.")
+    ap.add_argument("--clone-root", default=None,
+                    help="the package tree itself, so the two dist-info-keyed "
+                         "digests of spec 002 s4.1.2b are recorded beside the "
+                         "name-keyed one rather than inferred from it.")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
+
+    if (args.env_python_arg or args.env_python_pythonpath) and not args.env_python:
+        raise SystemExit(
+            "--env-python-arg/--env-python-pythonpath only mean something with "
+            "--env-python: without it the interpreter is derived, and applying the "
+            "S2 launch settings to a derived interpreter would produce a listing for "
+            "an environment nothing ran under.")
 
     if args.against and args.out and args.against.resolve() == args.out.resolve():
         raise SystemExit(
@@ -591,6 +820,39 @@ def main() -> int:
             f"for a process that may simply be occupying the port."
         )
 
+    # Read from the argv that was just verified to be the intended backend's, so a
+    # mismatch here is a statement about this arm and not about some other process.
+    # Checked before anything is written: a provenance file recording a shutdown
+    # budget the harness cannot outlast should not exist, because it would be
+    # indistinguishable from one that could.
+    if args.expect_graceful_timeout is not None:
+        seconds, gt_err = graceful_timeout(argv)
+        if seconds is None:
+            raise SystemExit(
+                f"pid {pid} on port {args.port} was launched without a usable "
+                f"--graceful-timeout ({gt_err}). Expected "
+                f"{args.expect_graceful_timeout}s. argv = {argv}")
+        if seconds != args.expect_graceful_timeout:
+            raise SystemExit(
+                f"pid {pid} on port {args.port} was launched with "
+                f"--graceful-timeout {seconds}s, not the expected "
+                f"{args.expect_graceful_timeout}s. Cleanup's wait is sized against "
+                f"the expected value, so the two must agree. argv = {argv}")
+
+    if args.expect_worker_count is not None:
+        n_workers, w_err = worker_count(argv)
+        if n_workers is None:
+            raise SystemExit(
+                f"pid {pid} on port {args.port}: cannot read a worker count from "
+                f"its argv ({w_err}). Expected {args.expect_worker_count}. "
+                f"argv = {argv}")
+        if n_workers != args.expect_worker_count:
+            raise SystemExit(
+                f"pid {pid} on port {args.port} was launched with {n_workers} "
+                f"worker(s), not the expected {args.expect_worker_count}. A run "
+                f"whose arms do not have the worker count it recorded is not the "
+                f"run that was authorised. argv = {argv}")
+
     cwd_link = Path(f"/proc/{pid}/cwd")
     try:
         cwd = cwd_link.resolve()
@@ -605,11 +867,28 @@ def main() -> int:
     env = whitelisted_env(pid)
     store = resolve_store(args.manifest, cwd, env)
 
+    interp_env = None
+    if args.env_python_pythonpath is not None:
+        # Built from this process's environment rather than from nothing, so the
+        # listing runs the way the arm did — then the three settings that decide
+        # *which* packages are visible are set explicitly.
+        interp_env = dict(os.environ)
+        for drop in ("PYTHONHOME", "VIRTUAL_ENV"):
+            interp_env.pop(drop, None)
+        interp_env["PYTHONPATH"] = args.env_python_pythonpath
+        interp_env["PYTHONNOUSERSITE"] = "1"
+        interp_env["PYTHONDONTWRITEBYTECODE"] = "1"
+
     meta = build_meta(manifest=args.manifest, port=args.port, pid=pid,
                       listeners=listeners, port_verified=port_verified, cwd=cwd,
                       exe=exe, argv=argv, argv_str=argv_str, env=env, store=store,
                       lockfile=args.lockfile,
-                      expect_argv=list(args.expect_argv_contains))
+                      expect_argv=list(args.expect_argv_contains),
+                      env_python_override=args.env_python,
+                      interp_args=tuple(args.env_python_arg),
+                      interp_env=interp_env,
+                      clone_manifest=args.clone_manifest,
+                      clone_root=args.clone_root)
 
     seed = meta["env"].get("PYTHONHASHSEED")
     print(f"pid {pid} on port {args.port}  cwd {cwd}")

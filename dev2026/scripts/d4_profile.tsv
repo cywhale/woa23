@@ -1,0 +1,38 @@
+# D4 VALIDATION PROFILE — how each suite's result is to be read for a D4 validation run.
+#
+# WHY THIS FILE EXISTS. A D4 validation batch on VM24, under `odbadmin`, runs suites that
+# were written for a different environment: the `woa23c1ro` staging account, its tree, a
+# root-owned /tmp and a bash-3.2 reference host. Those suites are not wrong; they are being
+# asked a question about a host they are not on. Reporting them as plain FAILURES hides the
+# D4 signal in noise, and reporting them as passes would be a lie.
+#
+# THE RULE THIS FILE ENFORCES: NOT_APPLICABLE and ENVIRONMENT_BLOCKED are NEVER counted as
+# PASS, and are NEVER silently dropped. Every one is listed here with its condition and its
+# reason, printed in the run report, and totalled separately. A suite absent from this file
+# is REQUIRED_PASS by default -- coverage cannot be reduced by forgetting to mention a suite.
+#
+# NO ASSERTION IS DELETED, RELAXED OR IGNORED by this file. It classifies RESULTS; it does
+# not modify any suite, and the suites still run and still report their own totals.
+#
+# CLASSES
+#   REQUIRED_PASS        must exit 0. Any non-zero is a D4 failure.
+#   REQUIRED_FAIL        must exit non-zero; a pass is a D4 failure (a guard that must bite).
+#   NOT_APPLICABLE       out of D4 scope by subject matter: D1-only, staging-only or
+#                        performance-only. Not run for a signal D4 does not ask for.
+#   ENVIRONMENT_BLOCKED  in scope, but at least one assertion encodes a host property that
+#                        is false here. The suite still runs and still reports its totals.
+#   UNRESOLVED           behaviour not understood well enough to classify. Blocks the run.
+#
+# COLUMNS:  suite <TAB> class <TAB> condition <TAB> reason
+#
+suite	class	condition	reason
+test_s2perf_integration.py	NOT_APPLICABLE	D4 runs no performance test	Latency gate returns FAIL_NO_ESTABLISHED_IMPROVEMENT and emits no summary line on that path. Performance is explicitly out of D4 scope; keeping it here would make a D4 verdict depend on host speed.
+test_d1_finalize.sh	NOT_APPLICABLE	D4 does not run D1	Asserts over D1 finalize artifacts (workers.json, per-arm worker counts). D4 performs no D1 run, so the artifacts cannot exist. Exec mode fixed separately; that fix is unrelated to this classification.
+test_staging_bootstrap.sh	NOT_APPLICABLE	staging-only	Exercises the staging bootstrap identity/symlink-parent refusal. D4 creates no staging identity.
+test_staging_launcher.sh	NOT_APPLICABLE	staging-only	Exercises the staging launcher's port-ledger and store validation before the interpreter. D4 uses the production launcher path, which test_production_launcher.sh covers.
+test_clone_integrity.py	ENVIRONMENT_BLOCKED	/tmp must be owned by uid 0	On VM24 /tmp is nginx:root 1777, uid 121. The checker correctly reports a group-writable ancestor not owned by the running uid, so fixtures created under TMPDIR can never satisfy it.
+test_compare_arms.py	ENVIRONMENT_BLOCKED	/tmp must be owned by uid 0	Same checker as test_clone_integrity.py, asserted from the other side: expects exactly two problems, one per arm, and gets 0 because the ancestor problem masks the per-arm ones.
+test_c1_readonly_account.sh	ENVIRONMENT_BLOCKED	the running account must not be in the owning group	odbadmin is a member of the root group, so a tree intended to be readable-but-not-writable is writable and the suite reports 5 writable paths. SIDE EFFECT, recorded: this suite drives run_controlled.sh, which runs `uv sync --locked --python $PROD_PY` against the SHARED dev2026/.venv and rebuilds it onto production's pyenv mid-run.
+test_production_launcher.sh	ENVIRONMENT_BLOCKED	host bash must be 3.2	One assertion of 113 pins the reference host's bash to 3.2 (macOS); VM24 runs bash 5. The other 112 assertions are deployment-launcher checks and DO pass here; the run report prints the totals so that is visible rather than lost.
+test_staging_entry.sh	ENVIRONMENT_BLOCKED	the account must not be odbadmin	Asserts that no /home/odbadmin path survives into the staged environment. D4 validation runs AS odbadmin, under /home/odbadmin, so the assertion cannot hold by construction.
+test_cli.sh	ENVIRONMENT_BLOCKED	no pre-existing candidate/reference processes; staging workdir absent	Reports processes left behind and a staging workdir created, both properties of this account's live tree rather than of the code under test.

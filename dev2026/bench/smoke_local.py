@@ -1,8 +1,10 @@
 """Local smoke test: does the candidate import, route and describe itself correctly?
 
-Runs entirely on this machine. No VM24 process, no Zarr store, no requests to any
-backend — the store path is never opened, only read from the environment, so a
-placeholder is enough to import the module.
+Runs entirely on this machine. No VM24 process, no requests to any backend, and no
+Zarr data is read. Since spec 004 the store path is *stat*ed at import — the
+configured path must exist and be a directory — so an empty temporary directory is
+enough. Nothing opens the store's contents: the anchor group is checked in the
+lifespan, which importing does not run.
 
 It also does something more useful than a smoke test: it calls **both** Swagger
 route handlers and byte-compares the `JSONResponse.body` each returns. That is
@@ -22,6 +24,7 @@ import asyncio
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent.parent
@@ -36,7 +39,18 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 
 
 def load_candidate():
-    os.environ.setdefault("WOA23_ZARR_STORE", "/placeholder/not/opened")
+    # A real directory, not a placeholder. `/placeholder/not/opened` worked until
+    # spec 004 added the import-time store check: `api.config` now requires the
+    # configured path to exist and be a directory, so importing the candidate can no
+    # longer be done with a path that is deliberately absent.
+    #
+    # That is the cost §12.1 of spec 004 named — importing api.config touches the
+    # filesystem, and every tool that imports it inherits that — showing up in the
+    # first tool to import it. An empty temporary directory is enough: this function
+    # only ever imports, and the anchor group is checked in the lifespan, which no
+    # import runs.
+    if "WOA23_ZARR_STORE" not in os.environ:
+        os.environ["WOA23_ZARR_STORE"] = tempfile.mkdtemp(prefix="smoke-store-")
     sys.path.insert(0, str(REPO / "dev2026"))
     from api import app as mod
     return mod

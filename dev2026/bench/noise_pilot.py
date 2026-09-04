@@ -50,6 +50,19 @@ from bench.paired_stats import (  # noqa: E402
     BOOTSTRAP_ROUNDS, DEFAULT_SEED, WARMUP_REQUESTS, noise_floor, warm,
 )
 from bench.queries import Query, select  # noqa: E402
+from bench.request_log import RequestLog, read_counts as read_journal  # noqa: E402
+
+class UnexpectedStatus(Exception):
+    """A sampled case answered with a status the run did not expect.
+
+    An exception rather than `raise SystemExit`, which is what this used to be.
+    `SystemExit` derives from BaseException, so it passed straight through the
+    `except Exception` that writes the partial artefact: a pilot that had already
+    issued hundreds of requests exited with no artefact, no `complete: false` and
+    no journal close, and `perf_counts` then read the absent artefact as the
+    legitimate "no pilot at this rung" state and called the run exact.
+    """
+
 
 ENDPOINT = "/api/woa23"
 REPEAT_LEVELS = (3, 5, 11, 21)
@@ -59,12 +72,15 @@ SELECTED_K = 21
 
 
 def sample(client: httpx.Client, base: str, params: dict, n: int,
-           pause: float, timeout: float) -> tuple[list[float], set[int]]:
+           pause: float, timeout: float, journal=None, arm: str = "candidate",
+           case: str = "") -> tuple[list[float], set[int]]:
     out, statuses = [], set()
     url = base.rstrip("/") + ENDPOINT
     for _ in range(n):
         q = dict(params)
         q["_cb"] = uuid.uuid4().hex
+        if journal is not None:
+            journal.attempt(arm, case)
         t0 = time.perf_counter()
         r = client.get(url, params=q, timeout=timeout)
         r.read()
@@ -94,6 +110,16 @@ def main() -> int:
                          "timings are not measuring the thing under test")
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--insecure", action="store_true")
+    ap.add_argument("--arm", default="candidate", choices=("candidate", "reference"),
+                    help="which arm this invocation is sampling. The pilot targets "
+                         "one arm per invocation; the name is what the request "
+                         "journal records the attempts against")
+    ap.add_argument("--request-log", type=Path, default=None,
+                    help="append one line per request attempt BEFORE it is issued, "
+                         "so a stage killed by a transport failure still has "
+                         "a record of the attempts it made. Under abrupt\n"
+                         "termination that record is not a bound on what\n"
+                         "reached the host")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -117,12 +143,16 @@ def main() -> int:
           f"warm samples/case: {args.warm} (+{WARMUP_REQUESTS} discarded)\n")
 
     results = []
+    journal = RequestLog(args.request_log, "noise_pilot")
+    aborted = None
     with httpx.Client(verify=not args.insecure, follow_redirects=True) as client:
+      try:
         for q in queries:
             raw, statuses = sample(client, args.base_url, q.params(), total,
-                                   args.pause, args.timeout)
+                                   args.pause, args.timeout, journal=journal,
+                                   arm=args.arm, case=q.id)
             if statuses != {args.expect_status}:
-                raise SystemExit(
+                raise UnexpectedStatus(
                     f"{q.id}: saw status {sorted(statuses)}, expected "
                     f"{args.expect_status}. Timings from error responses do not "
                     f"describe the workload; fix the backend or the case first."
@@ -154,8 +184,50 @@ def main() -> int:
                 print(f"      k={lv['k']:2d}  CI [{lv['ci95_low']:.3f}, {lv['ci95_high']:.3f}]"
                       f"  tol +/-{lv['tolerance_pct']:5.1f}%{mark}")
 
+      except Exception as exc:                   # noqa: BLE001
+        # Same rule as the latency gate: the attempts are in the journal, the cases
+        # that finished are in `results`, and both are kept and marked partial. A
+        # pilot that dies with no artefact leaves its requests uncountable.
+        aborted = {
+            "classification": ("STAGE_ABORTED_UNEXPECTED_STATUS"
+                               if isinstance(exc, UnexpectedStatus)
+                               else "STAGE_ABORTED_TRANSPORT_FAILURE"),
+            "stage": "noise_pilot",
+            "case": q.id,
+            "error": f"{type(exc).__name__}: {exc}",
+            "cases_completed": len(results),
+            "cases_planned": len(queries),
+            "not": ("NOT a noise floor and NOT sample-size planning. The run's "
+                    "request total is not exact — report the observed count and "
+                    "the authorised ceiling"),
+        }
+        print(f"\nSTAGE_ABORTED_{'UNEXPECTED_STATUS' if isinstance(exc, UnexpectedStatus) else 'TRANSPORT_FAILURE'} at {q.id}: "
+              f"{type(exc).__name__}: {exc}")
+      finally:
+        # Every path out, including a KeyboardInterrupt or a SystemExit raised by
+        # something below this frame. The lines are already flushed, so this is
+        # about the descriptor rather than the data — but a stage that leaves an
+        # open journal has left a loose end where its evidence lives.
+        journal.close()
+
+    observed, jproblems = ({"candidate": 0, "reference": 0}, [])
+    if args.request_log:
+        observed, jproblems = read_journal(args.request_log)
     payload = {
         "kind": "noise_pilot",
+        "arm": args.arm,
+        "complete": aborted is None,
+        "request_total_exact": aborted is None,
+        "journaled_attempts_per_arm": observed,
+        # This stage CAUGHT its own failure and is writing this file, so its process
+        # was alive to close the journal: every attempt() that returned was followed
+        # by a call that completed or raised. The ATTEMPT COUNT is exact; the
+        # MEASUREMENT is what is incomplete. A stage killed asynchronously writes no
+        # artefact at all, and its journal is not evidence of the same strength.
+        "host_attempt_count_exact": True,
+        "attempt_evidence": "journal_writer_exited_normally",
+        "request_journal_problems": jproblems,
+        "aborted": aborted,
         "base_url": args.base_url,
         "captured_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "host": platform.node(),
@@ -174,8 +246,10 @@ def main() -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(payload, indent=2))
-        print(f"\nwrote {args.out}")
-    return 0
+        print(f"\nwrote {args.out}"
+              + ("" if aborted is None
+                 else f" (partial: {len(results)}/{len(queries)} cases)"))
+    return 0 if aborted is None else 1
 
 
 if __name__ == "__main__":
