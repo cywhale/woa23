@@ -1,0 +1,41 @@
+subject : 143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d
+label   : base1
+token   : base1-2203669-lin-171899282
+worktree: /home/odbadmin/python/woa23-143bf8c-val
+batches : 3
+########## BATCH 1 of 3 ##########
+precheck  HEAD=143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d == subject   OK
+batch 1 exit status: 1
+batch 1 FAILED (exit 1)
+postcheck HEAD=143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d == subject   OK
+git head   : 143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d
+git subject: fix(api): an empty result keeps its value columns, so the CSV header is canonical
+tracked dirty : 0   (0 means every tracked file matches the commit)
+untracked     : 0
+batch 1 non-zero suites: 13
+########## BATCH 2 of 3 ##########
+precheck  HEAD=143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d == subject   OK
+batch 2 exit status: 1
+batch 2 FAILED (exit 1)
+postcheck HEAD=143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d == subject   OK
+git head   : 143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d
+git subject: fix(api): an empty result keeps its value columns, so the CSV header is canonical
+tracked dirty : 0   (0 means every tracked file matches the commit)
+untracked     : 16
+batch 2 non-zero suites: 12
+########## BATCH 3 of 3 ##########
+precheck  HEAD=143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d == subject   OK
+batch 3 exit status: 1
+batch 3 FAILED (exit 1)
+postcheck HEAD=143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d == subject   OK
+git head   : 143bf8caae4aaa4cd4d4ef9ec0ddcab9ada1174d
+git subject: fix(api): an empty result keeps its value columns, so the CSV header is canonical
+tracked dirty : 0   (0 means every tracked file matches the commit)
+untracked     : 16
+batch 3 non-zero suites: 12
+
+batches completed : 3 of 3
+non-zero total    : 40
+postconditions    : yes
+sentinel_write: REFUSING -- 40 non-zero suite result(s) in the run.
+NO SUCCESS SENTINEL — this run is not complete.

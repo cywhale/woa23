@@ -1,0 +1,52 @@
+
+===== G. STANDALONE CPython — re-verified as odbadmin, with the install dir set =====
+  uv                : uv 0.9.22
+  uv python dir     : /home/odbadmin/python/uv-pythons
+  uv recognises     : cpython-3.11.14-linux-x86_64-gnu                  python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+  -VV               : Python 3.11.14 (main, Dec 17 2025, 21:07:37) [Clang 21.1.4 ]
+  realpath          : /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+  alias -> target   : /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  owner/mode root   : odbadmin:odbadmin 775
+  owner/mode binary : odbadmin:odbadmin 775
+  binary sha256     : 96d1b01675f2492922ec6f6ed8445791d2d3231ccae727cda521db30494b751e
+  recorded          : 96d1b01675f2492922ec6f6ed8445791d2d3231ccae727cda521db30494b751e  MATCH
+  readable+exec by odbadmin: yes
+  no pyenv, no woa23c1ro: OK
+
+===== H. A FRESH VENV in the new APP_ROOT =====
+  cache files BEFORE: 40706
+   + zarr==2.18.6
+   + zict==3.0.0
+   + zipp==4.1.0
+  uv sync TRUE exit code = 0
+
+===== I. VENV VERIFICATION =====
+  lock digest AFTER : 0d2980a5928d4d0964d6cb3b78bffae14aa11a70d3b51ca00f4cf39073dccc69  UNCHANGED
+  distributions     : 58 (expected 58)
+  dev2026/.venv     : absent
+  sys.prefix        : /home/odbadmin/python/woa23-f66ddd8/.venv
+  sys.base_prefix   : /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  realpath(base)    : /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  venv active       : True
+  polars dist       : ['polars']
+  polars version    : 1.27.1
+  sys.prefix == $VENV and base == real root: OK
+  WOA23_PYTHON would be: /home/odbadmin/python/woa23-f66ddd8/.venv/bin/python3.11
+  cache files AFTER : 40706
+
+===== J. NOT DONE — and the 143 tree preserved =====
+  PM2_HOME created?     no
+  store symlink?        no
+  143 tree preserved?   yes
+  143 venv still there? yes
+  no app started, no Nginx/TLS/production change, no reload, no purge, no API request
+  no cleanup of the 143 tree
+
+===== K. RECORDED STATE =====
+  drwxrwxr-x 4 odbadmin odbadmin 4096 Sep  4 00:24 /home/odbadmin/python/woa23-f66ddd8
+  drwxrwxr-x 8 odbadmin odbadmin 4096 Sep  3 17:51 /home/odbadmin/python/woa23-f66ddd8/dev2026
+  drwxrwxr-x 5 odbadmin odbadmin 4096 Sep  4 00:24 /home/odbadmin/python/woa23-f66ddd8/.venv
+  du APP_ROOT: 505M
+  du 143 tree: 515M  (untouched)
+
+===== PROVISIONING RECONCILIATION COMPLETE =====

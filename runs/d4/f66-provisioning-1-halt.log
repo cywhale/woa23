@@ -1,0 +1,45 @@
+
+===== A. PRECONDITIONS =====
+  absent  /home/odbadmin/python/woa23-f66ddd8
+  the 143 tree is PRESERVED, untouched: present
+  archive sha256 : 2bea7db91bcf00270abe0c73beff33ab66692ee6749e57483eb165ef6373de90
+  members / files: 276 / 265   (authorised 276 / 265)
+
+===== B. EXTRACT into a NEW application root =====
+  extracted to /home/odbadmin/python/woa23-f66ddd8/dev2026
+
+===== C. FILE-LIST — the driver's own algorithm =====
+  files     : 265   (authorised 265)
+  file-list : ca461166312a61a3d338edf6211fbf6604facac3009a2c546ff54bee6e8ea169
+  authorised: ca461166312a61a3d338edf6211fbf6604facac3009a2c546ff54bee6e8ea169
+  SUBJECT VERIFIED
+
+===== D. DELIVERY MEMBERS — archive digest vs on-disk digest =====
+  deploy/staging_execute.sh                      archive=a69b12658c9ca6d76f90bb7afc3d46ab0626582534ee670cb92b2c190fc52d2b
+                                                 disk   =a69b12658c9ca6d76f90bb7afc3d46ab0626582534ee670cb92b2c190fc52d2b  MATCH
+  deploy/lib_store_guard.sh                      archive=dc82e80f62177805d6e64500adebdaf435fca0d1512fd283d264a410ac23d23d
+                                                 disk   =dc82e80f62177805d6e64500adebdaf435fca0d1512fd283d264a410ac23d23d  MATCH
+  deploy/production_app.sh                       archive=7f4da8d76ededc424c748d84e15b05750b3b1cb7fdb1b69fe8e4a47a217f7bea
+                                                 disk   =7f4da8d76ededc424c748d84e15b05750b3b1cb7fdb1b69fe8e4a47a217f7bea  MATCH
+  deploy/ecosystem.production.config.js          archive=a7e4cb7fcb47e83b8192b225093e5dbe20aad2c673e5fed511b2328ee22410c4
+                                                 disk   =a7e4cb7fcb47e83b8192b225093e5dbe20aad2c673e5fed511b2328ee22410c4  MATCH
+
+===== E. MODES — the archive's modes, and test_d1_finalize.sh in particular =====
+  archive mode  test_d1_finalize.sh : -rwxrwxr-x
+  on-disk mode  test_d1_finalize.sh : -rwxrwxr-x 775
+  directly executable: yes (exit 1, not 126)
+  executable-bit members in archive : 48
+  executable files on disk          : 48
+
+===== F. NO 143 RESIDUE in the new tree =====
+  the f66-only files, present? all three present
+  the abandoned LTS test absent?    yes
+  polars pin                        : "polars==1.27.1",
+  lock digest                       : 0d2980a5928d4d0964d6cb3b78bffae14aa11a70d3b51ca00f4cf39073dccc69
+  any path naming 143bf8c inside the tree? 
+
+===== G. STANDALONE CPython — re-verified as odbadmin =====
+  uv                : uv 0.9.22
+
+*** HALT: uv does not list /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu as uv-managed
+*** scene PRESERVED, no fallback, no reuse of the 143 tree

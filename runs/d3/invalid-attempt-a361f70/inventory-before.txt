@@ -1,0 +1,64 @@
+=== canonical process inventory ===
+host            : odb24
+user            : woa23c1ro   (uid 994)
+timestamp UTC   : 2026-09-01 15:24:10
+script sha256   : e17944b71034aa53b8e013383f04552352e39a30c8b49f30b4f4c32647fa0351   (from the subject archive)
+library sha256  : 4e5b7106001bbf6ad716db094cb9534985e2c8b51b2b00c8197a17b43acde989   (from the subject archive)
+kernel          : Linux 6.8.0-124-generic x86_64
+
+-- method --
+field order     : pid TAB starttime TAB ppid TAB pgid TAB ruid TAB args
+separator       : single TAB between fields, single LF after each row
+sort            : LC_ALL=C sort over the whole canonical row
+included        : all processes of woa23c1ro that are not observer rows
+excluded        : observer rows, by PID/PGID identity only, never by command match
+digest input    : the sorted canonical rows, nothing else
+digest algorithm: sha256, all 64 hex characters
+
+-- exclusion identity --
+observer pid    : 2010042
+observer pgid   : 2010042
+observer ppid   : 2010041
+observer start  : lin-159127127
+
+-- raw excluded rows (4) --
+  2010041 2009958 2009958   994 sshd: woa23c1ro@notty
+  2010042 2010041 2010042   994 bash -s
+  2010044 2010042 2010042   994 bash -s
+  2010045 2010044 2010042   994 ps -o pid=,ppid=,pgid=,ruid=,args= -u woa23c1ro
+
+-- raw included rows (12) --
+  1708514       1 1708514   994 /usr/lib/systemd/systemd --user
+  1708519 1708514 1708514   994 (sd-pam)
+  1708530 1708514 1708530   994 /usr/bin/pipewire
+  1708531 1708514 1708531   994 /usr/bin/pipewire -c filter-chain.conf
+  1708533 1708514 1708533   994 /snap/snapd-desktop-integration/391/usr/bin/user-session-helper /snap/snapd-desktop-integration/391/usr/bin/snapd-desktop-integration
+  1708536 1708514 1708536   994 /usr/bin/wireplumber
+  1708537 1708514 1708537   994 /usr/bin/pipewire-pulse
+  1708562 1708514 1708562   994 /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+  1708635 1708514 1708635   994 /usr/libexec/xdg-document-portal
+  1708651 1708514 1708651   994 /usr/libexec/xdg-permission-store
+  1709473       1 1709473   994 PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-bs3v1-pm2)
+  1761143       1 1761143   994 PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-b1s1-pm2)
+
+-- canonical rows, sorted (12) --
+  1708514	lin-114971132	1	1708514	994	/usr/lib/systemd/systemd --user
+  1708519	lin-114971133	1708514	1708514	994	(sd-pam)
+  1708530	lin-114971159	1708514	1708530	994	/usr/bin/pipewire
+  1708531	lin-114971159	1708514	1708531	994	/usr/bin/pipewire -c filter-chain.conf
+  1708533	lin-114971159	1708514	1708533	994	/snap/snapd-desktop-integration/391/usr/bin/user-session-helper /snap/snapd-desktop-integration/391/usr/bin/snapd-desktop-integration
+  1708536	lin-114971159	1708514	1708536	994	/usr/bin/wireplumber
+  1708537	lin-114971159	1708514	1708537	994	/usr/bin/pipewire-pulse
+  1708562	lin-114971161	1708514	1708562	994	/usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+  1708635	lin-114971170	1708514	1708635	994	/usr/libexec/xdg-document-portal
+  1708651	lin-114971171	1708514	1708651	994	/usr/libexec/xdg-permission-store
+  1709473	lin-114971541	1	1709473	994	PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-bs3v1-pm2)
+  1761143	lin-124827409	1	1761143	994	PM2 v5.4.2: God Daemon (/home/woa23c1ro/woa23-b1s1-pm2)
+
+-- assertions --
+excluded rows carrying a daemon signature : 0   (must be 0)
+included rows carrying a daemon signature : 2   (informational)
+rows whose args contain a TAB            : 0   (must be 0)
+
+ROWS=12
+PROC_INVENTORY_SHA256=46a044e1a3b33ec66b258528b522534d77892b1cdc32b8d36efa5906cc5e886c

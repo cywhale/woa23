@@ -1,0 +1,50 @@
+
+===== 1. where is uv, for this account? =====
+  FOUND /home/odbadmin/.local/bin/uv
+        -rwxr-xr-x 1 odbadmin odbadmin 55351232 Jan  6  2026 /home/odbadmin/.local/bin/uv
+  --- shallow search of odbadmin's home ---
+  /home/odbadmin/.local/bin/uv
+  --- what a LOGIN shell would see ---
+  /home/odbadmin/.local/bin/uv
+  uv 0.9.22
+  --- non-login PATH used by this script ---
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
+
+===== 2. the existing cache — whose, and what is in it? =====
+  drwxrwxr-x 8 odbadmin odbadmin 4096 Aug 20 11:04 /home/odbadmin/.cache/uv
+  --- top-level layout ---
+    CACHEDIR.TAG
+    archive-v0
+    builds-v0
+    interpreter-v4
+    sdists-v9
+    simple-v18
+    wheels-v5
+    /home/odbadmin/.cache/uv/archive-v0/              26598 files
+    /home/odbadmin/.cache/uv/builds-v0/                 609 files
+    /home/odbadmin/.cache/uv/interpreter-v4/             31 files
+    /home/odbadmin/.cache/uv/sdists-v9/               12699 files
+    /home/odbadmin/.cache/uv/simple-v18/                 98 files
+    /home/odbadmin/.cache/uv/wheels-v5/                 281 files
+  --- newest and oldest cache entries ---
+    oldest: 2025-12-22+12:21:23.3345640610 /home/odbadmin/.cache/uv/.gitignore
+    newest: 2026-08-20+11:04:14.9514169360 /home/odbadmin/.cache/uv/interpreter-v4/85046238252ff06c/c7c9782305037125.msgpack
+
+===== 3. is a uv-managed python already installed for odbadmin anywhere? =====
+  /home/odbadmin/.local/share/uv/python :
+      cpython-3.11.14-linux-x86_64-gnu
+      cpython-3.13.11-linux-x86_64-gnu
+      cpython-3.14.2-linux-x86_64-gnu
+  /home/odbadmin/.local/share/uv :
+      python
+
+===== 4. the ghrsst sibling deployment — what interpreter does IT serve from? =====
+  drwxrwxr-x 5 odbadmin odbadmin 4096 Jun 23 12:43 /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv
+    home = /home/odbadmin/.pyenv/versions/3.13.7/bin
+    include-system-site-packages = false
+    version = 3.13.7
+    executable = /home/odbadmin/.pyenv/versions/3.13.7/bin/python3.13
+    command = /home/odbadmin/.pyenv/versions/3.13.7/bin/python -m venv /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv
+
+===== 5. nothing was created or changed =====
+  read-only: no install, no path created, no service touched

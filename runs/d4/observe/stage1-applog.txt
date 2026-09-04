@@ -1,0 +1,23 @@
+=== app log files ===
+total 24
+-rw-r--r-- 1 odbadmin odbadmin 1360 Sep  4 09:46 woa23.log
+-rw-r--r-- 1 odbadmin odbadmin 9405 Sep  4 09:46 woa23.outerr.log
+-rw-r--r-- 1 odbadmin odbadmin 8045 Sep  4 09:46 woa23_err.log
+=== error-shaped lines since the app started (read-only) ===
+--- /home/odbadmin/python/woa23-f66ddd8/dev2026/tmp/woa23.log (1360 bytes) ---
+--- /home/odbadmin/python/woa23-f66ddd8/dev2026/tmp/woa23.outerr.log (9405 bytes) ---
+14:2026-09-04 09:41 +08:00: [2026-09-04 09:41:46 +0800] [3505294] [INFO] Booting worker with pid: 3505294
+15:2026-09-04 09:41 +08:00: [2026-09-04 09:41:46 +0800] [3505295] [INFO] Booting worker with pid: 3505295
+49:2026-09-04 09:46 +08:00: [2026-09-04 09:46:42 +0800] [3505294] [INFO] Shutting down
+50:2026-09-04 09:46 +08:00: [2026-09-04 09:46:42 +0800] [3505295] [INFO] Shutting down
+59:2026-09-04 09:46 +08:00: [2026-09-04 09:46:42 +0800] [3505291] [INFO] Shutting down: Master
+73:2026-09-04 09:46 +08:00: [2026-09-04 09:46:54 +0800] [3505555] [INFO] Booting worker with pid: 3505555
+74:2026-09-04 09:46 +08:00: [2026-09-04 09:46:54 +0800] [3505556] [INFO] Booting worker with pid: 3505556
+--- /home/odbadmin/python/woa23-f66ddd8/dev2026/tmp/woa23_err.log (8045 bytes) ---
+5:2026-09-04 09:41 +08:00: [2026-09-04 09:41:46 +0800] [3505294] [INFO] Booting worker with pid: 3505294
+6:2026-09-04 09:41 +08:00: [2026-09-04 09:41:46 +0800] [3505295] [INFO] Booting worker with pid: 3505295
+40:2026-09-04 09:46 +08:00: [2026-09-04 09:46:42 +0800] [3505294] [INFO] Shutting down
+41:2026-09-04 09:46 +08:00: [2026-09-04 09:46:42 +0800] [3505295] [INFO] Shutting down
+50:2026-09-04 09:46 +08:00: [2026-09-04 09:46:42 +0800] [3505291] [INFO] Shutting down: Master
+55:2026-09-04 09:46 +08:00: [2026-09-04 09:46:54 +0800] [3505555] [INFO] Booting worker with pid: 3505555
+56:2026-09-04 09:46 +08:00: [2026-09-04 09:46:54 +0800] [3505556] [INFO] Booting worker with pid: 3505556

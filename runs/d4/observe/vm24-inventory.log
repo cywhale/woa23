@@ -1,0 +1,148 @@
+===== 1. candidate roots under /home/odbadmin/python =====
+  /home/odbadmin/python/woa23                               33G  mtime 2026-08-05 13:54:33
+  /home/odbadmin/python/woa23-0d96f7a-val                  551M  mtime 2026-09-03 10:01:35
+  /home/odbadmin/python/woa23-0d96f7a-val-runs              64K  mtime 2026-09-03 10:28:58
+  /home/odbadmin/python/woa23-143bf8c                      515M  mtime 2026-09-03 08:35:45
+  /home/odbadmin/python/woa23-143bf8c-val                  524M  mtime 2026-09-03 10:52:15
+  /home/odbadmin/python/woa23-143bf8c-val-runs             124K  mtime 2026-09-03 12:07:33
+  /home/odbadmin/python/woa23-be3b7b8-val                  552M  mtime 2026-09-03 15:37:29
+  /home/odbadmin/python/woa23-be3b7b8-val-runs              88K  mtime 2026-09-03 16:43:12
+  /home/odbadmin/python/woa23-c3cf4da-val                  552M  mtime 2026-09-03 13:10:23
+  /home/odbadmin/python/woa23-c3cf4da-val-runs             136K  mtime 2026-09-03 14:25:03
+  /home/odbadmin/python/woa23-d42c44e-val                  552M  mtime 2026-09-03 17:21:30
+  /home/odbadmin/python/woa23-d42c44e-val-runs              88K  mtime 2026-09-03 18:27:44
+  /home/odbadmin/python/woa23-f66ddd8                      533M  mtime 2026-09-04 00:24:37
+  /home/odbadmin/python/woa23-f66ddd8-observe               96K  mtime 2026-09-04 11:20:37
+  /home/odbadmin/python/woa23-f66ddd8-val                  552M  mtime 2026-09-03 21:47:01
+  /home/odbadmin/python/woa23-f66ddd8-val-runs              92K  mtime 2026-09-03 22:53:33
+  /home/odbadmin/python/uv-pythons                          97M  mtime 2026-09-03 08:35:44
+  /home/odbadmin/python/cpython-3.11.14-20251217       SYMLINK -> /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  /home/odbadmin/python/py-mirror                           30M  mtime 2026-09-02 22:30:48
+  /home/odbadmin/python/wheelhouse                          34M  mtime 2026-09-03 10:00:27
+  /home/odbadmin/backup/woa23                              112K  mtime 2026-09-04 11:12:55
+
+===== 2. which roots have a RUNNING process =====
+              exe=/home/odbadmin/.pyenv/versions/3.11.4/bin/python3.11
+              exe=/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+              exe=/usr/bin/bash
+              exe=/usr/bin/node
+              exe=/usr/bin/python3.12
+  pid 1087138  cwd=/home/odbadmin/python/woa23-f66ddd8/dev2026
+  pid 1242814  cwd=/home/odbadmin/woa23-pm2a/dev2026
+  pid 1248938  cwd=/home/odbadmin/woa23-pm2b/dev2026
+  pid 1456369  cwd=/home/odbadmin/woa23-pm2g/dev2026
+  pid 1456373  cwd=/home/odbadmin/woa23-pm2g/dev2026
+  pid 1456374  cwd=/home/odbadmin/woa23-pm2g/dev2026
+  pid 2127878  cwd=/home/odbadmin/python/woa23-0d96f7a-val/dev2026
+  pid 2127903  cwd=/home/odbadmin/python/woa23-0d96f7a-val/dev2026
+  pid 2127940  cwd=/home/odbadmin/python/woa23-0d96f7a-val/dev2026
+  pid 2128015  cwd=/home/odbadmin/python/woa23-0d96f7a-val/dev2026
+  pid 2128045  cwd=/home/odbadmin/python/woa23-0d96f7a-val/dev2026
+  pid 2237949  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2237974  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2238011  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2238086  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2238116  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2344010  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2344035  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2344072  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2344157  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2344187  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2448982  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2449007  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2449044  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2449127  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2449157  cwd=/home/odbadmin/python/woa23-143bf8c-val/dev2026
+  pid 2621238  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2621263  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2621300  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2621382  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2621412  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2733279  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2733304  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2733341  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2733424  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2733454  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2841533  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2841558  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2841595  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2841670  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2841707  cwd=/home/odbadmin/python/woa23-c3cf4da-val/dev2026
+  pid 2950686  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 2950711  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 2950748  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 2950831  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 2950861  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3009191  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3009216  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3009253  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3009335  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3009365  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3067114  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3067139  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3067176  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3067252  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3067282  cwd=/home/odbadmin/python/woa23-be3b7b8-val/dev2026
+  pid 3132559  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3132584  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3132621  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3132701  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3132731  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3193528  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3193560  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3193597  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3193672  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3193702  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3254085  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3254121  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3254158  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3254237  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3254267  cwd=/home/odbadmin/python/woa23-d42c44e-val/dev2026
+  pid 3331900  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3331925  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3331962  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3332045  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3332075  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3394964  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3394989  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3395026  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3395101  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3395131  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3457909  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3457934  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3457971  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3458054  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3458084  cwd=/home/odbadmin/python/woa23-f66ddd8-val/dev2026
+  pid 3505552  cwd=/home/odbadmin/python/woa23-f66ddd8/dev2026
+  pid 3505555  cwd=/home/odbadmin/python/woa23-f66ddd8/dev2026
+  pid 3505556  cwd=/home/odbadmin/python/woa23-f66ddd8/dev2026
+
+===== 3. PM2 entries referencing any of these roots =====
+  live  woa23      status=online   cwd=/home/odbadmin/python/woa23-f66ddd8/dev2026
+  --- saved dump ---
+  dump  woa23      cwd=/home/odbadmin/python/woa23-f66ddd8/dev2026
+
+===== 4. nginx / config references =====
+  woa23-f66ddd8            referenced in 0 nginx file(s)
+  woa23-143bf8c            referenced in 0 nginx file(s)
+  woa23-c3cf4da-val        referenced in 0 nginx file(s)
+  woa23-be3b7b8-val        referenced in 0 nginx file(s)
+  woa23-d42c44e-val        referenced in 0 nginx file(s)
+  woa23-f66ddd8-val        referenced in 0 nginx file(s)
+  woa23                    referenced in 5 nginx file(s)
+  nginx upstream target: server127.0.0.1:8050;
+
+===== 5. symlinks pointing into these roots =====
+  /home/odbadmin/python/cpython-3.11.14-20251217 -> /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu
+  /home/odbadmin/python/woa23/tmp_data -> /home/odbadmin/Data/woa23/netcdf
+
+===== 6. observation / evidence dirs not yet archived =====
+  /home/odbadmin/python/woa23-f66ddd8-observe           96K  files=10  mtime 2026-09-04 11:20:37
+  /home/odbadmin/python/woa23-143bf8c-val-runs         124K  files=10  mtime 2026-09-03 12:07:33
+  /home/odbadmin/python/woa23-c3cf4da-val-runs         136K  files=12  mtime 2026-09-03 14:25:03
+  /home/odbadmin/python/woa23-be3b7b8-val-runs          88K  files=12  mtime 2026-09-03 16:43:12
+  /home/odbadmin/python/woa23-d42c44e-val-runs          88K  files=12  mtime 2026-09-03 18:27:44
+  /home/odbadmin/python/woa23-f66ddd8-val-runs          92K  files=13  mtime 2026-09-03 22:53:33
+
+===== 7. disk headroom =====
+  /dev/mapper/ubuntu--vg-root  393G  285G   92G  76% /

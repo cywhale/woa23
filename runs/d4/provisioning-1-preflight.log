@@ -1,0 +1,65 @@
+
+===== 0. identity =====
+  host  : odb24
+  whoami: odbadmin uid=1000
+  date  : 2026-09-02T21:55:20+08:00
+
+===== 1. TARGET PATHS MUST NOT EXIST =====
+  absent  /home/odbadmin/python/uv-pythons
+  absent  /home/odbadmin/python/cpython-3.11.14-20251217
+  absent  /home/odbadmin/python/woa23-143bf8c
+  parent /home/odbadmin/python : drwxrwxr-x+ 20 odbadmin odbadmin 4096 Aug 20 19:00 /home/odbadmin/python
+  writable by odbadmin: YES
+
+===== 2. uv availability and version (as this account) =====
+  UV NOT FOUND on PATH for odbadmin -- BLOCKER
+
+===== 3. uv cache dir (odbadmin's own) =====
+  uv cache dir       : sh: 38: uv: not found
+  UV_CACHE_DIR env   : <unset>
+  /home/odbadmin/.cache/uv : EXISTS, 40319 entries, du=1.9G
+    drwxrwxr-x 8 odbadmin odbadmin 4096 Aug 20 11:04 /home/odbadmin/.cache/uv
+
+===== 4. does uv sync support --offline / --locked on THIS version? =====
+  --- uv python install options ---
+
+===== 5. WHAT FILENAME does THIS uv ask for? (probe into a throwaway dir; installs nothing) =====
+  sh: 58: uv: not found
+  probe exit recorded above; probe dir contents: 
+  interpreter installed by probe? NO
+  (throwaway dir left in place, NOT under any target path: /tmp/tmp.2UyAJFftuv)
+
+===== 6. is an approved CPython archive already staged anywhere readable? =====
+  (nothing listed above = no staged archive found)
+
+===== 7. disk space on /home =====
+  Filesystem                   Size  Used Avail Use% Mounted on
+  /dev/mapper/ubuntu--vg-root  393G  283G   94G  76% /
+
+===== 8. PRODUCTION UNTOUCHED baseline (read-only) =====
+  pm2 pid file : 3459
+  pm2 daemon   : PM2 v5.4.2: God Daemon (/home/odbadmin/.pm2)                       
+  --- 8050 listener ---
+  LISTEN 0      2048       127.0.0.1:8050       0.0.0.0:*    users:(("gunicorn",pid=1828409,fd=6),("gunicorn",pid=1828389,fd=6),("gunicorn",pid=1828352,fd=6))      
+  --- woa23 process tree ---
+     4393 Fri Aug 14 13:25:22 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn tide_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8040 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 180 --reload
+     5044 Fri Aug 14 13:25:36 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn tide_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8040 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 180 --reload
+  1088292 Tue Aug 18 12:07:39 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn mhw_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8030 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 180 --reload
+  1088728 Tue Aug 18 12:07:40 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn mhw_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8030 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 180 --reload
+  1088748 Tue Aug 18 12:07:40 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn mhw_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8030 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 180 --reload
+  1290791 Fri Aug 21 09:53:57 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn tide_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8040 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 180 --reload
+  1456369 Mon Aug 24 23:05:46 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:18265 --timeout 120 --graceful-timeout 10
+  1456373 Mon Aug 24 23:05:46 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:18265 --timeout 120 --graceful-timeout 10
+  1456374 Mon Aug 24 23:05:46 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 -m gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:18265 --timeout 120 --graceful-timeout 10
+  1828352 Sat Aug 29 18:05:50 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn woa23_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8050 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 120 --reload
+  1828389 Sat Aug 29 18:05:51 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn woa23_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8050 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 120 --reload
+  1828409 Sat Aug 29 18:05:51 2026 odbadmin /home/odbadmin/.pyenv/versions/py311/bin/python3.11 /home/odbadmin/.pyenv/versions/py311/bin/gunicorn woa23_app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8050 --keyfile conf/privkey.pem --certfile conf/fullchain.pem --timeout 120 --reload
+  2069397 Wed Sep  2 20:30:37 2026 odbadmin /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv/bin/python /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv/bin/gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8035 --timeout 180
+  2069406 Wed Sep  2 20:30:37 2026 odbadmin /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv/bin/python /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv/bin/gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8035 --timeout 180
+  2069407 Wed Sep  2 20:30:37 2026 odbadmin /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv/bin/python /home/odbadmin/python/ghrsst-dev2026-phase2/dev2026/.venv/bin/gunicorn api.app:app -w 2 -k uvicorn.workers.UvicornWorker -b 127.0.0.1:8035 --timeout 180
+  --- nginx master ---
+  2071994 odbadmin sed s/^/  /
+
+===== 9. what this preflight did NOT do =====
+  created no target path, installed nothing, started nothing,
+  touched no PM2/Nginx/TLS/store, issued no API request

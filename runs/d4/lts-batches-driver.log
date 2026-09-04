@@ -1,0 +1,17 @@
+subject : 0d96f7a64b0538bc132eba23270638d9223290f0
+label   : ltsb1
+token   : ltsb1-2094087-lin-171602171
+worktree: /home/odbadmin/python/woa23-0d96f7a-val
+batches : 3
+########## BATCH 1 of 3 ##########
+precheck  HEAD=0d96f7a64b0538bc132eba23270638d9223290f0 == subject   OK
+batch 1 exit status: 1
+batch 1 FAILED (exit 1)
+postcheck HEAD=0d96f7a64b0538bc132eba23270638d9223290f0 == subject   OK
+git head   : 0d96f7a64b0538bc132eba23270638d9223290f0
+git subject: dev2026: successor subject swaps polars for polars-lts-cpu; adds a focused suite
+tracked dirty : 0   (0 means every tracked file matches the commit)
+untracked     : 0
+batch 1 non-zero suites: 15
+########## BATCH 2 of 3 ##########
+precheck  HEAD=0d96f7a64b0538bc132eba23270638d9223290f0 == subject   OK

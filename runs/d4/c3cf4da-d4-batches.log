@@ -1,0 +1,69 @@
+subject : c3cf4da855a03ffc87299604bd5cb0c768158d56
+worktree: /home/odbadmin/python/woa23-c3cf4da-val
+venv interpreter (REAL path, not the alias): /home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin/python3.11
+
+########## D4 BATCH 1 of 3 ##########
+precheck  HEAD=c3cf4da855a03ffc87299604bd5cb0c768158d56 == subject   OK
+precheck  tracked dirty : 0
+precheck  untracked     : 0
+runtime pin: uv sync exit=0  home=/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin
+batch 1 TRUE exit status: 1
+postcheck HEAD=c3cf4da855a03ffc87299604bd5cb0c768158d56 == subject   OK
+postcheck tracked dirty : 0
+postcheck untracked     : 16
+  ENVIRONMENT_BLOCKED test_clone_integrity.py            exit=1
+  ENVIRONMENT_BLOCKED test_compare_arms.py               exit=1
+  NOT_APPLICABLE      test_s2perf_integration.py         exit=1
+  ENVIRONMENT_BLOCKED test_c1_readonly_account.sh        exit=1
+  ENVIRONMENT_BLOCKED test_cli.sh                        exit=1
+  NOT_APPLICABLE      test_d1_finalize.sh                exit=1
+  ENVIRONMENT_BLOCKED test_production_launcher.sh        exit=1
+  NOT_APPLICABLE      test_staging_bootstrap.sh          exit=1
+  ENVIRONMENT_BLOCKED test_staging_entry.sh              exit=1
+  NOT_APPLICABLE      test_staging_launcher.sh           exit=1
+  REQUIRED_PASS passed   : 48
+  REQUIRED_PASS FAILED   : 1
+  REQUIRED_FAIL held     : 0
+  REQUIRED_FAIL BROKEN   : 0
+  NOT_APPLICABLE         : 4    (not counted as PASS)
+  ENVIRONMENT_BLOCKED    : 6    (not counted as PASS)
+  UNRESOLVED             : 0
+D4_VALIDATION: FAIL
+suite lines recorded: 59
+flaky watch — test_s2_provenance.py: exit=0   test_s2_provenance.py                 0s  all passed (98 assertions)   [98 assertions]
+
+########## D4 BATCH 2 of 3 ##########
+precheck  HEAD=c3cf4da855a03ffc87299604bd5cb0c768158d56 == subject   OK
+precheck  tracked dirty : 0
+precheck  untracked     : 16
+runtime pin: uv sync exit=0  home=/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin
+batch 2 TRUE exit status: 1
+postcheck HEAD=c3cf4da855a03ffc87299604bd5cb0c768158d56 == subject   OK
+postcheck tracked dirty : 0
+postcheck untracked     : 16
+  ENVIRONMENT_BLOCKED test_clone_integrity.py            exit=1
+  ENVIRONMENT_BLOCKED test_compare_arms.py               exit=1
+  NOT_APPLICABLE      test_s2perf_integration.py         exit=1
+  ENVIRONMENT_BLOCKED test_c1_readonly_account.sh        exit=1
+  ENVIRONMENT_BLOCKED test_cli.sh                        exit=1
+  NOT_APPLICABLE      test_d1_finalize.sh                exit=1
+  ENVIRONMENT_BLOCKED test_production_launcher.sh        exit=1
+  NOT_APPLICABLE      test_staging_bootstrap.sh          exit=1
+  ENVIRONMENT_BLOCKED test_staging_entry.sh              exit=1
+  NOT_APPLICABLE      test_staging_launcher.sh           exit=1
+  REQUIRED_PASS passed   : 48
+  REQUIRED_PASS FAILED   : 1
+  REQUIRED_FAIL held     : 0
+  REQUIRED_FAIL BROKEN   : 0
+  NOT_APPLICABLE         : 4    (not counted as PASS)
+  ENVIRONMENT_BLOCKED    : 6    (not counted as PASS)
+  UNRESOLVED             : 0
+D4_VALIDATION: FAIL
+suite lines recorded: 59
+flaky watch — test_s2_provenance.py: exit=0   test_s2_provenance.py                 1s  all passed (98 assertions)   [98 assertions]
+
+########## D4 BATCH 3 of 3 ##########
+precheck  HEAD=c3cf4da855a03ffc87299604bd5cb0c768158d56 == subject   OK
+precheck  tracked dirty : 0
+precheck  untracked     : 16
+runtime pin: uv sync exit=0  home=/home/odbadmin/python/uv-pythons/cpython-3.11.14-linux-x86_64-gnu/bin

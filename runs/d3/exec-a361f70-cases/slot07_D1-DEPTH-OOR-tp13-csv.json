@@ -1,0 +1,26 @@
+{
+  "attempt_number": 7,
+  "body_b64_full": "eyJkZXRhaWwiOiJObyBkYXRhIGF2YWlsYWJsZSBmb3IgdGhlIGdpdmVuIHBhcmFtZXRlcnMuIn0=",
+  "body_bytes": 56,
+  "body_sha256": "c6198e2296ad39ffe5f38159ad2ef97f40015ec0fb0b99d8f6e5132ba35b9a7d",
+  "case_id": "D1-DEPTH-OOR-tp13-csv",
+  "content_disposition": null,
+  "content_type": "application/json",
+  "elapsed_seconds": 0.0105,
+  "endpoint": "/api/woa23/csv",
+  "group": "1_degree/seasonal/Nutrients",
+  "http_status": 400,
+  "identity": "D1-DEPTH-OOR-tp13-csv",
+  "params": {
+    "dep0": 3000,
+    "dep1": 4000,
+    "grid": "1",
+    "lat0": 15,
+    "lon0": 135,
+    "parameter": "nitrate",
+    "time_period": "13"
+  },
+  "slot": 7,
+  "transport_error": null,
+  "url": "http://127.0.0.1:19387/api/woa23/csv?lon0=135&lat0=15&grid=1&parameter=nitrate&time_period=13&dep0=3000&dep1=4000"
+}
