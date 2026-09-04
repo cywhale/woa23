@@ -8,9 +8,13 @@ all, as matches. The reviewer found it by hand; these keep it found.
 """
 
 import json
+import pathlib
+import re
 
 from bench.contract_cases import CASES, all_cases, csv_cases
-from bench.contract_diff import compare_semantic, request_order
+from bench.contract_diff import (compare_semantic, order_fingerprint,
+                                 request_order)
+from bench.suite_summary import summary, summary_line   # noqa: E402
 
 failures: list[str] = []
 passed: list[str] = []
@@ -115,6 +119,65 @@ def test_non_row_payloads() -> None:
           cmp(200, b"[]", 200, b"[]") == [])
 
 
+def test_order_fingerprint_isolates_order() -> None:
+    """Order, recorded apart from the verdict, and apart from the values.
+
+    Under 5.2B a row-order difference is not a defect — it is the consequence of the
+    unpinned seed C2 exists to observe. So it must be *visible* without being part of
+    pass/fail, and it must not move when something that is not order moves.
+    """
+    rows = [{"lon": 1.5, "lat": 2.5, "depth": 0.0, "time_period": "0", "t": 1.0},
+            {"lon": 2.5, "lat": 2.5, "depth": 0.0, "time_period": "0", "t": 2.0}]
+    a = {"status": 200, "body": json.dumps(rows).encode()}
+    same = {"status": 200, "body": json.dumps(rows).encode()}
+    reversed_rows = {"status": 200, "body": json.dumps(list(reversed(rows))).encode()}
+    changed_value = {"status": 200, "body": json.dumps(
+        [rows[0], {**rows[1], "t": 99.0}]).encode()}
+
+    fa = order_fingerprint(a, False)
+    check("the same payload fingerprints the same",
+          fa == order_fingerprint(same, False))
+    check("a reversed payload has a different row-order digest",
+          fa["row_order_sha256"] != order_fingerprint(reversed_rows, False)["row_order_sha256"])
+    check("and 5.2B still calls it a match — order is not the verdict",
+          cmp(200, a["body"], 200, reversed_rows["body"]) == [])
+
+    # The isolation that makes the fingerprint mean "order": a value change moves the
+    # body digest and leaves the row-order digest alone. Without this, every
+    # cross-cycle value difference would be reported as an ordering change.
+    fv = order_fingerprint(changed_value, False)
+    check("a changed value moves the body digest",
+          fa["body_sha256"] != fv["body_sha256"])
+    check("but not the row-order digest",
+          fa["row_order_sha256"] == fv["row_order_sha256"])
+
+    check("the column sequence is recorded", fa["columns"] == list(rows[0]))
+    check("so is the row count", fa["n_rows"] == 2)
+
+    # No row structure: no fabricated ordering.
+    doc = {"status": 200, "body": json.dumps({"openapi": "3.1.0"}).encode()}
+    fd = order_fingerprint(doc, False)
+    check("an object payload has no row order", fd["row_order_sha256"] is None)
+    check("and no columns", fd["columns"] is None)
+    check("but still has a body digest", len(fd["body_sha256"]) == 64)
+
+    err = {"status": 400, "body": b'{"detail":"bad"}'}
+    fe = order_fingerprint(err, False)
+    check("an error body has no row order", fe["row_order_sha256"] is None)
+    check("and is still fingerprinted", len(fe["body_sha256"]) == 64)
+
+    empty = {"status": 200, "body": b"[]"}
+    fem = order_fingerprint(empty, False)
+    check("an empty row list has a digest rather than None",
+          fem["row_order_sha256"] is not None and fem["n_rows"] == 0)
+    check("and no columns to report", fem["columns"] is None)
+
+    csv_body = {"status": 200,
+                "body": b"lon,lat,depth,time_period,t\n1.5,2.5,0.0,0,1.0\n"}
+    fc = order_fingerprint(csv_body, True)
+    check("CSV rows are fingerprinted too", fc["n_rows"] == 1)
+
+
 def test_case_list() -> None:
     ids = [c.id for c in all_cases()]
     check("case ids are unique", len(ids) == len(set(ids)))
@@ -157,19 +220,100 @@ def test_request_order_is_counterbalanced() -> None:
               f"RC={s2.count('RC')} CR={s2.count('CR')}")
 
 
+def test_the_contract_stage_count_is_safe_to_derive() -> None:
+    """One request per case per arm — pinned, because the counter assumes it.
+
+    `lib_requests.sh` records the `contract` stage from the CASE LIST rather than
+    from the transport: the runner asks `bench.contract_cases` how many cases there
+    are and adds that number per arm. That is a derived count, and it is only equal
+    to the requests actually issued while two things hold.
+
+    **The transport must not retry.** `contract_diff` builds `httpx.Client()` with no
+    `transport=` argument, and httpx's default `HTTPTransport` has `retries=0` — a
+    connection failure raises rather than being tried again. If a retrying transport
+    were ever configured, one case could issue several requests and the derived
+    count would understate what reached the host. The check below is behavioural,
+    not a source grep: it points the real client at a server that accepts and then
+    closes without answering, and counts the connections the server actually saw.
+
+    **No response may be a redirect.** `follow_redirects=True` is set, so a 3xx would
+    make httpx issue a second request that the derived count would not include. No
+    contract case declares a 3xx today and none is expected to; if one ever does,
+    **the contract stage must be counted by a transport-level counter instead of
+    being derived.**
+    """
+    import socket
+    import threading
+
+    import httpx
+
+    from bench.contract_cases import Case
+    from bench.contract_diff import fetch
+
+    # No case may declare a redirect, or the derived count stops being safe.
+    redirecting = [c.id for c in all_cases()
+                   if 300 <= (c.expect_status or 200) < 400]
+    check("no contract case declares a 3xx status", not redirecting, str(redirecting))
+
+    # The transport, exercised rather than read: a server that accepts the
+    # connection and closes it. One connection per attempt, counted server-side.
+    accepted = {"n": 0}
+    srv = socket.socket()
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    port = srv.getsockname()[1]
+    stop = threading.Event()
+
+    def accept_and_drop():
+        srv.settimeout(0.5)
+        while not stop.is_set():
+            try:
+                conn, _ = srv.accept()
+            except OSError:
+                continue
+            accepted["n"] += 1
+            conn.close()
+
+    t = threading.Thread(target=accept_and_drop, daemon=True)
+    t.start()
+    try:
+        with httpx.Client(verify=False, follow_redirects=True) as client:
+            try:
+                fetch(client, f"http://127.0.0.1:{port}", Case("X", "", {}), 2.0)
+                raised = False
+            except Exception:
+                raised = True
+    finally:
+        stop.set()
+        t.join(timeout=2)
+        srv.close()
+
+    check("a dropped connection raises rather than being retried", raised)
+    check("and the transport made exactly one connection attempt",
+          accepted["n"] == 1, f"the server accepted {accepted['n']}")
+    check("so one case is one request per arm, which is what the counter derives",
+          accepted["n"] == 1)
+
+    # The client the gate actually builds, with no retrying transport configured.
+    src = (pathlib.Path(__file__).resolve().parent / "contract_diff.py").read_text()
+    m = re.search(r"httpx\.Client\(([^)]*)\)", src)
+    check("contract_diff builds its client without a transport= argument",
+          m is not None and "transport" not in m.group(1),
+          m.group(1) if m else "no httpx.Client(...) found")
+    check("and without retries=", m is not None and "retries" not in m.group(1))
+
+
 def main() -> int:
     for fn in (test_error_bodies, test_success_bodies, test_csv_bodies,
-               test_non_row_payloads, test_case_list,
-               test_request_order_is_counterbalanced):
+               test_non_row_payloads,
+               test_order_fingerprint_isolates_order, test_case_list,
+               test_request_order_is_counterbalanced,
+               test_the_contract_stage_count_is_safe_to_derive):
         print(f"\n{fn.__name__}")
         fn()
     total = len(passed) + len(failures)
-    if failures:
-        print(f"\nFAILED {len(failures)}/{total}: {', '.join(failures)}")
-    else:
-        print(f"\nall passed ({total} assertions)")
-    return 1 if failures else 0
-
-
+    print()
+    return summary(total - len(failures), len(failures))
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -13,6 +13,8 @@ have to work out whether their absence from `query.py` is an omission.
 
 import os
 
+from api.store_paths import describe, resolve
+
 # Spec 001 section 4.2: explicit, mandatory, no relative fallback.
 #
 # `woa23_app.py:63` hard-codes `zarr_store_path = "data/"`, which resolves against
@@ -29,6 +31,25 @@ import os
 # The identifier keeps its original name, so `process_woa23_data` needs no edit for
 # it: only the value's source changed, and that change lives here.
 zarr_store_path = os.environ["WOA23_ZARR_STORE"]
+
+# Spec 004: the configured store must resolve to a directory that exists, checked at
+# import — the same stage that already rejects an unset variable, and the stage
+# `gunicorn --check-config` reaches. This distinguishes the three cases that are
+# otherwise identical at every stage: a path that does not exist, an empty directory
+# and an ordinary file all produce the same FileNotFoundError on the first data
+# request today, and none of them names the store.
+#
+# Existence and type only. Whether the target is a readable Zarr store is a different
+# question, needs a metadata read, and is asked in `api.app`'s lifespan — putting it
+# here would give every importer of `api.config` a store dependency.
+_resolved_store = resolve(zarr_store_path, os.getcwd())
+if not os.path.exists(_resolved_store):
+    raise RuntimeError(
+        f"WOA23_ZARR_STORE does not exist: {describe(zarr_store_path, os.getcwd())}")
+if not os.path.isdir(_resolved_store):
+    raise RuntimeError(
+        f"WOA23_ZARR_STORE is not a directory: "
+        f"{describe(zarr_store_path, os.getcwd())}")
 
 # Two gridded resolutions in WOA23: 1-degree and 0.25-degree.
 grid_resolutions = {'01': '1.00', '04': '0.25'}   # unreferenced, carried over

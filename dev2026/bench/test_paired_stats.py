@@ -17,6 +17,7 @@ from bench.paired_stats import (
     ESCALATION_LADDER, PRACTICAL_MARGIN, bootstrap_ratio, improvement_verdict,
     next_rung, plan_rung, regression_verdict, required_n, warm,
 )
+from bench.suite_summary import summary, summary_line   # noqa: E402
 
 failures: list[str] = []
 
@@ -212,13 +213,10 @@ def main() -> int:
         print(f"\n{fn.__name__}")
         fn()
     total = len(passed) + len(failures)
-    if failures:
-        print(f"\nFAILED {len(failures)}/{total}: {', '.join(failures)}")
-    else:
-        # Reported rather than written into prose: every hand-maintained count in
-        # the spec has gone stale within a revision or two.
-        print(f"\nall passed ({total} assertions)")
-    return 1 if failures else 0
+    # Reported rather than written into prose: every hand-maintained count in
+    # the spec has gone stale within a revision or two.
+    print()
+    return summary(total - len(failures), len(failures))
 
 
 if __name__ == "__main__":

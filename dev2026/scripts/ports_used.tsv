@@ -1,0 +1,147 @@
+# Every loopback port this campaign has already bound, so "a port that has never
+# been used" stops being something anyone has to remember.
+#
+# The rule this file exists to enforce: a run gets ports no earlier run had. Reusing
+# one is not forbidden, but it must be DELIBERATE and it must be SAID — a report
+# calling a reused port "new" is the failure this ledger prevents. `run_controlled.sh`
+# refuses a port listed here unless --allow-reused-ports is passed, and every run
+# records, per port, whether it was a first use or a reuse.
+#
+# Read the scope honestly: this ledger records what is KNOWN, and it was written
+# after the fact. Absence from it is not proof a port was never bound on odb24 by
+# anything — it means no run of THIS campaign recorded binding it. Production's own
+# ports are listed because they are the ones that must never be touched at all.
+#
+# A port allocated to a run that never started is listed too, and said to be so.
+# It was never bound, so it is not "used" in the sense the host would report — but
+# a run's evidence is named against the ports it was launched with, and proposing
+# one of them again as fresh is the same mistake in a quieter form.
+#
+# TWO STATES THAT ARE NOT THE SAME THING, and this file used to write both as "SPENT".
+#
+#   the RUN's identity   — CONSUMED once a run has been authorised and started, whether
+#                          or not it reached the point of binding anything. A consumed
+#                          identity (label, staging path, workdir, app name) is never
+#                          reused, because its evidence is named against it.
+#
+#   the PORT's history   — either BOUND (a socket really listened on it) or
+#                          NEVER BOUND (allocated to a run that stopped first).
+#
+# A port can be retired without ever having been bound, and saying "SPENT" for both
+# loses the difference: a reader cannot tell whether a listener ever existed, which is
+# exactly what they came to this file to find out. The vocabulary from here on:
+#
+#   BOUND / SPENT           a socket listened on it; it is retired
+#   RETIRED-NEVER-BOUND     allocated to a consumed identity; NO socket ever listened
+#   allocated, not yet run  proposed by a request; nothing has happened yet
+#
+# Rows written before this note use the older, conflated wording. They are LEFT AS THEY
+# ARE: their prose already says whether a port was bound, and rewriting historical
+# evidence to match a newer vocabulary is not a correction, it is an edit to the record.
+#
+# Maintained by hand and by commit. The runners cannot append to it: they execute
+# from a throwaway export, so anything they wrote would be discarded with it. Adding
+# the ports of a completed run is a deliberate edit before the next one is proposed.
+#
+#
+# RETIRED-NEVER-BOUND, and deliberately NOT listed as port rows: c1i (18321/18322/18969),
+# c1j (18341/18342/18979), c1k (18361/18362/18989), c1m (19051/19052/19059), c1n
+# (19071/19072/19079), and c1q's proposed 19101/19102/19103. run_controlled.sh refuses a
+# port this file names, and reads it from the export of the subject it runs, so a port
+# recorded before its run is a port that run cannot use. c1i never started; c1j aborted at
+# connection identity; c1k at the shared-environment stage; c1m at uv resolution; c1n at
+# production identity. None of them ever bound a socket. c1p DID bind its three and they are listed below as SPENT. c1q's are added only after it runs.
+#
+# The c1m..c1p ports sit OUTSIDE 18241-18999 deliberately: test_staging_launcher.sh scans
+# that range for a free port, so a run port inside it is ambiguous even though the scan
+# allocates nothing. 19061 and 19081 were also rejected -- each appears as a coincidental
+# substring inside a uv.lock URL, and "named nowhere else" should mean exactly that.
+# port	role	run	evidence
+8050	production api	production	live service; never bound by this campaign
+8786	production dask scheduler	production	live service; never bound by this campaign
+8787	production dask	production	live service; never bound by this campaign
+8051	candidate arm	D2b	specs/D2b-request.md
+8052	reference arm	D2b	specs/D2b-request.md
+18787	isolated dask scheduler	D2b	specs/D2b-request.md; run_controlled.sh default
+18051	candidate arm	S2 attempt	authorised run parameter, this campaign
+18052	reference arm	S2 attempt	authorised run parameter, this campaign
+18788	isolated dask scheduler	S2 attempt	authorised run parameter, this campaign
+18061	candidate arm	C1 (c1d)	specs/ROADMAP.md, specs/002 s: cleanup confirmed free
+18062	reference arm	C1 (c1d)	specs/ROADMAP.md, specs/002
+18798	isolated dask scheduler	C1 (c1d)	specs/ROADMAP.md, specs/002
+18071	candidate arm	C2 attempt	authorised run parameter, this campaign
+18072	reference arm	C2 attempt	authorised run parameter, this campaign
+18799	isolated dask scheduler	C2 attempt	authorised run parameter, this campaign
+18081	candidate arm	S2 run	authorised run parameter, this campaign
+18082	reference arm	S2 run	authorised run parameter, this campaign
+18809	isolated dask scheduler	S2 run	authorised run parameter, this campaign
+18091	candidate arm	C2 PASS (c2c)	specs/ROADMAP.md, specs/002: confirmed free after each cycle
+18092	reference arm	C2 PASS (c2c)	specs/ROADMAP.md, specs/002
+18819	isolated dask scheduler	C2 PASS (c2c)	specs/ROADMAP.md, specs/002
+18101	candidate arm	S2 rerun	authorised run parameter, this campaign
+18102	reference arm	S2 rerun	authorised run parameter, this campaign
+18829	isolated dask scheduler	S2 rerun	authorised run parameter, this campaign
+18111	candidate arm	S2 rerun	authorised run parameter, this campaign
+18112	reference arm	S2 rerun	authorised run parameter, this campaign
+18839	isolated dask scheduler	S2 rerun	authorised run parameter, this campaign
+18121	candidate arm	c2e (INVALID_PRE_START)	allocated, never bound: aborted at clone-integrity preflight before any service started
+18122	reference arm	c2e (INVALID_PRE_START)	allocated, never bound
+18849	isolated dask scheduler	c2e (INVALID_PRE_START)	allocated, never bound
+18141	candidate arm	D1 d1a (INVALID_POST_MEASUREMENT_HARNESS)	bound by the run; cleanup PASS, port confirmed free afterwards
+18142	reference arm	D1 d1a (INVALID_POST_MEASUREMENT_HARNESS)	bound by the run; cleanup PASS, port confirmed free afterwards
+18869	isolated dask scheduler	D1 d1a (INVALID_POST_MEASUREMENT_HARNESS)	bound by the run; cleanup PASS, port confirmed free afterwards
+18151	candidate arm	D1 d1b (CHARACTERIZATION RECORDED)	bound by the run; cleanup PASS, port confirmed free afterwards
+18152	reference arm	D1 d1b (CHARACTERIZATION RECORDED)	bound by the run; cleanup PASS, port confirmed free afterwards
+18879	isolated dask scheduler	D1 d1b (CHARACTERIZATION RECORDED)	bound by the run; cleanup PASS, port confirmed free afterwards
+18131	candidate arm	C2 PASS (c2f)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18132	reference arm	C2 PASS (c2f)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18859	isolated dask scheduler	C2 PASS (c2f)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18161	candidate arm	clnA (cleanup regression, FAIL)	allocated, never bound: the cleanup regression binds no port
+18162	reference arm	clnA (cleanup regression, FAIL)	allocated, never bound
+18889	isolated dask scheduler	clnA (cleanup regression, FAIL)	allocated, never bound
+18171	candidate arm	clnB (cleanup regression, PASS)	allocated, never bound: the cleanup regression binds no port
+18172	reference arm	clnB (cleanup regression, PASS)	allocated, never bound
+18899	isolated dask scheduler	clnB (cleanup regression, PASS)	allocated, never bound
+18181	candidate arm	s2pA (S2 rung-21, INVALID_PRE_START)	allocated, never bound: refused at the workdir guard before any service started
+18182	reference arm	s2pA (S2 rung-21, INVALID_PRE_START)	allocated, never bound
+18909	isolated dask scheduler	s2pA (S2 rung-21, INVALID_PRE_START)	allocated, never bound
+18191	candidate arm	s2pB (S2 rung-21 latency, gate PASS)	bound and released: port confirmed free after cleanup
+18192	reference arm	s2pB (S2 rung-21 latency, gate PASS)	bound and released: port confirmed free after cleanup
+18919	isolated dask scheduler	s2pB (S2 rung-21 latency, gate PASS)	bound and released: port confirmed free after cleanup
+18201	candidate arm	c1f (C1 5.2C contract validation, PASS)	bound and released: port confirmed free after cleanup
+18202	reference arm	c1f (C1 5.2C contract validation, PASS)	bound and released: port confirmed free after cleanup
+18929	isolated dask scheduler	c1f (C1 5.2C contract validation, PASS)	bound and released: port confirmed free after cleanup
+18211	candidate arm	c2g (C2 three cycles + row-order gate, PASS)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18212	reference arm	c2g (C2 three cycles + row-order gate, PASS)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18939	isolated dask scheduler	c2g (C2 three cycles + row-order gate, PASS)	bound by all three cycles; cleanup PASS each time, port confirmed free after each
+18221	candidate staging (PM2)	PM2 alternate-port staging, spec 010 (DESIGN DEFAULT)	ALLOCATED, NEVER BOUND: an offline design default only. SPENT — the authorised staging run must use a NEW first-use port, not this one
+18231	candidate staging API (PM2)	pm2A (PM2 alternate-port staging, FAILED at start)	AUTHORISED and NEVER BOUND: the service exited before listening. PM2's env block overrode the shell value and handed the launcher 18221 instead; the store guard stopped it first. 18231 is SPENT — a re-attempt needs a new first-use port
+18241	candidate staging API (PM2)	pm2B (PM2 alternate-port staging, PASS)	BOUND by gunicorn master 1248949 and, after restart, 1249486 (workers 1248962/1248963 then 1249495/1249496); stop + delete released it; port confirmed free and connection-refused after cleanup. SPENT
+18262	candidate staging API (PM2)	pm2D (INVALID_PRE_START)	allocated, never bound: aborted at pre-start before any service started. SPENT
+18263	candidate staging API (PM2)	pm2E (INVALID_PRE_START)	allocated, never bound: venv built into workdir, refused by workdir lifecycle guard. SPENT
+18264	candidate staging API (PM2)	pm2F (INVALID_ENVIRONMENT)	BOUND by gunicorn master 1438258 during run; stop + delete released it; port confirmed free after cleanup. WOA23_PM2_BIN leaked to process; environment invalid. SPENT
+18265	candidate staging API (PM2)	pm2G (NOT A PASS: venv-not-runtime + column-order findings)	BOUND by gunicorn master 1455874 and, after restart, 1456369 (workers 1456373/1456374); the run STOPPED at its findings and the process was deliberately LEFT RUNNING under the retention discipline — as of the pm2G result the port is STILL BOUND. SPENT
+18301	candidate arm	c1h (C1; identity CONSUMED, run INCOMPLETE_VALIDATION)	RETIRED-NEVER-BOUND: no socket ever listened on this port. The run stopped at the production-store pre-flight, before run_controlled.sh was invoked and before any arm started. The c1h IDENTITY is consumed and never reused; the PORT was never bound. Retired by campaign policy, not because it was used. See specs/C1-result-c1h.md
+18302	reference arm	c1h (C1; identity CONSUMED, run INCOMPLETE_VALIDATION)	RETIRED-NEVER-BOUND: no socket ever listened on this port. The run stopped at the production-store pre-flight, before run_controlled.sh was invoked and before any arm started. The c1h IDENTITY is consumed and never reused; the PORT was never bound. Retired by campaign policy, not because it was used. See specs/C1-result-c1h.md
+18949	isolated dask scheduler	c1h (C1; identity CONSUMED, run INCOMPLETE_VALIDATION)	RETIRED-NEVER-BOUND: no socket ever listened on this port. The run stopped at the production-store pre-flight, before run_controlled.sh was invoked and before any arm started. The c1h IDENTITY is consumed and never reused; the PORT was never bound. Retired by campaign policy, not because it was used. See specs/C1-result-c1h.md
+18311	candidate arm	c2h (C2 re-run for the 015/016 candidate)	RETIRED-NEVER-BOUND: c2h was allocated but never requested or run; superseded by c2j on subject 82ecd44. Never reuse
+18312	reference arm	c2h (C2 re-run for the 015/016 candidate)	RETIRED-NEVER-BOUND: superseded by c2j. Never reuse
+18959	isolated dask scheduler	c2h (C2 re-run for the 015/016 candidate)	RETIRED-NEVER-BOUND: superseded by c2j. Never reuse
+19091	candidate arm	c1p (C1 5.2C, gate FAIL / INCOMPLETE_VALIDATION)	BOUND by the run and released; port confirmed free after cleanup. SPENT — the first C1 identity whose ports actually carried a listener
+19092	reference arm	c1p (C1 5.2C, gate FAIL / INCOMPLETE_VALIDATION)	BOUND and released; confirmed free after cleanup. SPENT
+19099	isolated dask scheduler	c1p (C1 5.2C, gate FAIL / INCOMPLETE_VALIDATION)	BOUND and released; confirmed free after cleanup. SPENT
+19101	candidate arm	c1q (C1 5.2C, INCOMPLETE_VALIDATION)	BOUND by the run and released; port confirmed free after cleanup. SPENT
+19102	reference arm	c1q (C1 5.2C, INCOMPLETE_VALIDATION)	BOUND and released; confirmed free after cleanup. SPENT
+19103	isolated dask scheduler	c1q (C1 5.2C, INCOMPLETE_VALIDATION)	BOUND and released; confirmed free after cleanup. SPENT
+19111	candidate arm	c1r (C1 5.2C, PASS)	BOUND by the run and released; port confirmed free after cleanup. SPENT
+19112	reference arm	c1r (C1 5.2C, PASS)	BOUND and released; confirmed free after cleanup. SPENT
+19114	isolated dask scheduler	c1r (C1 5.2C, PASS)	BOUND and released; confirmed free after cleanup. SPENT — 19113 was rejected before the run: it occurs inside a float in results/paired_s1*.json
+19131	candidate arm	c2j (C2 cycle 1 only — NO C2 RESULT)	BOUND by cycle 1 and released; port confirmed free after cleanup. SPENT. Cycles 2 and 3 never ran
+19132	reference arm	c2j (C2 cycle 1 only — NO C2 RESULT)	BOUND by cycle 1 and released; confirmed free. SPENT
+19133	isolated dask scheduler	c2j (C2 cycle 1 only — NO C2 RESULT)	BOUND by cycle 1 and released; confirmed free. SPENT
+19134	candidate arm	c2k (C2 three cycles, PASS)	BOUND by all three cycles; cleanup confirmed each time, port free after each. SPENT
+19135	reference arm	c2k (C2 three cycles, PASS)	BOUND by all three cycles; cleanup confirmed each time, port free after each. SPENT
+19137	isolated dask scheduler	c2k (C2 three cycles, PASS)	BOUND by all three cycles; cleanup confirmed each time, port free after each. SPENT — 19136 was rejected pre-run: it occurs in the tree
+18281	candidate arm (staging)	b35a1 (B3+B5 staging, INVALID_PRE_START)	RETIRED-NEVER-BOUND: the driver refused at its staging-root freshness guard before any PM2 invocation; the port was never bound and carried no listener. NOT SPENT. Never reuse; b35a1 identity CONSUMED
+18283	candidate arm (staging)	bs3v1 (B3+B5 staging-only; both PASS for staging)	BOUND by the staging app and released; port confirmed free after the named-app stop. SPENT. Closes NO production blocker
+19157	candidate staging API (PM2)	b1s1 (staging-only stop-path validation, PASS for staging)	BOUND by gunicorn master 1761154 (workers 1761163/1761164) under PM2_HOME /home/woa23c1ro/woa23-b1s1-pm2; the authorised named-app stop released it and the port was confirmed free afterwards, with the listener inventory identical before and after. SPENT. Closes NO production blocker: production B1 remains unvalidated and production PM2 state was never read

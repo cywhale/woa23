@@ -13,13 +13,109 @@
 #     ./scripts/test_procs.sh
 
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_suite_summary.sh"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export RUN="$(mktemp -d)"
 STRAYS=""
+
+# reap_by_identity <pid> <recorded-starttime>
+#
+# Kills a PID only if it is STILL THE PROCESS THAT WAS RECORDED, checked by comparing
+# the live start time with the one taken when the fixture was created.
+#
+# A bare `kill -9 <pid>` trusts a number that the kernel reuses. This suite is the one
+# place in the campaign that documents why `grep 'woa23_app' | kill -9` is dangerous,
+# and reaping its own fixtures by an unverified PID would be the same mistake in a
+# quieter form: between recording and the exit trap, that PID may belong to something
+# else entirely.
+#
+# It FAILS CLOSED. If the start time cannot be read, or does not match, the process is
+# NOT signalled — the same rule `lib_procs.sh` applies to an unconfirmed identity. The
+# cost is a stray that `scripts/run_suites.sh` will report in its leak diff, which is
+# the right trade: a leaked `sleep` is visible and harmless, and a wrongly-killed
+# process is neither.
+reap_by_identity() {          # reap_by_identity <pid> <recorded-starttime>
+  local pid="$1" want="$2" now
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  [ -n "$want" ] || {
+    echo "cleanup: no recorded start time for pid $pid — NOT killing it" >&2
+    return 0
+  }
+  now="$(starttime_of "$pid" 2>/dev/null)" || now=""
+  if [ -z "$now" ]; then
+    # Already gone is the common case and needs no message; a PID that exists but
+    # whose start time cannot be read is the one worth reporting.
+    kill -0 "$pid" 2>/dev/null && \
+      echo "cleanup: cannot confirm identity of pid $pid — NOT killing it" >&2
+    return 0
+  fi
+  if [ "$now" != "$want" ]; then
+    echo "cleanup: pid $pid is NOT the recorded process (start $now, expected" >&2
+    echo "  $want) — the PID was reused. NOT killing it." >&2
+    return 0
+  fi
+  kill -9 "$pid" 2>/dev/null || true
+}
+
 cleanup_strays() {
+  local p f pid st
+  # $STRAYS carries PIDs the MAIN shell started, and their identities are recorded in
+  # $STRAYDIR by note_stray. A PID with no recorded identity is not signalled.
+  for p in $STRAYS; do
+    st=""
+    [ -f "$STRAYDIR/$p.id" ] && st="$(cat "$STRAYDIR/$p.id" 2>/dev/null)"
+    reap_by_identity "$p" "$st"
+  done
+  # The grandchildren the `bash -c` fixtures backgrounded, recorded by PID and start
+  # time — never by matching on a command name.
+  for f in "$STRAYDIR"/*.pid; do
+    [ -f "$f" ] || continue
+    read -r pid st < "$f" 2>/dev/null || continue
+    reap_by_identity "$pid" "$st"
+  done
+}
+
+# add_stray <pid>...
+#
+# The only way a PID joins the reap list. It appends and records identity together, so
+# a site cannot add a PID while forgetting to record what makes killing it safe.
+add_stray() {
   local p
-  for p in $STRAYS; do kill -9 "$p" 2>/dev/null || true; done
+  # NOTE: this assignment is the one place the list is built. A mechanical rewrite of
+  # `STRAYS="$STRAYS $x"` call sites once matched this line too and made the function
+  # call itself — the suite died of stack exhaustion (exit 139) three assertions in.
+  for p in "$@"; do STRAYS="$STRAYS ${p}"; done
+  note_stray "$@"
+}
+
+# note_stray <pid>...
+#
+# Records each PID's start time beside it, so the exit trap can verify identity before
+# signalling. Called after the fixture has been given a moment to appear.
+note_stray() {
+  local p st
+  for p in "$@"; do
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    st="$(starttime_of "$p" 2>/dev/null)" || st=""
+    [ -n "$st" ] && printf '%s\n' "$st" > "$STRAYDIR/$p.id"
+  done
+}
+
+# stamp_stray_file <file>...
+#
+# Rewrites a `bash -c` fixture's PID file from "<pid>" to "<pid> <starttime>". The
+# fixture cannot record its own children's start times — it writes `$!` and exits the
+# line — so the main shell stamps them once the children exist.
+stamp_stray_file() {
+  local f pid st
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    read -r pid _ < "$f" 2>/dev/null || continue
+    case "$pid" in ''|*[!0-9]*) continue ;; esac
+    st="$(starttime_of "$pid" 2>/dev/null)" || st=""
+    printf '%s %s\n' "$pid" "$st" > "$f"
+  done
 }
 trap cleanup_strays EXIT
 
@@ -34,6 +130,19 @@ has_text() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
 # to do with the code. The exit trap kills these regardless, so the value only needs
 # to be comfortably larger than the run.
 export FIXTURE_LIFE=900   # exported: the `bash -c` fixtures are separate shells
+
+# Where a `bash -c` fixture writes the PIDs of the sleeps IT backgrounds, so the exit
+# trap can reap them too.
+#
+# Four fixtures used to background a `sleep` inside `bash -c` and record only the
+# `bash` PID. Killing the parent does not kill its children — they were reparented and
+# survived the suite, and `scripts/run_suites.sh` catches them in its per-suite
+# process-leak snapshot. Every batch run left more of them on the machine.
+#
+# It is its own directory rather than $RUN because $RUN is deliberately re-pointed at
+# fixture directories partway through this suite; a PID file written under it could
+# land somewhere the trap never looks.
+export STRAYDIR="$(mktemp -d)"
 # Several cases are designed never to drain — a stranded child, a port that stays
 # held — so the full production wait would be spent on each of them.
 export STOP_WAIT_SECS=3
@@ -131,6 +240,39 @@ fi
 echo "process enumeration: $([ -r /proc/1/stat ] && echo "/proc (the VM24 path)" \
                              || echo "ps (no procfs on this machine)")"
 
+echo "the exit trap will not kill a PID whose identity it cannot confirm"
+# reap_by_identity is what stops this suite's own cleanup from becoming the hazard it
+# documents elsewhere: a bare `kill -9 <pid>` trusts a number the kernel reuses.
+# Exercised here rather than trusted, because a guard nobody tests is a comment.
+_guard_probe="$(mktemp -d)"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & _gp=$!
+sleep 1
+_gp_start="$(starttime_of "$_gp")"
+check "a live fixture has a readable start time" "yes" \
+      "$([ -n "$_gp_start" ] && echo yes || echo no)"
+# Wrong start time: the PID exists, but it is NOT the recorded process.
+_msg="$(reap_by_identity "$_gp" "definitely-not-the-start-time" 2>&1)"
+check "a mismatched start time does NOT kill the process" "yes" \
+      "$(kill -0 "$_gp" 2>/dev/null && echo yes || echo no)"
+check "and it says the PID was reused" "yes" \
+      "$(has_text "$_msg" "PID was reused")"
+# No recorded identity at all: also refused.
+_msg="$(reap_by_identity "$_gp" "" 2>&1)"
+check "an absent start time does NOT kill the process either" "yes" \
+      "$(kill -0 "$_gp" 2>/dev/null && echo yes || echo no)"
+check "and it says so" "yes" "$(has_text "$_msg" "no recorded start time")"
+# The matching case does kill it — so the refusals above are the guard working, not
+# the function being inert.
+reap_by_identity "$_gp" "$_gp_start"
+sleep 1
+check "a MATCHING start time does kill it" "no" \
+      "$(kill -0 "$_gp" 2>/dev/null && echo yes || echo no)"
+# A PID that is already gone is not an error and produces no complaint.
+_msg="$(reap_by_identity "$_gp" "$_gp_start" 2>&1)"
+check "reaping an already-dead PID is silent" "" "$_msg"
+check "a non-numeric pid is ignored" "" "$(reap_by_identity "not-a-pid" "x" 2>&1)"
+
+echo
 echo "the tree is discovered, not assumed"
 # A parent that forks a child and waits, like a gunicorn arbiter.
 # `wait` rather than a second `sleep`: the foreground sleep would be a THIRD
@@ -138,9 +280,9 @@ echo "the tree is discovered, not assumed"
 # empty after exactly one child is killed. (It passed before only because the
 # fixtures were short-lived enough to expire on their own.)
 bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "$RUN/child.pid"; wait' >/dev/null 2>&1 &
-parent=$!; STRAYS="$STRAYS $parent"
+parent=$!; add_stray "$parent"
 sleep 1
-child="$(cat "$RUN/child.pid")"; STRAYS="$STRAYS $child"
+child="$(cat "$RUN/child.pid")"; add_stray "$child"
 echo "$parent" > "$RUN/svc.pid"
 starttime_of "$parent" > "$RUN/svc.starttime"
 
@@ -154,13 +296,49 @@ check "every live survivor is recorded" "yes" \
       "$(contains "$(tree_survivors svc)" "$child")"
 
 echo
+echo "the boot token identifies the BOOT, and does not drift within one"
+# This is the defect that failed 5 assertions of test_s2perf_driver.sh in batch 1 of
+# three, and passed in batches 2 and 3 — the shape of a flake, and not one.
+#
+# macOS has no stored boot instant; it derives one as (now - uptime), so the `usec`
+# field of kern.boottime MOVES as the clock is slewed. boot_id used the whole string,
+# so a tree recorded before an adjustment stopped matching the kernel after it,
+# tree_boot_matches returned 2, and cleanup refused to act — correctly, given what it
+# had been told. The arms then survived and the suite failed on them.
+#
+# Two REAL readings, 19 minutes apart on one boot, are the fixture:
+#   { sec = 1784274218, usec = 605425 } ...   recorded 14:49
+#   { sec = 1784274218, usec = 551909 } ...   read     15:08
+#
+# The Linux path is untouched — /proc/sys/kernel/random/boot_id is a per-boot UUID
+# that cannot drift, and that is the path VM24 takes.
+boot_tok() {   # the extraction boot_id performs, applied to a supplied string
+  printf '%s\n' "$1" | sed -n 's/^[^0-9]*sec[[:space:]]*=[[:space:]]*\([0-9][0-9]*\).*/\1/p'
+}
+DRIFT_A='{ sec = 1784274218, usec = 605425 } Fri Jul 17 15:43:38 2026'
+DRIFT_B='{ sec = 1784274218, usec = 551909 } Fri Jul 17 15:43:38 2026'
+REBOOT_C='{ sec = 1784274219, usec = 605425 } Fri Jul 17 15:43:39 2026'
+check "a usec drift within one boot yields the SAME token" "$(boot_tok "$DRIFT_A")" \
+      "$(boot_tok "$DRIFT_B")"
+check "and that token is the seconds field, not the microseconds" "1784274218" \
+      "$(boot_tok "$DRIFT_A")"
+check "a genuinely different boot still yields a DIFFERENT token" "no" \
+      "$([ "$(boot_tok "$DRIFT_A")" = "$(boot_tok "$REBOOT_C")" ] && echo yes || echo no)"
+check "boot_id is stable across consecutive calls" "$(boot_id)" "$(boot_id)"
+has_usec=no
+case "$(boot_id)" in *usec*) has_usec=yes ;; esac
+check "boot_id carries no microsecond field" "no" "$has_usec"
+check "and it is non-empty, so a tree can always be stamped" "yes" \
+      "$([ -n "$(boot_id)" ] && echo yes || echo no)"
+
+echo
 echo "a tracked service always has an interpretable tree"
 # The window this closes: the trap is armed the moment a service is tracked, and
 # stop_tracked refuses to signal anything whose tree it cannot interpret. If
 # start_tracked did not record one, an abort before the first explicit record_tree —
 # a port that never binds, a readiness timeout — would leave the process running.
 start_tracked early "" sleep "$FIXTURE_LIFE" >/dev/null
-early_pid="$(cat "$RUN/early.pid")"; STRAYS="$STRAYS $early_pid"
+early_pid="$(cat "$RUN/early.pid")"; add_stray "$early_pid"
 check "start_tracked leaves a tree file behind" "yes" \
       "$([ -f "$RUN/early.tree" ] && echo yes || echo no)"
 check "it carries a boot header" "yes" \
@@ -179,7 +357,7 @@ echo "a service that never bound is still stopped"
 # nothing. Requiring port ownership before signalling left it running.
 PORT_HELD_BY_PID=no
 start_tracked unbound 8099 sleep "$FIXTURE_LIFE" >/dev/null
-unbound_pid="$(cat "$RUN/unbound.pid")"; STRAYS="$STRAYS $unbound_pid"
+unbound_pid="$(cat "$RUN/unbound.pid")"; add_stray "$unbound_pid"
 set +e; out="$(stop_tracked unbound 8099 2>&1)"; st=$?; set -e
 check "stop_tracked signals it rather than refusing" "0" "$st"
 check "the process is actually gone" "gone" \
@@ -254,7 +432,7 @@ rm "$RUN/dying.tree"
 # (b) genuinely alive with an unreadable stat: a REAL process seen through a proc
 # root that lacks its stat. A bare directory under a fake root is indistinguishable
 # from one that has already exited, which is the whole point.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & livep=$!; STRAYS="$STRAYS $livep"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & livep=$!; add_stray "$livep"
 sleep 1
 mkdir -p "$FAKE/$livep"
 check "pid_alive says alive for a real process" "0" \
@@ -376,12 +554,15 @@ echo "the diagnostic survives stop_tracked's own command substitution"
 # one goes through stop_tracked, which is where the variable-based version was lost:
 # the caller is `surv="$(tree_survivors ...)"` inside a function invoked from a trap.
 # Nothing short of the real call path proves the record gets out.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & intp=$!; STRAYS="$STRAYS $intp"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & intp=$!; add_stray "$intp"
 sleep 1
 echo "$intp" > "$RUN/intg.pid"; starttime_of "$intp" > "$RUN/intg.starttime"
 record_tree intg >/dev/null
-kill "$intp" 2>/dev/null || true
-sleep 1
+# The process is left ALIVE so its identity is confirmed and the stop proceeds as
+# far as the tree. Under the cleanup-outcome policy (spec 002) an unconfirmed
+# identity ends the stop before tree_survivors is ever reached, so killing it first
+# — as this fixture used to — would test the identity branch and never exercise the
+# path whose diagnostic this case exists to follow.
 # Corrupt the tree the way a real failure would leave it, then let stop_tracked run.
 printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/intg.tree"
 [ -f "$RUN/intg.diag" ] && rm "$RUN/intg.diag"
@@ -404,12 +585,14 @@ echo "a diagnostic that cannot be persisted fails cleanup loudly"
 # anything in stop_tracked. Its absence has to be the signal.
 DIAGLOCK="$RUN/diaglock"
 mkdir -p "$DIAGLOCK"
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & dlp=$!; STRAYS="$STRAYS $dlp"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & dlp=$!; add_stray "$dlp"
 sleep 1
 RUN_REAL="$RUN"; RUN="$DIAGLOCK"
 echo "$dlp" > "$RUN/dl.pid"; starttime_of "$dlp" > "$RUN/dl.starttime"
 record_tree dl >/dev/null
-kill "$dlp" 2>/dev/null || true; sleep 1
+# Left ALIVE so the identity is confirmed: under the cleanup-outcome policy
+# (spec 002) an unconfirmed identity ends the stop before the tree stage this
+# case is about is ever reached.
 printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/dl.tree"
 chmod 0555 "$DIAGLOCK"          # no new files, so the .diag cannot be created
 if printf 'probe\n' > "$DIAGLOCK/probe" 2>/dev/null; then
@@ -433,12 +616,14 @@ echo "a stale .diag line is never reported as this failure's reason"
 # diagnosis — and would look exactly like a working diagnostic.
 STALE="$RUN/stale"
 mkdir -p "$STALE"
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & stp=$!; STRAYS="$STRAYS $stp"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & stp=$!; add_stray "$stp"
 sleep 1
 RUN_REAL="$RUN"; RUN="$STALE"
 echo "$stp" > "$RUN/st.pid"; starttime_of "$stp" > "$RUN/st.starttime"
 record_tree st >/dev/null
-kill "$stp" 2>/dev/null || true; sleep 1
+# Left ALIVE so the identity is confirmed: under the cleanup-outcome policy
+# (spec 002) an unconfirmed identity ends the stop before the tree stage this
+# case is about is ever reached.
 printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/st.tree"
 # A convincing leftover from an earlier stage, already in the file.
 printf 'st: [wait/identity-unreadable] pid 999 present, recorded "1", read back ""\n' \
@@ -459,6 +644,14 @@ else
 fi
 
 # The same setup, but the final stage CAN write: now the fresh line is the reason.
+# A NEW live fixture, because the run above stopped the previous one — and a tree
+# whose master has exited never reaches the final stage under the cleanup-outcome
+# policy (spec 002), so it could not produce the record this case is about.
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & stp2=$!; add_stray "$stp2"
+sleep 1
+echo "$stp2" > "$RUN/st.pid"; starttime_of "$stp2" > "$RUN/st.starttime"
+record_tree st >/dev/null
+printf 'boot:%s\nnocolon\n' "$(boot_id)" > "$RUN/st.tree"
 printf 'st: [wait/identity-unreadable] earlier stage\n' > "$RUN/st.diag"
 set +e; out="$(stop_tracked st "" 2>&1)"; st=$?; set -e
 check "with a fresh final-stage record, that record is the reason" "yes" \
@@ -484,8 +677,15 @@ echo "a live child is never silently dropped from the tree"
 # corrupt one, because it looks entirely valid and reports every missing child as
 # exited.
 
-bash -c 'sleep "$FIXTURE_LIFE" & sleep "$FIXTURE_LIFE"' >/dev/null 2>&1 & dropp=$!; STRAYS="$STRAYS $dropp"
+# Both sleeps are backgrounded and BOTH PIDs are recorded. The foreground one used
+# to be unrecorded and was orphaned when the parent was killed, exactly like the
+# backgrounded one. `wait` keeps the parent alive, so the fixture still is what it
+# was: a live parent with two live children.
+bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "$STRAYDIR/drop1.pid"; \
+         sleep "$FIXTURE_LIFE" & echo $! > "$STRAYDIR/drop2.pid"; wait' \
+  >/dev/null 2>&1 & dropp=$!; add_stray "$dropp"
 sleep 1
+stamp_stray_file "$STRAYDIR/drop1.pid" "$STRAYDIR/drop2.pid"
 echo "$dropp" > "$RUN/drop.pid"; starttime_of "$dropp" > "$RUN/drop.starttime"
 check "the parent really does have children" "yes" \
       "$([ -n "$(descendants_of "$dropp")" ] && echo yes || echo no)"
@@ -514,7 +714,7 @@ rm "$RUN/drop.pid" "$RUN/drop.starttime" "$RUN/drop.tree"
 # (b) a process that is genuinely live but cannot be recorded. It has to be a REAL
 # process: a bare directory under a fake proc root is indistinguishable from one
 # that has already exited, and pid_alive now — correctly — calls that exited.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unrec=$!; STRAYS="$STRAYS $unrec"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unrec=$!; add_stray "$unrec"
 sleep 1
 mkdir -p "$FAKE/$unrec"
 : > "$RUN/one.tree"
@@ -577,9 +777,9 @@ LOCKED="$RUN/locked"
 mkdir -p "$LOCKED"
 bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "'"$LOCKED"'/lk.child"; wait' \
   >/dev/null 2>&1 &
-lockp=$!; STRAYS="$STRAYS $lockp"
+lockp=$!; add_stray "$lockp"
 sleep 1
-lockc="$(cat "$LOCKED/lk.child")"; STRAYS="$STRAYS $lockc"
+lockc="$(cat "$LOCKED/lk.child")"; add_stray "$lockc"
 RUN_REAL="$RUN"; RUN="$LOCKED"
 echo "$lockp" > "$RUN/lk.pid"; starttime_of "$lockp" > "$RUN/lk.starttime"
 record_tree lk >/dev/null
@@ -622,9 +822,10 @@ kill "$lockp" "$lockc" 2>/dev/null || true
 echo
 echo "a persisted .uncertain sentinel outlives the process that wrote it"
 # The layer that covers a *later* invocation, which has no runtime flag at all.
-bash -c 'sleep "$FIXTURE_LIFE" & wait' >/dev/null 2>&1 &
-sentp=$!; STRAYS="$STRAYS $sentp"
+bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "$STRAYDIR/wait1.pid"; wait' >/dev/null 2>&1 &
+sentp=$!; add_stray "$sentp"
 sleep 1
+stamp_stray_file "$STRAYDIR/wait1.pid"
 echo "$sentp" > "$RUN/sent.pid"; starttime_of "$sentp" > "$RUN/sent.starttime"
 record_tree sent >/dev/null
 check "the tree is usable to begin with" "0" \
@@ -648,13 +849,13 @@ echo "a stop that cannot clear its state does not report a clean stop"
 # this run claimed to have cleared.
 UNRM="$RUN/unrm"
 mkdir -p "$UNRM"
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unrmp=$!; STRAYS="$STRAYS $unrmp"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & unrmp=$!; add_stray "$unrmp"
 sleep 1
 RUN_REAL="$RUN"; RUN="$UNRM"
 echo "$unrmp" > "$RUN/u.pid"; starttime_of "$unrmp" > "$RUN/u.starttime"
 record_tree u >/dev/null
-kill "$unrmp" 2>/dev/null || true
-sleep 1
+# Left ALIVE: an unconfirmed identity ends the stop before the state-removal stage
+# this case is about (spec 002 cleanup-outcome policy).
 chmod 0555 "$UNRM"          # files may be read, but not unlinked
 if rm -- "$UNRM/u.starttime" 2>/dev/null; then
   echo "  (skipped: this user can unlink inside a 0555 directory)"
@@ -677,8 +878,15 @@ echo "an incomplete tree still stops the process it does know about"
 # The point of marking rather than refusing: what is provably ours is still stopped,
 # so the host is left cleaner, while the run still fails because completeness is
 # unknown. Both halves are asserted here.
-bash -c 'sleep "$FIXTURE_LIFE" & sleep "$FIXTURE_LIFE"' >/dev/null 2>&1 & inc=$!; STRAYS="$STRAYS $inc"
+# Both sleeps are backgrounded and BOTH PIDs are recorded. The foreground one used
+# to be unrecorded and was orphaned when the parent was killed, exactly like the
+# backgrounded one. `wait` keeps the parent alive, so the fixture still is what it
+# was: a live parent with two live children.
+bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "$STRAYDIR/inc1.pid"; \
+         sleep "$FIXTURE_LIFE" & echo $! > "$STRAYDIR/inc2.pid"; wait' \
+  >/dev/null 2>&1 & inc=$!; add_stray "$inc"
 sleep 1
+stamp_stray_file "$STRAYDIR/inc1.pid" "$STRAYDIR/inc2.pid"
 echo "$inc" > "$RUN/inc.pid"; starttime_of "$inc" > "$RUN/inc.starttime"
 record_tree inc >/dev/null
 _mark_incomplete inc "staged-for-test" >/dev/null
@@ -697,8 +905,15 @@ rm "$RUN/inc.pid" "$RUN/inc.starttime" "$RUN/inc.tree"
 
 echo
 echo "a refresh that fails is carried even if its marker never lands"
-bash -c 'sleep "$FIXTURE_LIFE" & sleep "$FIXTURE_LIFE"' >/dev/null 2>&1 & ref=$!; STRAYS="$STRAYS $ref"
+# Both sleeps are backgrounded and BOTH PIDs are recorded. The foreground one used
+# to be unrecorded and was orphaned when the parent was killed, exactly like the
+# backgrounded one. `wait` keeps the parent alive, so the fixture still is what it
+# was: a live parent with two live children.
+bash -c 'sleep "$FIXTURE_LIFE" & echo $! > "$STRAYDIR/ref1.pid"; \
+         sleep "$FIXTURE_LIFE" & echo $! > "$STRAYDIR/ref2.pid"; wait' \
+  >/dev/null 2>&1 & ref=$!; add_stray "$ref"
 sleep 1
+stamp_stray_file "$STRAYDIR/ref1.pid" "$STRAYDIR/ref2.pid"
 echo "$ref" > "$RUN/ref.pid"; starttime_of "$ref" > "$RUN/ref.starttime"
 record_tree ref >/dev/null
 # refresh_tree fails, and its marker write is staged to fail too, so the only
@@ -729,7 +944,7 @@ set +e
 out="$(stop_tracked svc 8099 2>&1)"; st=$?
 set -e
 check "stop_tracked returns non-zero" "1" "$st"
-check "it reports a survivor" "yes" "$(has_text "$out" "still running after stop")"
+check "it reports a survivor" "yes" "$(has_text "$out" "STILL RUNNING after stop")"
 check "it names the surviving PID" "yes" "$(has_text "$out" "$child")"
 check "the pidfile is kept for inspection" "yes" \
       "$([ -f "$RUN/svc.pid" ] && echo yes || echo no)"
@@ -737,20 +952,30 @@ check "the tree file is kept too" "yes" \
       "$([ -f "$RUN/svc.tree" ] && echo yes || echo no)"
 
 echo
-echo "and succeeds once the whole tree is gone"
+echo "and STILL fails once the tree is gone, because the master was never identified"
+# The cost of the cleanup-outcome policy (spec 002), stated rather than hidden: the
+# master died before this stop, so its identity can never be confirmed and no later
+# attempt can claim a clean stop for this tree. The host may well be clean — every
+# tracked process has exited — but "the PIDs are absent" is not "the tracked
+# processes were identified and are gone", and this project fails closed on that.
+# The state is kept for a human to close out.
 kill "$child" 2>/dev/null || true
 sleep 2
 set +e
 out="$(stop_tracked svc 8099 2>&1)"; st=$?
 set -e
-check "stop_tracked returns zero" "0" "$st"
-check "the pidfile is removed" "no" "$([ -f "$RUN/svc.pid" ] && echo yes || echo no)"
-check "the tree file is removed" "no" "$([ -f "$RUN/svc.tree" ] && echo yes || echo no)"
+check "stop_tracked still fails" "1" "$st"
+check "and says the identity was never confirmed" "yes" \
+      "$(has_text "$out" "was never identified")"
+check "it no longer reports a survivor, because there is none" "no" \
+      "$(has_text "$out" "STILL RUNNING after stop")"
+check "the pidfile is kept" "yes" "$([ -f "$RUN/svc.pid" ] && echo yes || echo no)"
+check "the tree file is kept" "yes" "$([ -f "$RUN/svc.tree" ] && echo yes || echo no)"
 
 echo
 echo "a released port is not proof on its own"
 # Both halves of the claim, isolated: tree gone but port held must still fail.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & lone=$!; STRAYS="$STRAYS $lone"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & lone=$!; add_stray "$lone"
 sleep 1
 echo "$lone" > "$RUN/p.pid"; starttime_of "$lone" > "$RUN/p.starttime"
 record_tree p >/dev/null
@@ -770,7 +995,7 @@ echo "a tree from another boot is never acted on"
 # After a reboot, PIDs are reused and start times are measured from boot — so the
 # same pid:starttime pair can name someone else's process. The only safe action is
 # none: do not signal, do not delete state.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & bootp=$!; STRAYS="$STRAYS $bootp"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & bootp=$!; add_stray "$bootp"
 sleep 1
 echo "$bootp" > "$RUN/b.pid"; starttime_of "$bootp" > "$RUN/b.starttime"
 record_tree b >/dev/null
@@ -807,7 +1032,7 @@ echo "a legal-but-different start time is a recycled PID; garbage is a corrupt t
 # These two must not collapse into each other. The previous version of this test
 # used a garbage value to stand in for "a different start time", so it asserted the
 # fail-open behaviour — a malformed tree reporting no survivors — as correct.
-sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & rec=$!; STRAYS="$STRAYS $rec"
+sleep "$FIXTURE_LIFE" >/dev/null 2>&1 & rec=$!; add_stray "$rec"
 sleep 1
 echo "$rec" > "$RUN/r.pid"; starttime_of "$rec" > "$RUN/r.starttime"
 real_st="$(starttime_of "$rec")"
@@ -847,8 +1072,4 @@ done
 kill "$rec" 2>/dev/null || true
 
 echo
-if [ "$fail" -gt 0 ]; then
-  echo "FAILED $fail/$((pass + fail))"
-  exit 1
-fi
-echo "all passed ($pass assertions)"
+suite_summary "$pass" "$fail"

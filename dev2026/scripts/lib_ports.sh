@@ -74,3 +74,39 @@ pids_on_port() {
          | tr '\n' ' ')" || out=""
   printf '%s' "$out"
 }
+
+# ------------------------------------------------------- the used-port ledger ---
+# `port_held` answers "is anything listening RIGHT NOW". That is not the same
+# question as "has this campaign bound this port before", and conflating the two is
+# how 18091/18092 came to be described as new ports when c2c had already used them:
+# every port a finished run used is free again afterwards, precisely because its
+# cleanup worked.
+#
+# So the two checks are separate and both run. This one is a lookup in a committed
+# file, reads nothing from the host, and cannot be satisfied by waiting.
+PORTS_LEDGER="${PORTS_LEDGER:-$(dirname "${BASH_SOURCE[0]}")/ports_used.tsv}"
+
+# The ledger rows naming port $1, tab-separated, empty if none. Status 0 if the port
+# has been used before, 1 if it has not, 2 if the ledger cannot be read — which is
+# NOT the same as "not used" and must not be treated as one.
+port_previously_used() {
+  local port="$1" rows
+  [ -r "$PORTS_LEDGER" ] || return 2
+  rows="$(grep -E "^${port}	" "$PORTS_LEDGER" || true)"
+  [ -n "$rows" ] || return 1
+  printf '%s\n' "$rows"
+  return 0
+}
+
+# One line per port: "<port> first-use" or "<port> REUSED <role>, <run>".
+port_ledger_status() {
+  local port="$1" rows st=0
+  rows="$(port_previously_used "$port")" || st=$?
+  case "$st" in
+    0) printf '%s REUSED %s\n' "$port" \
+         "$(printf '%s' "$rows" | head -1 | cut -f2,3 | tr '\t' ',')" ;;
+    1) printf '%s first-use\n' "$port" ;;
+    *) printf '%s UNKNOWN (ledger %s is unreadable)\n' "$port" "$PORTS_LEDGER" ;;
+  esac
+  return "$st"
+}

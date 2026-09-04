@@ -12,6 +12,7 @@
 #     ./scripts/test_ports.sh
 
 set -euo pipefail
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib_suite_summary.sh"
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TMP="$(mktemp -d)"
@@ -89,9 +90,112 @@ check "pid_holds_port fails closed"               "no" \
       "$(pid_holds_port 3960 8050 2>/dev/null && echo yes || echo no)"
 unset SS_MUST_FAIL
 
+# `case` inside a command substitution breaks bash 3.2's parser, as it has several
+# times across this suite; a helper keeps it out of `$( )`.
+contains() { case "$1" in *"$2"*) echo yes ;; *) echo no ;; esac; }
+
 echo
-if [ "$fail" -gt 0 ]; then
-  echo "FAILED $fail/$((pass + fail))"
-  exit 1
-fi
-echo "all passed ($pass assertions)"
+echo "the used-port ledger answers a question the host cannot"
+# A finished run's ports are free again — that is what a working cleanup means. So
+# `port_held` passes on every port this campaign has ever used, and cannot tell a
+# fresh one from c2c's. That is the gap 18091/18092 fell into when they were called
+# new ports in a request.
+check "a port an earlier run bound is known to have been used" "0" \
+      "$(port_previously_used 18091 >/dev/null; echo $?)"
+check "and the row says which run" "yes" \
+      "$(contains "$(port_previously_used 18091)" "c2c")"
+# Chosen at run time rather than written down: every literal this test has used for
+# "a port nothing has used" has later been used, and the assertion then failed for
+# the right reason at the wrong moment.
+UNUSED_PORT="$(python3 - "$PORTS_LEDGER" <<'PY'
+import sys
+used = set()
+for line in open(sys.argv[1]):
+    if line.startswith("#"):
+        continue
+    parts = line.split("\t")
+    if parts and parts[0].strip().isdigit():
+        used.add(int(parts[0]))
+print(next(p for p in range(18900, 19999) if p not in used))
+PY
+)"
+check "a port nothing has used is not in it" "1" \
+      "$(port_previously_used "$UNUSED_PORT" >/dev/null 2>&1; echo $?)"
+check "production's own ports are listed, so they can never be proposed" "0" \
+      "$(port_previously_used 8050 >/dev/null; echo $?)"
+check "and so is the isolated scheduler D2b used" "0" \
+      "$(port_previously_used 18787 >/dev/null; echo $?)"
+
+check "the status line names a first use" "$UNUSED_PORT first-use" \
+      "$(port_ledger_status "$UNUSED_PORT")"
+
+# c2e never bound its ports — it aborted before any service started — but its
+# evidence is named against them, so they are listed and the row says which.
+# "Never bound" and "free to propose again" are not the same statement.
+check "a port allocated to a run that never started is still listed" "0" \
+      "$(port_previously_used 18121 >/dev/null; echo $?)"
+check "and the row says it was never bound" "yes" \
+      "$(contains "$(port_previously_used 18121)" "never bound")"
+check "and marks a reuse as a reuse" "yes" \
+      "$(contains "$(port_ledger_status 18091)" "REUSED")"
+
+# A prefix must not match: 1809 is not 18091, and 18091 is not 180915.
+check "a shorter number does not match a longer port" "1" \
+      "$(port_previously_used 1809 >/dev/null 2>&1; echo $?)"
+check "and a longer one does not match a shorter port" "1" \
+      "$(port_previously_used 180915 >/dev/null 2>&1; echo $?)"
+
+# An unreadable ledger is not an answer. Treating it as "not used" would silently
+# turn the check off the moment the file went missing.
+PORTS_LEDGER=/nonexistent/ports.tsv
+check "an unreadable ledger reports 2, not 'unused'" "2" \
+      "$(port_previously_used "$UNUSED_PORT" >/dev/null 2>&1; echo $?)"
+check "and the status line says so rather than guessing" "yes" \
+      "$(contains "$(port_ledger_status "$UNUSED_PORT" 2>&1)" "UNKNOWN")"
+PORTS_LEDGER="$HERE/ports_used.tsv"
+
+# Every port in the ledger must be a port. A typo'd row is a row that silently
+# never matches anything.
+#
+# THE PATTERN USED TO BE `'^[0-9]{2,5}\t'` AND IT COULD NEVER MATCH. POSIX ERE has no
+# `\t` escape: GNU grep -E reads `\t` as a literal `t`, so the pattern meant "digits then
+# the letter t". No ledger row looks like that, `grep -v` therefore kept every row, and
+# `bad` was the row COUNT — 88 of 88 — reported as 88 malformed rows in a file where all
+# 88 rows are correct. The check inverted: it failed on a good ledger and, because a
+# genuinely malformed row would also be counted, it could never distinguish the two.
+#
+# A literal tab, built with printf, is portable across GNU and BSD grep and needs no -P.
+TAB="$(printf '\t')"
+ledger_bad_rows() {   # ledger_bad_rows <file> -> count of non-comment rows that are not <port><TAB>
+  grep -vE '^#' "$1" | grep -vE "^[0-9]{2,5}${TAB}" | grep -c . || true
+}
+bad="$(ledger_bad_rows "$PORTS_LEDGER")"
+check "every non-comment row starts with a port and a tab" "0" "$bad"
+dupes="$(grep -vE '^#' "$PORTS_LEDGER" | cut -f1 | sort | uniq -d | grep -c . || true)"
+check "and no port is listed twice" "0" "$dupes"
+
+# REGRESSION: the real ledger's rows are RECOGNISED, not merely "not counted".
+# `bad = 0` alone is satisfied by a pattern that matches nothing and a file that is
+# empty, so the positive side is asserted directly against the row count.
+real_rows="$(grep -vcE '^#' "$PORTS_LEDGER")"
+matched="$(grep -vE '^#' "$PORTS_LEDGER" | grep -cE "^[0-9]{2,5}${TAB}" || true)"
+check "the ledger has rows to check at all" "yes" "$([ "$real_rows" -gt 0 ] && echo yes || echo no)"
+check "every real ledger row is RECOGNISED by the pattern" "$real_rows" "$matched"
+
+# MUTATION: each malformed shape must be CAUGHT. Without these the check could be
+# rewritten to match everything and still report 0 bad rows.
+MUT="$(mktemp)"
+mutation_case() {   # mutation_case <label> <row> <expected bad count>
+  { grep -E '^#' "$PORTS_LEDGER" | head -2; printf '%s\n' "$2"; } > "$MUT"
+  check "mutation: $1" "$3" "$(ledger_bad_rows "$MUT")"
+}
+mutation_case "a row separated by a SPACE instead of a tab is caught" "19387 dep3s" "1"
+mutation_case "a row with no port at all is caught"                   "notaport${TAB}x" "1"
+mutation_case "a row whose port is too short is caught"               "9${TAB}x" "1"
+mutation_case "a row whose port is too long is caught"                "123456${TAB}x" "1"
+mutation_case "a leading-space row is caught"                         " 19387${TAB}x" "1"
+mutation_case "a well-formed row is NOT caught"                       "19387${TAB}dep3s" "0"
+rm -f "$MUT"
+
+echo
+suite_summary "$pass" "$fail"

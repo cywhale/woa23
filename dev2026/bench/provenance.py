@@ -29,6 +29,62 @@ from bench.manifests import MANIFESTS, expand
 # backend we start ourselves.
 REQUIRED_HASH_SEED = "0"
 
+#: What `collect_backend_meta.whitelisted_env` records when PYTHONHASHSEED is absent.
+#: An unset seed is a finding, not a gap, so it is recorded as a value.
+UNSET_HASH_SEED = "<unset — randomised>"
+
+#: Which arms must have a pinned seed, by campaign. Three cases, not two — and the
+#: third is what stopped C2 cycle 1.
+#:
+#:   both-pinned         D2b and C1. Both arms are ours and both are pinned; a
+#:                       byte-exact comparison depends on it.
+#:   reference-unpinned  5.2B against live production. The reference is production,
+#:                       which we may not restart, so its seed is whatever it is —
+#:                       "any", because we cannot assert either way.
+#:   both-unpinned       C2. Both arms are ours and both are deliberately UNPINNED.
+#:                       This one requires the seed to be absent rather than merely
+#:                       tolerating it: a C2 cycle that ran with a pinned seed
+#:                       observed nothing about unpinned behaviour, and would report
+#:                       three identical seeds as if that were a fact about the
+#:                       interpreter instead of about the launch.
+SEED_POLICIES: dict[str, dict[str, str]] = {
+    "both-pinned":        {"candidate": "pinned",   "reference": "pinned"},
+    "reference-unpinned": {"candidate": "pinned",   "reference": "any"},
+    "both-unpinned":      {"candidate": "unpinned", "reference": "unpinned"},
+}
+
+#: What each policy actually requires, in words, because one of the names does not
+#: say it. `reference-unpinned` does NOT mean "the reference must be unpinned" — it
+#: means the reference is not constrained, because under 5.2B the reference is live
+#: production and its seed is whatever it happens to be. A pinned reference is
+#: perfectly acceptable under it. The name describes the situation that motivated the
+#: policy, not the rule the policy applies, and reading it as a requirement would
+#: invert the check on the one arm it deliberately does not constrain.
+SEED_POLICY_MEANING: dict[str, str] = {
+    "both-pinned": (
+        "candidate MUST be pinned to PYTHONHASHSEED=0; reference MUST be pinned. "
+        "D2b and C1, where both arms are ours and a byte-exact comparison depends "
+        "on the ordering being reproducible."),
+    "reference-unpinned": (
+        "candidate MUST be pinned to PYTHONHASHSEED=0; reference MAY be either "
+        "pinned or unpinned — it is not checked. NOT 'the reference must be "
+        "unpinned'. 5.2B against live production, which we may not restart, so its "
+        "seed cannot be asserted in either direction."),
+    "both-unpinned": (
+        "candidate MUST be unset; reference MUST be unset. C2, where both arms are "
+        "ours and both are deliberately unpinned — a pinned arm here would observe "
+        "nothing about unpinned behaviour, so this one is checked in the inverse "
+        "direction rather than merely tolerated."),
+}
+
+
+def seed_requirement_for(policy: str, label: str) -> str:
+    """What `label` must show under `policy`. Unknown policies fail closed."""
+    if policy not in SEED_POLICIES:
+        raise ValueError(f"unknown seed policy {policy!r}; "
+                         f"expected one of {sorted(SEED_POLICIES)}")
+    return SEED_POLICIES[policy].get(label, "pinned")
+
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 # Every field the sidecar must supply, with the type it must have. Checking only
@@ -202,7 +258,7 @@ def validate_store_agreement(cand: dict | None, ref: dict | None) -> list[str]:
 
 
 def validate_meta(meta: dict | None, label: str,
-                  require_pinned_seed: bool = True) -> list[str]:
+                  seed_requirement: str = "pinned") -> list[str]:
     """Reasons this run's provenance is not good enough to publish a number.
 
     Incompleteness here is not cosmetic. A result whose backend cannot be
@@ -298,17 +354,26 @@ def validate_meta(meta: dict | None, label: str,
         if deps.get("distributions_error"):
             problems.append(f"{label}: dependencies could not be listed "
                             f"({deps['distributions_error']})")
-        elif not deps.get("distributions_sha256"):
-            problems.append(f"{label}: dependencies record no distribution digest")
+        elif not deps.get("name_version_set_sha256"):
+            problems.append(f"{label}: dependencies record no name==version set digest")
     if meta.get("env_python_source") == "unresolved":
         problems.append(f"{label}: the package environment could not be resolved, so "
                         f"the dependency record describes no known interpreter")
 
     env = meta.get("env")
     seed = env.get("PYTHONHASHSEED") if isinstance(env, dict) else None
-    if require_pinned_seed and seed != REQUIRED_HASH_SEED:
+    if seed_requirement not in ("pinned", "unpinned", "any"):
+        problems.append(f"{label}: unknown seed requirement {seed_requirement!r}")
+    elif seed_requirement == "pinned" and seed != REQUIRED_HASH_SEED:
         problems.append(
             f"{label}: PYTHONHASHSEED is {seed!r}, must be {REQUIRED_HASH_SEED!r}")
+    elif seed_requirement == "unpinned" and seed != UNSET_HASH_SEED:
+        # Inverted on purpose. C2 exists to observe what an unpinned seed does; a
+        # cycle that ran pinned answers a different question and must not be counted
+        # as having answered this one.
+        problems.append(
+            f"{label}: PYTHONHASHSEED is {seed!r}, but this run requires it to be "
+            f"unset — a pinned seed observes nothing about unpinned behaviour")
 
     expected_source = "hardcoded_relative" if label == "reference" else "env"
     if meta.get("store_source") not in (None, expected_source):
@@ -629,17 +694,30 @@ def verify_prior_contract(prior: dict | None, cand_meta: dict | None,
             if then.get(field) != now.get(field):
                 problems.append(f"{label}: {note} since the contract gate ran "
                                 f"({field})")
-        pinned = label == "candidate"
+        req = "pinned" if label == "candidate" else "any"
         problems.extend(f"prior contract {m}" for m in
-                        validate_meta(then, label, require_pinned_seed=pinned))
+                        validate_meta(then, label, seed_requirement=req))
 
     return problems
 
 
 # --- controlled two-arm comparison (spec 001 section 5.2A / D2b) --------------
 
-def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None
-                             ) -> list[str]:
+#: Digest pairs that must agree between the arms, by campaign. The anchor differs
+#: because the environments are built differently: D2b resolves a lockfile, S2 copies
+#: a package tree and anchors on that tree's manifest. Hard-coding `lockfile_sha256`
+#: here made every S2 run fail with "lockfile digest missing on candidate", which is
+#: true and irrelevant — there is no lockfile to be missing.
+ARM_MATCH_DIGESTS = (("name_version_set_sha256", "installed name==version set"),
+                     ("lockfile_sha256", "lockfile"))
+S2_ARM_MATCH_DIGESTS = (("name_version_set_sha256", "installed name==version set"),
+                        ("clone_manifest_sha256", "package-tree clone manifest"),
+                        ("package_tree_digest", "package-tree digest"),
+                        ("runtime_distribution_digest", "runtime distribution digest"))
+
+
+def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None,
+                             digests=ARM_MATCH_DIGESTS) -> list[str]:
     """Do both arms run the *same* interpreter and the *same* installed packages?
 
     Variant 5.2A exists to remove the variables 5.2B could not. The 2026-08-07
@@ -666,8 +744,7 @@ def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None
 
     ca = (cand_meta.get("dependencies") or {})
     ra = (ref_meta.get("dependencies") or {})
-    for field, note in (("distributions_sha256", "installed distribution set"),
-                        ("lockfile_sha256", "lockfile")):
+    for field, note in digests:
         a, b = ca.get(field), ra.get(field)
         if a is None or b is None:
             problems.append(f"{note} digest missing on "
@@ -678,7 +755,7 @@ def verify_environment_match(cand_meta: dict | None, ref_meta: dict | None
     # When the digests disagree, name the packages. "The sets differ" is not
     # actionable; "fsspec 2026.7.0 vs 2025.10.0" is.
     if ca.get("distributions") and ra.get("distributions") and \
-            ca.get("distributions_sha256") != ra.get("distributions_sha256"):
+            ca.get("name_version_set_sha256") != ra.get("name_version_set_sha256"):
         am = {x.split("==")[0]: x.split("==")[1] for x in ca["distributions"] if "==" in x}
         bm = {x.split("==")[0]: x.split("==")[1] for x in ra["distributions"] if "==" in x}
         for name in sorted(set(am) | set(bm)):
@@ -737,13 +814,35 @@ ENVIRONMENT_RECORD_FIELDS = (
     ("env_python", "env_python", "package environment path"),
     ("python_version", "env_python_version", "interpreter version"),
     ("lockfile_sha256", "dependencies.lockfile_sha256", "lockfile digest"),
-    ("distributions_sha256", "dependencies.distributions_sha256",
-     "installed distribution set digest"),
+    ("name_version_set_sha256", "dependencies.name_version_set_sha256",
+     "installed name==version set digest"),
+)
+
+# The S2 modes have no lockfile: the arms do not run an environment this campaign
+# resolved and installed, they run a read-only copy of production's package tree.
+# The anchor is therefore the clone's own manifest digest — the artefact that says
+# *this* clone is the one that was built and verified against production — and it
+# occupies exactly the position `lockfile_sha256` holds under D2b. Nothing else
+# changes: the interpreter, its version and the distribution set are still compared
+# field by field, because two arms agreeing with each other has never been evidence
+# that they agree with the environment the run intended.
+S2_ENVIRONMENT_RECORD_FIELDS = (
+    ("env_python", "env_python", "package environment interpreter"),
+    ("python_version", "env_python_version", "interpreter version"),
+    ("clone_manifest_sha256", "dependencies.clone_manifest_sha256",
+     "package-tree clone manifest digest"),
+    ("name_version_set_sha256", "dependencies.name_version_set_sha256",
+     "installed name==version set digest"),
+    ("package_tree_digest", "dependencies.package_tree_digest",
+     "package-tree digest (240 dist-info directories, s4.1.2b)"),
+    ("runtime_distribution_digest", "dependencies.runtime_distribution_digest",
+     "runtime distribution digest (236 with METADATA, s4.1.2b)"),
 )
 
 
 def verify_environment_record(env_record: dict | None, meta: dict | None,
-                              label: str) -> list[str]:
+                              label: str,
+                              fields=ENVIRONMENT_RECORD_FIELDS) -> list[str]:
     """Is this arm running the environment the run built, or merely *an* environment?
 
     `verify_environment_match` only asks whether the two arms agree with each other.
@@ -761,7 +860,10 @@ def verify_environment_record(env_record: dict | None, meta: dict | None,
         return [f"{label}: metadata missing, cannot compare to the environment record"]
 
     problems = []
-    for env_key, meta_path, note in ENVIRONMENT_RECORD_FIELDS:
+    if not fields:
+        return [f"{label}: no fields to compare — an empty field list would pass "
+                f"every environment, including the wrong one"]
+    for env_key, meta_path, note in fields:
         want = env_record.get(env_key)
         got: object = meta
         for part in meta_path.split("."):
@@ -774,3 +876,47 @@ def verify_environment_record(env_record: dict | None, meta: dict | None,
             problems.append(f"{label}: {note} is not the environment this run built "
                             f"({meta_path}={got!r}, record {env_key}={want!r})")
     return problems
+
+
+def compare_arms(cand_meta: dict | None, ref_meta: dict | None,
+                 env_record: dict | None, *, s2: bool,
+                 seed_policy: str = "both-pinned") -> list[str]:
+    """Everything that must hold before the two arms may be compared at all.
+
+    This lives here, and not inline in the runner, because it was inline in the
+    runner. The S2 branch computed the right field list into a variable and then
+    called `verify_environment_record` without it — a dead assignment that reads
+    exactly like the working code — so every S2 run failed on the D2b field list
+    complaining about a lockfile the campaign does not have. Nothing offline caught
+    it: the pieces each had tests, and the composition had none because it was not a
+    function.
+
+    Now it is one, and the test drives it with the artefacts a real run produced.
+
+    The four questions, in order:
+
+    1. is each record internally well-formed (`validate_meta`);
+    2. do the two arms agree with each other (`verify_environment_match`);
+    3. is what they agree on the environment this run actually prepared
+       (`verify_environment_record`) — two arms sharing a stale venv, or a clone
+       nobody verified, agree perfectly and prove nothing;
+    `seed_policy` decides what each arm's `PYTHONHASHSEED` must be. It is not
+    inferred from the variant: 5.2B was written for a pinned candidate against live
+    production, and C2 is a third arrangement — both arms ours, both unpinned — that
+    a two-valued rule reported as a defect. See `SEED_POLICIES`.
+
+    4. do they build `zarr_group_paths` from the same string
+       (`verify_group_path_agreement`) — different strings hash differently, so the
+       set iterates in a different order for any query spanning more than one group,
+       which is exactly how C16 and C16-csv differed in the 2026-08-08 run.
+    """
+    fields = S2_ENVIRONMENT_RECORD_FIELDS if s2 else ENVIRONMENT_RECORD_FIELDS
+    digests = S2_ARM_MATCH_DIGESTS if s2 else ARM_MATCH_DIGESTS
+    return (validate_meta(cand_meta, "candidate",
+                          seed_requirement=seed_requirement_for(seed_policy, "candidate"))
+            + validate_meta(ref_meta, "reference",
+                            seed_requirement=seed_requirement_for(seed_policy, "reference"))
+            + verify_environment_match(cand_meta, ref_meta, digests=digests)
+            + verify_environment_record(env_record, cand_meta, "candidate", fields)
+            + verify_environment_record(env_record, ref_meta, "reference", fields)
+            + verify_group_path_agreement(cand_meta, ref_meta))

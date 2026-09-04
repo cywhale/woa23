@@ -18,6 +18,19 @@
 
 * API endpoint: api/woa23/csv and all the same parameters as api/woa23
 
+#### Row order (API 1.1.0)
+
+For successful responses containing multiple rows, rows are ordered by
+(time_period numeric ascending, depth ascending, lat ascending, lon ascending).
+Within a fixed time_period and depth block, latitude is the outer dimension and
+longitude varies fastest. JSON field order and CSV header order are unchanged.
+
+This applies to both the JSON and the CSV endpoint. It is a **row-order contract
+addition, not an endpoint migration**: the endpoint URLs, request parameters and
+response fields are unchanged, so no client needs to move to a new URL. Before 1.1.0 no
+row order was stated, and the order a client received could differ between server
+restarts.
+
 #### Demo 
 
 [![Demo_by_WOA23_API](https://github.com/cywhale/woa23/blob/main/figs/salinity_profile_woa23_annual01.png?raw=true)](https://github.com/cywhale/woa23/blob/main/figs/salinity_profile_woa23_annual01.png)<br/>

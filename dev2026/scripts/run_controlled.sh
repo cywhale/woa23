@@ -27,44 +27,972 @@ export PATH="$HOME/.local/bin:$PATH"
 
 EXPECT_HOST=odb24
 EXPECT_PY=3.11.4
-PROD_DIR=$HOME/python/woa23
-PROD_PY=$HOME/.pyenv/versions/py311/bin/python3.11
-STORE=$PROD_DIR/data
-# A new directory per attempt. The script refuses to reuse one, and the
-# 2026-08-08 attempts left ~/woa23-s1-controlled and -r2 behind, each holding the
-# reference copy its run was scored against — evidence, not scratch space.
+
+# WHERE PRODUCTION IS, AND WHO IS ASKING, ARE TWO DIFFERENT QUESTIONS.
+#
+# These used to be derived from $HOME unconditionally, which only ever worked because the
+# runner had always been started by the account that owns production. C1 now runs as
+# `woa23c1ro` (uid 994) -- an account with a read-only ACL on the store and a home of its
+# own -- and under `HOME=/home/woa23c1ro` the derived paths resolve to
+# `/home/woa23c1ro/python/woa23/data` and a non-existent interpreter. The runner would
+# hunt for production in the wrong place and fail at its own preflight, for a reason that
+# looks nothing like the one it actually had.
+#
+# The derivation survives ONLY as a default, because the existing suites use $HOME to
+# stand up a fake production tree and testing a fixture is a legitimate use of "whose
+# home is this". What does NOT survive is the derivation being trusted when the run is
+# explicitly asserting a different identity: see the guard after argument parsing, which
+# REFUSES the derived default whenever WOA23_EXPECT_UID is set. Then --prod-dir and
+# --store are mandatory and must be said out loud.
+PROD_DIR_DEFAULT="$HOME/python/woa23"
+PROD_PY_DEFAULT="$HOME/.pyenv/versions/py311/bin/python3.11"
+PROD_SITE_DEFAULT="$HOME/.pyenv/versions/py311/lib/python3.11/site-packages"
+PROD_DIR="$PROD_DIR_DEFAULT"
+PROD_PY="$PROD_PY_DEFAULT"
+PROD_DIR_EXPLICIT=no
+STORE_EXPLICIT=no
+PROD_PY_EXPLICIT=no
+PROD_SITE_EXPLICIT=no
+PROD_PIDS=""
+PROD_PIDS_EXPLICIT=no
+PROD_IDENT_BEFORE=""
+
+# TWO INTERPRETERS, AND THEY ARE NOT THE SAME QUESTION.
+#
+#   --python-binary  the interpreter the ARMS run. What is under test.
+#   --prod-python    production's interpreter, used for the existence/version check and
+#                    for `uv sync --python` when building the HARNESS venv.
+#
+# In practice they name the same file today, and that is exactly why conflating them is
+# tempting and wrong: a run that wanted them different could not say so, and the harness
+# environment is not the environment under test.
+#
+# c1k is why --prod-python exists. Spec 017 made --prod-dir and --store explicit and left
+# PROD_PY deriving from $HOME with no flag at all, so a run as woa23c1ro looked for
+# production's interpreter under /home/woa23c1ro and refused -- after a full clean
+# preflight, for a reason unrelated to anything it had just verified.
+STORE=""                       # defaults to $PROD_DIR/data once arguments are parsed
+# Production's live site-packages. Never read by an arm and never on any import
+# path this script builds — it is here only so it can be named as forbidden. The
+# S2 arms must not reach it, and `__editable__.src-1.0.pth` inside it points at
+# $PROD_DIR/src, so an arm that found this directory would import production's
+# live source as well as its packages.
+PROD_SITE="$PROD_SITE_DEFAULT"
+# Defaults. Every one of these can be overridden on the command line, because a
+# staging run has to be able to sit beside the evidence of previous runs rather than
+# on top of it — but the defaults stay pointed at the last authorised D2b
+# configuration so an argument-free invocation does not silently mean something new.
 WORK=$HOME/woa23-s1-controlled-r6
-REF_DIR=$WORK/reference
-CAND_DIR=$WORK/candidate
 CAND_PORT=8051
 REF_PORT=8052
-SCHED_PORT=18787           # see D2b-request.md §4: 8787 is NOT free — it is
-                           # production's own scheduler dashboard, same PID as 8786
+SCHED_PORT=18787           # 8787 is NOT free: it is production's own scheduler
+                           # dashboard, same PID as 8786. See D2b-request.md §4.
 PROD_PORT=8050
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN=$HERE/run
-VENV=$HERE/.venv
+# Ports this script must never bind, whatever it is told. 8050 is production's API,
+# 8786 its shared Dask scheduler, 8787 that scheduler's dashboard. Preflight would
+# refuse a held port anyway, but a typo that aims at production deserves a refusal
+# that names the reason rather than one that says "already in use".
+FORBIDDEN_PORTS="8050 8786 8787"
 
-# --cleanup-only: bring the six processes up, record and verify their trees, collect
-# provenance, then stop. No contract gate, no latency gate, no pilot — so it produces
-# no measurement of any kind and none may be quoted from it. It exists to make a
-# cleanup failure reproducible and self-describing, nothing more.
+# Modes. Exactly one may be selected.
+#
+#   default          contract gate, then latency gate, then the sample-size pilot
+#   --contract-only  contract gate, then stop. No latency, no pilot, no rung
+#                    escalation — so it produces no timing of any kind and nothing
+#                    may be quoted from it as performance.
+#   --cleanup-only   neither gate. Brings the processes up, records and verifies
+#                    their trees, collects provenance, stops. For reproducing a
+#                    cleanup failure.
+#
+# and two S2 modes, which are a different experiment entirely. D2b asks whether the
+# candidate matches the reference in one environment this campaign built. C1 and C2
+# ask whether that still holds in *production's* environment — production's Python
+# binary, a read-only clone of production's package tree, and no `dev2026/.venv`
+# anywhere on the arms' import path.
+#
+#   --c1             production binary + package clone, PYTHONHASHSEED=0, 5.2C
+#                    byte-exact over 64 cases. One cycle. No latency, no pilot.
+#   --c2-cycle       one cycle of C2: the same clone, production's own worker count
+#                    read at run time, and **no** PYTHONHASHSEED, compared 5.2B
+#                    semantically. Three independent cycles make a C2 result, and
+#                    scripts/run_c2_cycles.sh is what runs them — this flag is one
+#                    cycle and never draws the conclusion.
 CLEANUP_ONLY=no
-for arg in "$@"; do
-  case "$arg" in
-    --cleanup-only) CLEANUP_ONLY=yes ;;
-    *) echo "unknown argument: $arg (only --cleanup-only is accepted)" >&2; exit 2 ;;
+# Reusing a port an earlier run bound is allowed; calling a reused port new is not.
+# The flag is the difference between the two, and it is recorded in the evidence.
+ALLOW_REUSED_PORTS=no
+CONTRACT_ONLY=no
+C1_MODE=no
+C2_CYCLE=no
+D1_MODE=no
+S2PERF_MODE=no
+PY_BINARY=""
+PKG_CLONE=""
+CLONE_MANIFEST=""
+WORKERS=""
+LABEL=""
+
+# ------------------------------------------------- production-path resolution, testable
+# These are PURE FUNCTIONS, defined before anything in this script has a side effect, so
+# the offline suite can source this file with WOA23_RUNNER_LIB_ONLY=1 and call them with
+# real inputs.
+#
+# That indirection is not decoration. This script refuses to run anywhere but odb24
+# (`EXPECT_HOST`), so the shared-environment stage where PROD_PY is used cannot be reached
+# on a developer machine through the CLI at all -- and c1k proved that testing only the
+# early CLI refusal is not enough: the defect sat past every check a laptop could run.
+# Extracting the decisions makes them exercisable with real values instead.
+
+# The problem with a mandatory-flag set, or nothing. Under an asserted UID the run is not
+# production's owner, so a $HOME-derived default names the RUNNING account's home and is
+# refused rather than corrected.
+prod_paths_mandatory_problem() {   # <expect_uid> <dir_explicit> <store_explicit> <py_explicit>
+  local uid="$1" d="$2" st="$3" py="$4"
+  [ -n "$uid" ] || return 0
+  if [ "$d" != yes ] || [ "$st" != yes ] || [ "$py" != yes ]; then
+    printf 'WOA23_EXPECT_UID is set: --prod-dir, --store and --prod-python are mandatory'
+  fi
+}
+
+# --prod-pids is mandatory under an asserted UID for a different reason than the paths:
+# not that $HOME would mislead, but that the information is PRIVILEGED. `ss -p` shows a
+# socket's owner only to that owner or to root, so a non-owner cannot discover which
+# process holds production's port and must be told.
+prod_pids_mandatory_problem() {    # <expect_uid> <pids_explicit> <pids>
+  local uid="$1" explicit="$2" pids="$3" n
+  [ -n "$uid" ] || return 0
+  if [ "$explicit" != yes ]; then
+    printf 'WOA23_EXPECT_UID is set: --prod-pids is mandatory (a non-owner cannot learn a socket'"'"'s owner)'
+    return 0
+  fi
+  n="$(printf '%s' "$pids" | wc -w | tr -d ' ')"
+  [ "$n" -gt 0 ] || printf -- '--prod-pids is empty'
+}
+
+# production's live site-packages, derived from the interpreter's own prefix. Named only so
+# the arms can be FORBIDDEN to reach it -- left deriving from $HOME under a foreign HOME it
+# would forbid a path that does not exist, and the guard would pass while protecting
+# nothing. A weakened check that reports success is worse than an absent one.
+derive_prod_site() {               # <prod_py>  -> prints path, or rc 2
+  local py="$1"
+  case "$py" in
+    */bin/*) printf '%s/lib/python3.11/site-packages' "${py%/bin/*}" ;;
+    *) return 2 ;;
+  esac
+}
+
+# An explicitly named interpreter must be absolute: a relative path resolves against
+# whatever cwd this script happens to have, which is not a property anyone declared.
+prod_python_absolute_problem() {   # <prod_py> <explicit>  -> prints problem, or nothing
+  local py="$1" explicit="$2"
+  [ "$explicit" = yes ] || return 0
+  case "$py" in
+    /*) ;;
+    *) printf -- '--prod-python must be an absolute path: %s' "$py" ;;
+  esac
+}
+
+# ------------------------------------------------- WHY a path cannot be used, precisely
+# ABSENT and UNREACHABLE are different findings and this project has already reported the
+# wrong one. During c1m a probe running as uid 994 said /home/odbadmin/.local/bin/uv was
+# absent. It was not: it is mode 755 and plainly there. `.local` is mode 700 with no ACL
+# for that account, so the account cannot traverse into it -- and `[ -e ]` is false for a
+# file behind a directory you cannot enter. "Not visible to me" was reported as "not on
+# the host", which sends the next reader to install something that already exists.
+#
+# So the ancestors are walked from the root and the FIRST thing that actually stops us is
+# named:
+#
+#   present            the path exists and this account can reach it
+#   notexec            reachable, exists, but is not executable
+#   absent:<path>      an ancestor (or the target) genuinely does not exist
+#   unreachable:<dir>  an ancestor exists but this account cannot traverse it
+path_state() {              # path_state <absolute-path>
+  local target="$1" walked="" comp
+  case "$target" in
+    /*) ;;
+    *) printf 'notabsolute'; return ;;
+  esac
+  # Ancestors first, outermost to innermost, so the report names the FIRST thing that
+  # actually stops us rather than whichever was tested first. Empty components are
+  # skipped: splitting "/a/b" on "/" yields a leading empty field, and accumulating it
+  # produced paths like "//home/odbadmin" in the error message. A refusal that prints a
+  # path the reader cannot copy is a refusal they will distrust.
+  local IFS=/
+  # shellcheck disable=SC2086
+  set -- $target
+  unset IFS
+  while [ "$#" -gt 1 ]; do
+    comp="$1"; shift
+    [ -n "$comp" ] || continue
+    walked="$walked/$comp"
+    if [ ! -e "$walked" ]; then printf 'absent:%s' "$walked"; return; fi
+    if [ ! -x "$walked" ]; then printf 'unreachable:%s' "$walked"; return; fi
+  done
+  if [ ! -e "$target" ]; then printf 'absent:%s' "$target"; return; fi
+  if [ ! -x "$target" ]; then printf 'notexec'; return; fi
+  printf 'present'
+}
+
+# A required tool, resolved and described. Returns 0 with the absolute path on stdout, or
+# non-zero having said precisely what is wrong -- never "absent" for something that is
+# merely out of reach.
+require_tool() {            # require_tool <name> [candidate...]
+  local name="$1"; shift
+  local resolved st c
+  if resolved="$(command -v "$name" 2>/dev/null)" && [ -n "$resolved" ]; then
+    case "$resolved" in
+      /*) ;;
+      *) resolved="$(cd "$(dirname "$resolved")" 2>/dev/null && pwd)/$(basename "$resolved")" ;;
+    esac
+    printf '%s' "$resolved"
+    return 0
+  fi
+  {
+    echo "REQUIRED TOOL NOT USABLE: $name"
+    echo "  PATH searched: $PATH"
+    if [ "$#" -gt 0 ]; then
+      echo "  known locations, and what actually stops this account reaching each:"
+      for c in "$@"; do
+        st="$(path_state "$c")"
+        case "$st" in
+          present)        printf '    %-44s EXISTS and is executable, but is not on PATH\n' "$c" ;;
+          notexec)        printf '    %-44s exists and is reachable, but is NOT EXECUTABLE\n' "$c" ;;
+          absent:*)       printf '    %-44s absent (nothing at %s)\n' "$c" "${st#absent:}" ;;
+          unreachable:*)  printf '    %-44s UNREACHABLE -- cannot traverse %s\n' "$c" "${st#unreachable:}"
+                          printf '    %-44s   (this is NOT the same as absent: the file may well be there)\n' "" ;;
+          notabsolute)    printf '    %-44s not an absolute path\n' "$c" ;;
+        esac
+      done
+    fi
+  } >&2
+  return 1
+}
+
+# Sourcing with WOA23_RUNNER_LIB_ONLY=1 defines the functions above and stops, so the
+# suite can call them without this script running.
+if [ "${WOA23_RUNNER_LIB_ONLY:-}" = 1 ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: run_controlled.sh [--contract-only | --cleanup-only | --c1 | --c2-cycle
+                          | --d1 | --s2-perf]
+                         [--workdir PATH]
+                         [--candidate-port N] [--reference-port N]
+                         [--scheduler-port N]
+                         [--prod-dir PATH] [--store PATH]
+                         [--prod-python PATH] [--prod-site PATH]
+                         [--python-binary PATH] [--package-clone PATH]
+                         [--clone-manifest PATH] [--workers N] [--label TAG]
+
+  --contract-only   run the 5.2A contract gate and stop. Skips the latency gate,
+                    the noise pilot and any rung escalation.
+  --cleanup-only    start the services, verify their trees, stop. No gates.
+  --c1              S2 C1: production binary + package clone, PYTHONHASHSEED=0,
+                    5.2A byte-exact, 64 cases. No latency, no pilot.
+  --c2-cycle        S2 C2, ONE cycle: same clone, production's measured worker
+                    count, no PYTHONHASHSEED, 5.2B semantic. Three cycles make a
+                    result; run scripts/run_c2_cycles.sh, not this flag directly.
+  --workdir PATH    staging root. Must not already exist.
+  --prod-dir PATH   production's install root. NOT derived from $HOME, because the
+                    account running C1 is not the account that owns production.
+                    Default: /home/odbadmin/python/woa23
+  --store PATH      the production Zarr store, read-only. Default: <prod-dir>/data
+  --prod-python PATH  production's interpreter: the existence/version check and
+                    `uv sync --python` for the HARNESS venv. NOT the arms'
+                    interpreter -- that is --python-binary, and the two are kept
+                    separate on purpose. Default: $HOME/.pyenv/versions/py311/...
+  --prod-site PATH  production's live site-packages, named only so it can be
+                    FORBIDDEN to the arms. Default: derived from --prod-python
+                    when that is given, else from $HOME.
+  --prod-pids "N N" production's process ids, space separated. MANDATORY under
+                    WOA23_EXPECT_UID, because `ss -p` reveals a socket's owner
+                    only to that owner or to root, so a non-owner cannot learn
+                    which process holds 8050. They must be READ FRESH in the
+                    run's own preflight -- never copied from an earlier report
+                    or written into a script -- and each is validated against
+                    /proc for starttime, cmdline and exe before any arm starts.
+  --*-port N        loopback port. 8050, 8786 and 8787 are refused.
+
+ S2 modes only (and refused outside them):
+  --python-binary PATH   production's interpreter. No default, and no fallback to
+                         dev2026/.venv: an S2 run that quietly used the campaign's
+                         own venv would answer a question nobody asked.
+  --package-clone PATH   root of the read-only production package-tree clone.
+  --clone-manifest PATH  the manifest written when that clone was built and
+                         verified — the FOUR-COLUMN file, normally
+                         <clone-root>/clone.manifest, whose columns are
+                         relpath, sha256, size, mtime_ns. NOT the clone root's
+                         SHA256SUMS, which lists the digests of the manifest
+                         files and cannot verify a tree. Its digest anchors the
+                         environment record.
+  --expected-workers N   ASSERT production's worker count. This does NOT set the
+                         arms' worker count — that is read from production's own
+                         argv at run time. If the two disagree the run aborts
+                         before any arm starts. C2 only.
+  --label TAG            prefixes this invocation's result files. C2 cycles need
+                         it so three cycles do not overwrite each other.
+
+ Authorisation, by mode. Each is separate and none implies another:
+  default/--contract-only/--cleanup-only   WOA23_D2B_GRANTED=yes
+  --c1                                     WOA23_S2_C1_GRANTED=yes
+  --c2-cycle                               WOA23_S2_C2_GRANTED=yes
+  --d1                                     WOA23_D1_GRANTED=yes
+  --s2-perf                                WOA23_S2PERF_GRANTED=yes
+USAGE
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --contract-only) CONTRACT_ONLY=yes; shift ;;
+    --cleanup-only)  CLEANUP_ONLY=yes; shift ;;
+    --c1)            C1_MODE=yes; shift ;;
+    --c2-cycle)      C2_CYCLE=yes; shift ;;
+    --d1)            D1_MODE=yes; shift ;;
+    --s2-perf)       S2PERF_MODE=yes; shift ;;
+    --workdir)         [ $# -ge 2 ] || { echo "--workdir needs a value" >&2; exit 2; }
+                       WORK="$2"; shift 2 ;;
+    --candidate-port)  [ $# -ge 2 ] || { echo "--candidate-port needs a value" >&2; exit 2; }
+                       CAND_PORT="$2"; shift 2 ;;
+    --reference-port)  [ $# -ge 2 ] || { echo "--reference-port needs a value" >&2; exit 2; }
+                       REF_PORT="$2"; shift 2 ;;
+    --scheduler-port)  [ $# -ge 2 ] || { echo "--scheduler-port needs a value" >&2; exit 2; }
+                       SCHED_PORT="$2"; shift 2 ;;
+    --python-binary)   [ $# -ge 2 ] || { echo "--python-binary needs a value" >&2; exit 2; }
+                       PY_BINARY="$2"; shift 2 ;;
+    --prod-python)     [ $# -ge 2 ] || { echo "--prod-python needs a value" >&2; exit 2; }
+                       PROD_PY="$2"; PROD_PY_EXPLICIT=yes; shift 2 ;;
+    --prod-site)       [ $# -ge 2 ] || { echo "--prod-site needs a value" >&2; exit 2; }
+                       PROD_SITE="$2"; PROD_SITE_EXPLICIT=yes; shift 2 ;;
+    --prod-pids)       [ $# -ge 2 ] || { echo "--prod-pids needs a value" >&2; exit 2; }
+                       PROD_PIDS="$2"; PROD_PIDS_EXPLICIT=yes; shift 2 ;;
+    --prod-dir)        [ $# -ge 2 ] || { echo "--prod-dir needs a value" >&2; exit 2; }
+                       PROD_DIR="$2"; PROD_DIR_EXPLICIT=yes; shift 2 ;;
+    --store)           [ $# -ge 2 ] || { echo "--store needs a value" >&2; exit 2; }
+                       STORE="$2"; STORE_EXPLICIT=yes; shift 2 ;;
+    --package-clone)   [ $# -ge 2 ] || { echo "--package-clone needs a value" >&2; exit 2; }
+                       PKG_CLONE="$2"; shift 2 ;;
+    --clone-manifest)  [ $# -ge 2 ] || { echo "--clone-manifest needs a value" >&2; exit 2; }
+                       CLONE_MANIFEST="$2"; shift 2 ;;
+    --expected-workers) [ $# -ge 2 ] || { echo "--expected-workers needs a value" >&2; exit 2; }
+                       WORKERS="$2"; shift 2 ;;
+    --workers)         echo "--workers was renamed --expected-workers. It never set" >&2
+                       echo "  the arms' worker count: that is read from production at" >&2
+                       echo "  run time and cannot be chosen. The old name invited the" >&2
+                       echo "  opposite reading, so it is refused rather than aliased." >&2
+                       exit 2 ;;
+    --allow-reused-ports) ALLOW_REUSED_PORTS=yes; shift ;;
+    --label)           [ $# -ge 2 ] || { echo "--label needs a value" >&2; exit 2; }
+                       LABEL="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
 done
 
-if [ "${WOA23_D2B_GRANTED:-}" != "yes" ]; then
-  echo "D2b authorisation not stated. This starts FOUR services on a production" >&2
-  echo "host — a Dask scheduler, a Dask worker, an unmodified reference API and the" >&2
-  echo "candidate API — which is SIX OS processes, because each of the two APIs is" >&2
-  echo "a gunicorn arbiter plus the worker it forks." >&2
-  echo "Re-run with WOA23_D2B_GRANTED=yes once it is granted. D2a does not imply D2b." >&2
+# ------------------------------------------------------------ mode selection ---
+# Exactly one mode, checked by counting rather than by a chain of pairwise tests:
+# four flags make six pairs, and the version of this that enumerated them missed
+# three of the six.
+selected=""
+[ "$CONTRACT_ONLY" = yes ] && selected="$selected --contract-only"
+[ "$CLEANUP_ONLY"  = yes ] && selected="$selected --cleanup-only"
+[ "$C1_MODE"       = yes ] && selected="$selected --c1"
+[ "$C2_CYCLE"      = yes ] && selected="$selected --c2-cycle"
+[ "$D1_MODE"       = yes ] && selected="$selected --d1"
+[ "$S2PERF_MODE"   = yes ] && selected="$selected --s2-perf"
+n_modes=$(printf '%s' "$selected" | wc -w | tr -d ' ')
+if [ "$n_modes" -gt 1 ]; then
+  echo "the modes are mutually exclusive; got:$selected" >&2
+  echo "  Each runs a different set of gates against a different environment, so" >&2
+  echo "  combining them would produce a result belonging to neither." >&2
+  exit 2
+fi
+
+S2_MODE=none
+[ "$C1_MODE" = yes ] && S2_MODE=c1
+[ "$C2_CYCLE" = yes ] && S2_MODE=c2
+# D1 runs the same isolated environment as C1 — production's binary, the read-only
+# clone, one worker per arm, PYTHONHASHSEED pinned — and then does something else
+# with it. It is an S2 mode for every purpose except which gate runs.
+[ "$D1_MODE" = yes ] && S2_MODE=d1
+# S2 performance: the C1 environment — production binary, read-only clone, one
+# worker, seed pinned — running the contract gate and then the latency gate in
+# ONE execution. Spec 007 section 5.4.1: the formal ceiling is 496 per arm.
+[ "$S2PERF_MODE" = yes ] && S2_MODE=s2perf
+
+# The S2 arguments exist only for the S2 modes. Accepting them elsewhere would
+# silently ignore them, and "the flag was accepted" reads as "the flag took
+# effect" to everyone including the person who wrote it.
+if [ "$S2_MODE" = none ]; then
+  for pair in "--python-binary:$PY_BINARY" "--package-clone:$PKG_CLONE" \
+              "--clone-manifest:$CLONE_MANIFEST" "--expected-workers:$WORKERS"; do
+    [ -n "${pair#*:}" ] || continue
+    echo "${pair%%:*} means nothing without --c1, --c2-cycle or --d1, and this run" >&2
+    echo "  have ignored it. Refusing rather than accepting a flag that has no effect." >&2
+    exit 2
+  done
+else
+  # No default and no fallback. dev2026/.venv is this campaign's own environment;
+  # an S2 run that reached for it because a flag was missing would produce a D2b
+  # result wearing a C1 label, and it would pass.
+# A RUN THAT ASSERTS A DIFFERENT IDENTITY MUST SAY WHERE PRODUCTION IS.
+#
+# WOA23_EXPECT_UID being set means "every process in this run belongs to uid N" -- which
+# is only ever used when the run is NOT the account that owns production. In that case a
+# $HOME-derived default is not merely wrong, it is confidently wrong: it names a path
+# under the running account's own home and would be refused, or worse found, for reasons
+# unrelated to production. So the derivation is refused rather than corrected.
+if [ -n "${WOA23_EXPECT_UID:-}" ]; then
+  # PROD_SITE is production's LIVE site-packages, named only so the arms can be
+  # forbidden to reach it. Left deriving from $HOME it would, under a foreign HOME,
+  # forbid a path that does not exist -- the guard would still "pass" while protecting
+  # nothing. A weakened check that reports success is worse than an absent one, so it
+  # follows --prod-python's prefix unless given explicitly.
+  if [ "$PROD_SITE_EXPLICIT" != yes ] && [ "$PROD_PY_EXPLICIT" = yes ]; then
+    if ! PROD_SITE="$(derive_prod_site "$PROD_PY")"; then
+      echo "REFUSING: cannot derive production's site-packages from --prod-python" >&2
+      echo "  ($PROD_PY): it has no /bin/ component. Pass --prod-site explicitly." >&2
+      exit 2
+    fi
+  fi
+
+  pids_problem="$(prod_pids_mandatory_problem "${WOA23_EXPECT_UID:-}" \
+                    "$PROD_PIDS_EXPLICIT" "$PROD_PIDS")"
+  if [ -n "$pids_problem" ]; then
+    echo "REFUSING: $pids_problem" >&2
+    echo "  \`ss -p\` prints a socket's owner only to that owner or to root, so this" >&2
+    echo "  account cannot discover which process holds production's port. Supply the" >&2
+    echo "  pids, read FRESH in this run's preflight, and they will be validated against" >&2
+    echo "  /proc for starttime, cmdline and exe before any arm starts:" >&2
+    echo "    --prod-pids \"4296 5040 5041\"" >&2
+    exit 2
+  fi
+
+  if [ -n "$(prod_paths_mandatory_problem "${WOA23_EXPECT_UID:-}" \
+              "$PROD_DIR_EXPLICIT" "$STORE_EXPLICIT" "$PROD_PY_EXPLICIT")" ]; then
+    echo "REFUSING: WOA23_EXPECT_UID is set, so this run is not the account that owns" >&2
+    echo "  production -- and --prod-dir, --store and --prod-python are then mandatory." >&2
+    echo "  Falling back to \$HOME would name a path under the RUNNING account's home" >&2
+    echo "  ($HOME), not production's. Say where production is." >&2
+    echo "    --prod-dir     /home/odbadmin/python/woa23" >&2
+    echo "    --store        /home/odbadmin/python/woa23/data" >&2
+    echo "    --prod-python  /home/odbadmin/.pyenv/versions/py311/bin/python3.11" >&2
+    exit 2
+  fi
+fi
+
+  [ -n "$PY_BINARY" ] || {
+    echo "$S2_MODE requires --python-binary: the arms run production's interpreter," >&2
+    echo "  and there is deliberately no fallback to dev2026/.venv." >&2
+    exit 2; }
+  [ -n "$PKG_CLONE" ] || {
+    echo "$S2_MODE requires --package-clone: the arms import from the read-only" >&2
+    echo "  production package-tree clone, and there is deliberately no fallback to" >&2
+    echo "  dev2026/.venv." >&2
+    exit 2; }
+  [ -n "$CLONE_MANIFEST" ] || {
+    echo "$S2_MODE requires --clone-manifest: without the manifest digest nothing" >&2
+    echo "  distinguishes the verified clone from a directory with the right name." >&2
+    exit 2; }
+  for pair in "--python-binary:$PY_BINARY" "--package-clone:$PKG_CLONE" \
+              "--clone-manifest:$CLONE_MANIFEST"; do
+    case "${pair#*:}" in
+      /*) ;;
+      *) echo "${pair%%:*} must be an absolute path; got '${pair#*:}'. A relative" >&2
+         echo "  path would resolve against whichever directory this was invoked from." >&2
+         exit 2 ;;
+    esac
+  done
+fi
+if [ "$C1_MODE" = yes ] && [ -n "$WORKERS" ]; then
+  echo "--expected-workers is C2 only. C1 pins one worker per arm so that a byte-exact" >&2
+  echo "  comparison has one process producing each side's bytes." >&2
+  exit 2
+fi
+if [ "$S2PERF_MODE" = yes ] && [ -n "$WORKERS" ]; then
+  echo "--expected-workers is C2 only. The performance mode pins one worker per arm" >&2
+  echo "  by design (spec 007 section 6.2): a two-worker arm spreads requests over" >&2
+  echo "  processes with different cache state, and the median becomes a median over" >&2
+  echo "  an allocation policy. It makes NO claim about production's worker count." >&2
+  exit 2
+fi
+if [ "$D1_MODE" = yes ] && [ -n "$WORKERS" ]; then
+  echo "--expected-workers is C2 only. D1 pins one worker per arm for the same reason" >&2
+  echo "  C1 does: the two arms' bytes are compared, and one process per side is what" >&2
+  echo "  makes that comparison about the code rather than about which worker answered." >&2
+  exit 2
+fi
+if [ -n "$WORKERS" ]; then
+  case "$WORKERS" in
+    ''|*[!0-9]*) echo "--expected-workers '$WORKERS' is not a number" >&2; exit 2 ;;
+  esac
+  if [ "$WORKERS" -lt 1 ] || [ "$WORKERS" -gt 16 ]; then
+    echo "--expected-workers $WORKERS is outside 1-16" >&2; exit 2
+  fi
+fi
+if [ -n "$LABEL" ]; then
+  case "$LABEL" in
+    *[!A-Za-z0-9_-]*|"")
+      echo "--label '$LABEL' may contain only letters, digits, '-' and '_': it" >&2
+      echo "  becomes part of a filename." >&2
+      exit 2 ;;
+  esac
+fi
+[ -n "$LABEL" ] || LABEL=$([ "$S2_MODE" = none ] && echo d2b || echo "$S2_MODE")
+
+# Validate the ports before anything else looks at the host. A port that is not a
+# port, or is production's, is a configuration error and not something to discover
+# halfway through preflight.
+for spec in "candidate:$CAND_PORT" "reference:$REF_PORT" "scheduler:$SCHED_PORT"; do
+  name="${spec%%:*}"; val="${spec#*:}"
+  case "$val" in
+    ''|*[!0-9]*) echo "$name port '$val' is not a number" >&2; exit 2 ;;
+  esac
+  if [ "$val" -lt 1024 ] || [ "$val" -gt 65535 ]; then
+    echo "$name port $val is outside 1024-65535" >&2; exit 2
+  fi
+  for bad in $FORBIDDEN_PORTS; do
+    [ "$val" = "$bad" ] || continue
+    echo "$name port $val belongs to production and will never be bound by this" >&2
+    echo "  script: 8050 is its API, 8786 its shared Dask scheduler, 8787 that" >&2
+    echo "  scheduler's dashboard." >&2
+    exit 2
+  done
+done
+if [ "$CAND_PORT" = "$REF_PORT" ] || [ "$CAND_PORT" = "$SCHED_PORT" ] \
+   || [ "$REF_PORT" = "$SCHED_PORT" ]; then
+  echo "the three ports must differ (candidate $CAND_PORT, reference $REF_PORT," >&2
+  echo "  scheduler $SCHED_PORT)" >&2
+  exit 2
+fi
+
+# The staging root must not be production, nor inside it.
+#
+# Normalised lexically, in shell, rather than with `realpath -m`: that flag is GNU
+# coreutils only. VM24 has it; the machine the offline tests run on does not, and a
+# check that cannot be exercised where it is written is not much of a check. The path
+# normally does not exist yet, so nothing here may touch the filesystem.
+_abspath() {                # lexical absolute path; the target need not exist
+  local p="$1" out="" part oldIFS="$IFS"
+  case "$p" in /*) ;; *) p="$PWD/$p" ;; esac
+  IFS=/
+  for part in $p; do
+    case "$part" in
+      ''|.) ;;
+      ..)   out="${out%/*}" ;;
+      *)    out="$out/$part" ;;
+    esac
+  done
+  IFS="$oldIFS"
+  printf '%s' "${out:-/}"
+}
+# Lexical normalisation alone is not a boundary check: it cannot see a symlink.
+# `--workdir /tmp/link/new-run`, where `/tmp/link` points at ~/python/woa23, is
+# lexically nowhere near production and physically inside it.
+#
+# So the deepest ancestor that actually exists is resolved physically — `cd -P`
+# plus `pwd -P`, which is POSIX and needs no GNU realpath — and the components
+# that do not exist yet are appended to that. Both sides are resolved the same
+# way, so a symlinked production directory is caught as well as a symlinked
+# workdir.
+#
+# Fails closed. A path whose ancestor is a symlink that does not resolve to a
+# directory — dangling, or pointing at a file — cannot be shown to be outside
+# production, so it is refused rather than assumed safe.
+_resolve_existing_parent() {    # physical path; the leaf need not exist
+  local p tail="" base phys
+  p="$(_abspath "$1")"
+  while [ ! -d "$p" ]; do
+    if [ -L "$p" ]; then
+      return 2                  # a symlink we cannot follow to a directory
+    fi
+    [ "$p" = "/" ] && break
+    base="${p##*/}"
+    tail="${base}${tail:+/$tail}"
+    p="${p%/*}"
+    [ -z "$p" ] && p=/
+  done
+  phys="$(cd -P "$p" 2>/dev/null && pwd -P)" || return 1
+  printf '%s' "$phys${tail:+/$tail}"
+}
+
+# --store defaults to <prod-dir>/data, resolved only now so that --prod-dir given after
+# --store on the command line still composes correctly. An explicit --store wins.
+[ -n "$STORE" ] || STORE="$PROD_DIR/data"
+
+WORK_ABS="$(_resolve_existing_parent "$WORK")" || {
+  echo "cannot resolve $WORK to a physical path: its nearest existing ancestor is" >&2
+  echo "  a symlink that does not lead to a directory, so it cannot be shown to be" >&2
+  echo "  outside production. Refusing." >&2
+  exit 2; }
+PROD_ABS="$(_resolve_existing_parent "$PROD_DIR")" || {
+  echo "cannot resolve the production directory $PROD_DIR to a physical path" >&2
+  exit 2; }
+case "$WORK_ABS" in
+  "$PROD_ABS"|"$PROD_ABS"/*)
+    echo "workdir $WORK_ABS is inside production ($PROD_ABS). This script never" >&2
+    echo "  writes there." >&2
+    exit 2 ;;
+esac
+WORK="$WORK_ABS"
+
+# THE STORE IS READ-ONLY AND IS NOT THIS RUN'S SCRATCH SPACE. A workdir inside the store
+# would put logs, journals and caches in production's data directory, and the store guard
+# would never fire because nothing would be "writing to production" by name -- it would
+# simply be where the run happened to live. Both containments are refused, in both
+# directions, on RESOLVED paths so a symlink cannot smuggle one inside the other.
+STORE_ABS="$(_resolve_existing_parent "$STORE")" || {
+  echo "cannot resolve the store $STORE to a physical path" >&2
+  exit 2; }
+case "$WORK_ABS" in
+  "$STORE_ABS"|"$STORE_ABS"/*)
+    echo "REFUSING: the workdir $WORK_ABS is inside the production store $STORE_ABS." >&2
+    echo "  The store is read-only and is never this run's scratch space: logs," >&2
+    echo "  journals, caches and temporary files belong under the running account's" >&2
+    echo "  own home." >&2
+    exit 2 ;;
+esac
+case "$STORE_ABS" in
+  "$WORK_ABS"|"$WORK_ABS"/*)
+    echo "REFUSING: the store $STORE_ABS resolves inside the workdir $WORK_ABS." >&2
+    echo "  A store the run can also write is not a read-only store." >&2
+    exit 2 ;;
+esac
+STORE="$STORE_ABS"
+REF_DIR=$WORK/reference
+CAND_DIR=$WORK/candidate
+
+# The clone is subject to the same boundary as the workdir, resolved the same way.
+# A `--package-clone` that resolved into production would put production's live
+# site-packages on the arms' PYTHONPATH — with `__editable__.src-1.0.pth` inside it
+# pointing at $PROD_DIR/src — which is precisely the arrangement C1 exists to avoid,
+# and it would be reported as isolation.
+if [ "$S2_MODE" != none ]; then
+  CLONE_ABS="$(_resolve_existing_parent "$PKG_CLONE")" || {
+    echo "cannot resolve --package-clone $PKG_CLONE to a physical path" >&2
+    exit 2; }
+  PROD_SITE_ABS="$(_resolve_existing_parent "$PROD_SITE")" || PROD_SITE_ABS="$PROD_SITE"
+  for bad in "$PROD_ABS" "$PROD_SITE_ABS"; do
+    case "$CLONE_ABS" in
+      "$bad"|"$bad"/*)
+        echo "--package-clone $CLONE_ABS is inside production ($bad). The clone is" >&2
+        echo "  a copy of production's packages, never production's own directory:" >&2
+        echo "  pointing at the original would make every arm import from the live" >&2
+        echo "  tree and report it as isolated." >&2
+        exit 2 ;;
+    esac
+  done
+  case "$CLONE_ABS" in
+    "$WORK"|"$WORK"/*)
+      echo "--package-clone $CLONE_ABS is inside the workdir $WORK, which this run" >&2
+      echo "  creates and writes to. The clone must be immutable and outside it." >&2
+      exit 2 ;;
+  esac
+  PKG_CLONE="$CLONE_ABS"
+
+  # The three artefacts are checked here — with the arguments, not with the host
+  # prerequisites — because each one describes something named on the command line
+  # and a wrong name is a configuration error. Putting them after the host gate had
+  # a second cost: on any machine that is not VM24 the wrong-host exit came first,
+  # so none of these refusals could be exercised offline at all. They are read-only
+  # stats; nothing is created and nothing is started.
+  [ -e "$PY_BINARY" ] || {
+    echo "--python-binary $PY_BINARY does not exist" >&2; exit 2; }
+  [ -x "$PY_BINARY" ] && [ -f "$PY_BINARY" ] || {
+    echo "--python-binary $PY_BINARY is not an executable file" >&2; exit 2; }
+  [ -e "$PKG_CLONE" ] || {
+    echo "--package-clone $PKG_CLONE does not exist" >&2; exit 2; }
+  [ -d "$PKG_CLONE" ] || {
+    echo "--package-clone $PKG_CLONE is not a directory" >&2; exit 2; }
+  [ -f "$CLONE_MANIFEST" ] || {
+    echo "--clone-manifest $CLONE_MANIFEST is not a readable file" >&2; exit 2; }
+  # Shape, not just existence, and checked HERE rather than at the integrity stage.
+  #
+  # The clone root holds both `clone.manifest` and a `SHA256SUMS` that lists the
+  # digests of the manifest FILES. The names are similar, SHA256SUMS is the
+  # conventional name for this kind of check everywhere else, and this script's own
+  # usage example pointed at a path that does not exist — so the wrong one was
+  # passed, and the run bootstrapped a venv and built an environment record before
+  # anything looked at the file. A one-line check costs nothing and fails in the
+  # same second the argument is read.
+  manifest_nf="$(head -1 "$CLONE_MANIFEST" | awk -F'\t' '{print NF}')"
+  if [ "${manifest_nf:-0}" != 4 ]; then
+    echo "--clone-manifest $CLONE_MANIFEST is not a package manifest: its first" >&2
+    echo "  line has ${manifest_nf:-0} tab-separated field(s), not 4." >&2
+    if head -1 "$CLONE_MANIFEST" | grep -qE '^[0-9a-fA-F]{64} [ *]'; then
+      echo "  It is a sha256sum-style digest list. That file records digests of a" >&2
+      echo "  few named FILES; it does not list the clone's contents, so nothing" >&2
+      echo "  in it can verify a tree." >&2
+    fi
+    echo "  The manifest is the four-column file written when the clone was built" >&2
+    echo "  — normally <clone-root>/clone.manifest — with the columns" >&2
+    echo "  relpath, sha256, size, mtime_ns." >&2
+    exit 2
+  fi
+  # The clone is meant to be immutable. If this run can write to it, it is not the
+  # artefact that was built and verified — and a stray .pyc would change it.
+  #
+  # This tests the clone's own inode and that is all it tests. It is NOT sufficient
+  # for the immutability claim: unlinking a file needs write permission on its
+  # DIRECTORY, so a writable parent lets the whole tree be renamed and replaced under
+  # the same path while every mode inside it stays 555/444. The ancestor chain and
+  # the manifest are checked by bench.clone_integrity, below and again before each
+  # arm starts.
+  if [ -w "$PKG_CLONE" ]; then
+    echo "--package-clone $PKG_CLONE is writable by this user. The clone is meant to" >&2
+    echo "  be read-only; a writable one may already have been modified, and this run" >&2
+    echo "  could modify it further." >&2
+    exit 2
+  fi
+fi
+
+# The repository this script lives in — the source of the candidate's api/, the venv,
+# and the run-state directory. Distinct from $WORK, which is the staging root.
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Per label, so three C2 cycles cannot overwrite one another. Every per-service file
+# — pid, starttime, tree, uncertain, diag and crucially the service LOGS — is named
+# `<service>.<ext>` inside this directory, so with a shared directory cycle 2 would
+# silently replace cycle 1's evidence. The logs are the part that survives a
+# successful cleanup, and therefore the part that would have been lost.
+RUN=$HERE/run/$LABEL
+VENV=$HERE/.venv
+
+# Printed before the authorisation and host gates, not after: a refused invocation
+# should still record what it was asked to do, and reading the resolved values back
+# is how a wrong flag gets noticed.
+case "$S2_MODE" in
+  c1) MODE_NAME="C1 (S2: production binary + package clone, 5.2C canonical row order)" ;;
+  c2) MODE_NAME="C2 cycle (S2: production binary + package clone, 5.2B semantic)" ;;
+  d1) MODE_NAME="D1 characterization (S2 environment; observes the real store, judges nothing)" ;;
+  s2perf) MODE_NAME="S2 single-worker steady-state request-path performance validation" ;;
+  *)  MODE_NAME="$([ "$CLEANUP_ONLY" = yes ] && echo cleanup-only \
+                   || { [ "$CONTRACT_ONLY" = yes ] && echo contract-only \
+                        || echo "full (contract + latency + pilot)"; })" ;;
+esac
+# ------------------------------------------------- the arms' worker count ---
+# One number, and — more importantly — where it came from.
+#
+# **What sets it: the mode.** The `-w` on each launch line below is the setting.
+# `EXPECT_ARM_WORKERS` is what the provenance step ASSERTS against each arm's own
+# /proc/<pid>/cmdline, and it sets nothing — the same distinction `--expected-workers`
+# already carries for C2, where confusing the two would have let the harness choose
+# a worker count and then report it as production's.
+#
+# **C2 MEASURES it** from production's own argv at run time, because C2 exists to
+# compare the arms at production's worker count. **Every other mode FIXES it at
+# one**, because a byte comparison wants one process producing each side's bytes.
+#
+# D1 is in the second group. That is a design choice about this run, not a finding
+# about production, and the record says so rather than leaving the two readings of
+# "workers: 1" to look alike.
+if [ "$S2_MODE" = c2 ]; then
+  EXPECT_ARM_WORKERS=""                 # set from the measurement, further down
+  ARM_WORKERS_SOURCE="measured from production's argv at run time"
+else
+  EXPECT_ARM_WORKERS=1
+  ARM_WORKERS_SOURCE="fixed at 1 by this mode; NOT derived from production"
+fi
+
+echo "== configuration for this invocation =="
+echo "   mode      : $MODE_NAME"
+echo "   workdir   : $WORK"
+echo "   candidate : 127.0.0.1:$CAND_PORT"
+echo "   reference : 127.0.0.1:$REF_PORT"
+echo "   scheduler : 127.0.0.1:$SCHED_PORT"
+echo "   repository: $HERE"
+echo "   label     : $LABEL"
+if [ "$S2_MODE" != none ]; then
+  echo "   binary    : $PY_BINARY"
+  echo "   clone     : $PKG_CLONE"
+  echo "   manifest  : $CLONE_MANIFEST"
+  # Said per mode, because "read from production at run time" is true of C2 and of
+  # nothing else. C1 and D1 fix the count at one, and printing C2's sentence over
+  # their runs is exactly how a reader comes to think D1 validated a production
+  # worker count.
+  if [ "$S2_MODE" = c2 ]; then
+    echo "   workers   : read from production at run time"
+    echo "               expected (asserted): ${WORKERS:-<none asserted>}"
+  else
+    echo "   workers   : 1 per arm, fixed by this mode"
+    echo "               NOT measured from production, and no claim is made about"
+    echo "               behaviour at production's worker count — that is C2's."
+  fi
+  echo "   seed      : $([ "$S2_MODE" = c1 ] && echo "PYTHONHASHSEED=0 (pinned)" \
+                          || echo "unset — this is what C2 observes")"
+  echo "   arms run from the clone. dev2026/.venv is the harness's environment and"
+  echo "   is not on any arm's import path."
+fi
+
+# ------------------------------------------------------------ request budget ---
+# Stated before anything is sent, and stated as a ceiling rather than an estimate.
+# Every number below is the maximum this invocation can issue: process readiness
+# gives up at 30 attempts per arm, the data probe is exactly two per arm, and the
+# contract gate is one request per case per arm.
+BUDGET_READY=30            # per arm, worst case; normally 1-3
+BUDGET_PROBE=2             # per arm, counterbalanced
+BUDGET_CONTRACT=64         # per arm, one per case
+# The S2 performance mode's ceiling, spelled out as spec 007 section 5.4.1 does.
+# One authorisable number, for ONE execution that carries both gates: splitting them
+# would be a different execution identity with its own label, ports and budget.
+BUDGET_WARMUP=16           # symmetric_warmup_pass: 8 cases x 2 arm orders
+BUDGET_LATENCY=176         # 8 cases x (1 leading sample + 21 measured)
+# The noise pilot samples EVERY case, not one: `bench/noise_pilot.py` loops over
+# `select(None, include_heavy=True)` and takes `--warm 25` plus the same 1 discarded
+# leading request for each. 8 x 26, not 26. The first version of this constant read
+# the per-case figure as the per-arm one and understated the pilot by 182 requests
+# per arm; the pilot is the largest stage in this mode, not the smallest.
+BUDGET_PILOT=208           # noise pilot: 8 cases x (25 measured + 1 discarded)
+
+
+# D1 issues no contract case. Two numbers, named apart, because one of them was
+# named `BUDGET_D1` and read as the per-arm countable total when it is not:
+#
+#   the CHARACTERIZATION requests  four cases, plus one anchor recovery probe after
+#                                  each of them = 8
+#   the COUNTABLE requests         those eight PLUS the two store-readiness probes
+#                                  every mode issues = 10 per arm
+#
+# The countable figure is the one spec 005 section 8 states and the one a report
+# must use. Process readiness is on top of it and is NOT counted, so the run's total
+# is a range: 22 to 80 (spec 005 section 8.2).
+BUDGET_D1_CHARACTERIZATION=8
+case "$S2_MODE:$CLEANUP_ONLY:$CONTRACT_ONLY" in
+  s2perf:*)         BUDGET_ARM=$((BUDGET_READY + BUDGET_PROBE + BUDGET_CONTRACT \
+                                  + BUDGET_WARMUP + BUDGET_LATENCY + BUDGET_PILOT)) ;;
+  d1:*)             BUDGET_ARM=$((BUDGET_READY + BUDGET_PROBE + BUDGET_D1_CHARACTERIZATION)) ;;
+  c1:*|c2:*)        BUDGET_ARM=$((BUDGET_READY + BUDGET_PROBE + BUDGET_CONTRACT)) ;;
+  none:yes:*)       BUDGET_ARM=$BUDGET_READY ;;
+  none:*:yes)       BUDGET_ARM=$((BUDGET_READY + BUDGET_PROBE + BUDGET_CONTRACT)) ;;
+  *)                BUDGET_ARM=480 ;;      # plus the latency gate and the pilot
+esac
+echo "== request budget (ceilings, not estimates) =="
+if [ "$S2_MODE" = s2perf ]; then
+  echo "   FORMAL CEILING (spec 007 s5.4.1): $BUDGET_ARM per arm, $((BUDGET_ARM * 2)) total"
+  echo "              = readiness <= $BUDGET_READY  (counted, failures included)"
+  echo "              + store probe $BUDGET_PROBE"
+  echo "              + contract $BUDGET_CONTRACT   (same execution: a latency figure for"
+  echo "                                an arm not shown to answer correctly is not"
+  echo "                                worth having)"
+  echo "              + symmetric warm-up $BUDGET_WARMUP  (8 cases x 2 orders, discarded)"
+  echo "              + latency $BUDGET_LATENCY        (8 cases x (1 leading + 21 measured))"
+  echo "              + noise pilot $BUDGET_PILOT      (8 cases x (25 + 1 discarded) — it"
+  echo "                                samples every case, not one)"
+  echo "   Bootstrap resampling issues NO HTTP and is not in any count."
+  echo "   APPROVED ENGINEERING THRESHOLD: 0.05 (PI, 2026-08-19)."
+  echo "              Approved as a DECISION threshold. It is not a statistical"
+  echo "              property of the data, not a confidence guarantee, and not an SLA."
+  echo "   production 127.0.0.1:$PROD_PORT : 0 requests."
+elif [ "$S2_MODE" = d1 ]; then
+  D1_COUNTABLE_PER_ARM=$((BUDGET_PROBE + BUDGET_D1_CHARACTERIZATION))
+  D1_TOTAL_MIN=$((D1_COUNTABLE_PER_ARM * 2 + 2))
+  echo "   COUNTABLE per arm : $D1_COUNTABLE_PER_ARM"
+  echo "              = $BUDGET_PROBE store-readiness probes"
+  echo "              + 4 characterization cases"
+  echo "              + 4 anchor recovery probes (ONE AFTER EACH CASE, not one per pass)"
+  echo "   countable both arms: $((D1_COUNTABLE_PER_ARM * 2))"
+  echo "   readiness : <= $BUDGET_READY per arm and NOT COUNTED by this harness"
+  echo "   TOTAL     : a RANGE, and must be reported as one — $D1_TOTAL_MIN to $((BUDGET_ARM * 2))"
+  echo "               ($D1_TOTAL_MIN = the countable $((D1_COUNTABLE_PER_ARM * 2)) plus the"
+  echo "                minimum one readiness probe per arm; $((BUDGET_ARM * 2)) = the ceiling"
+  echo "                with readiness at its maximum of $BUDGET_READY per arm)"
+  echo "   per arm ceiling   : <= $BUDGET_ARM"
+  echo "   production 127.0.0.1:$PROD_PORT : 0 requests."
+else
+echo "   per arm  : <= $BUDGET_ARM  (readiness <= $BUDGET_READY, probe $BUDGET_PROBE,"
+echo "              contract $([ "$CLEANUP_ONLY" = yes ] && echo 0 || echo "$BUDGET_CONTRACT")\
+$([ "$S2_MODE" = none ] && [ "$CLEANUP_ONLY" = no ] && [ "$CONTRACT_ONLY" = no ] \
+  && echo ", latency + pilot" || echo ""))"
+echo "   total    : <= $((BUDGET_ARM * 2)) across both arms"
+echo "   production 127.0.0.1:$PROD_PORT : 0 requests. Nothing in this script"
+echo "              addresses it; it is read from /proc and ss only."
+fi
+if [ "$S2_MODE" = c2 ]; then
+  echo "   one cycle. Three cycles make a C2 result: <= $((BUDGET_ARM * 3)) per arm,"
+  echo "              <= $((BUDGET_ARM * 6)) in total, and three full start/stop"
+  echo "              cleanups — one per cycle, each verified before the next starts."
+fi
+
+# ------------------------------------------------------------- authorisation ---
+# One grant per experiment, and no grant implies another. D2b authorised six
+# processes in an environment this campaign built and can rebuild; C1 and C2 run
+# production's own interpreter against a copy of production's packages, which is a
+# different set of risks and was granted, if at all, in a different message.
+#
+# Everything above this point is argument handling, and everything below it starts
+# something: nothing has been created, no port has been touched and no request has
+# been sent when this gate is reached.
+case "$S2_MODE" in
+  c1) GRANT_VAR=WOA23_S2_C1_GRANTED; GRANT_VAL="${WOA23_S2_C1_GRANTED:-}" ;;
+  c2) GRANT_VAR=WOA23_S2_C2_GRANTED; GRANT_VAL="${WOA23_S2_C2_GRANTED:-}" ;;
+  d1) GRANT_VAR=WOA23_D1_GRANTED;    GRANT_VAL="${WOA23_D1_GRANTED:-}" ;;
+  s2perf) GRANT_VAR=WOA23_S2PERF_GRANTED; GRANT_VAL="${WOA23_S2PERF_GRANTED:-}" ;;
+  *)  GRANT_VAR=WOA23_D2B_GRANTED;   GRANT_VAL="${WOA23_D2B_GRANTED:-}" ;;
+esac
+if [ "$GRANT_VAL" != "yes" ]; then
+  if [ "$S2_MODE" = none ]; then
+    echo "D2b authorisation not stated. This starts FOUR services on a production" >&2
+    echo "host — a Dask scheduler, a Dask worker, an unmodified reference API and the" >&2
+    echo "candidate API — which is SIX OS processes, because each of the two APIs is" >&2
+    echo "a gunicorn arbiter plus the worker it forks." >&2
+    echo "Re-run with WOA23_D2B_GRANTED=yes once it is granted. D2a does not imply D2b." >&2
+  else
+    echo "S2 $S2_MODE authorisation not stated. This starts four services from" >&2
+    echo "production's own Python binary against a read-only clone of production's" >&2
+    echo "package tree — a different experiment from D2b, on a different environment." >&2
+    if [ "${WOA23_D2B_GRANTED:-}" = "yes" ]; then
+      echo "WOA23_D2B_GRANTED is set and does NOT authorise this: it was granted for" >&2
+      echo "  the controlled venv, not for production's interpreter and packages." >&2
+    fi
+    # Naming the neighbouring grant matters most here: C1, C2 and D1 share an
+    # environment and differ in what they send, so "a grant is set" is exactly the
+    # wrong thing for anyone to reason from.
+    if [ "$S2_MODE" = d1 ]; then
+      for v in WOA23_S2_C1_GRANTED WOA23_S2_C2_GRANTED; do
+        eval "set_val=\${$v:-}"
+        [ "$set_val" = "yes" ] || continue
+        echo "$v is set and does NOT authorise this: D1 issues requests no contract" >&2
+        echo "  case covers, against the real store, and was granted — if at all — in" >&2
+        echo "  its own message." >&2
+      done
+    fi
+    echo "Re-run with $GRANT_VAR=yes once that specific authorisation is granted." >&2
+  fi
   exit 3
 fi
+# The converse, so a stray export cannot widen what was granted: an S2 grant does
+# not authorise a D2b run either.
+if [ "$S2_MODE" = none ]; then
+  for v in WOA23_S2_C1_GRANTED WOA23_S2_C2_GRANTED WOA23_D1_GRANTED; do
+    eval "set_val=\${$v:-}"
+    [ "$set_val" = "yes" ] || continue
+    echo "$v is set but this is a D2b mode, which it does not authorise." >&2
+    echo "  Select the mode the grant was issued for, or unset the variable." >&2
+    exit 3
+  done
+fi
+if [ "$S2_MODE" = c1 ] && [ "${WOA23_S2_C2_GRANTED:-}" = "yes" ]; then
+  echo "WOA23_S2_C2_GRANTED is set during a C1 run. C1 and C2 are separately" >&2
+  echo "  authorised; unset the one this run is not." >&2
+  exit 3
+fi
+if [ "$S2_MODE" = d1 ]; then
+  for v in WOA23_S2_C1_GRANTED WOA23_S2_C2_GRANTED; do
+    eval "set_val=\${$v:-}"
+    [ "$set_val" = "yes" ] || continue
+    echo "$v is set during a D1 run and does NOT authorise it. D1 issues requests" >&2
+    echo "  no contract case covers, against the real store, and was granted — if at" >&2
+    echo "  all — in its own message." >&2
+    exit 3
+  done
+fi
+if [ "$S2_MODE" = c2 ] && [ "${WOA23_S2_C1_GRANTED:-}" = "yes" ]; then
+  echo "WOA23_S2_C1_GRANTED is set during a C2 cycle. C1 and C2 are separately" >&2
+  echo "  authorised; unset the one this run is not." >&2
+  exit 3
+fi
+
 if [ "$(hostname -s)" != "$EXPECT_HOST" ]; then
   echo "this runs on $EXPECT_HOST only; hostname is $(hostname -s)" >&2
   exit 4
@@ -73,7 +1001,18 @@ fi
 env -C / true 2>/dev/null || { echo "env -C is required (coreutils >= 8.28)" >&2; exit 4; }
 
 cd "$HERE"
+
+# What this label already owns, checked BEFORE the directory it would own is
+# created. Doing it after `mkdir -p "$RUN"` would mean the guard found a directory
+# this invocation had just made and refused itself.
+# shellcheck source=lib_labels.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_labels.sh"
+refuse_label_collision "$HERE" "$LABEL" \
+  "Choose a label this staging directory has not used, or a fresh staging export." \
+  || exit 4
+
 mkdir -p "$RUN" results
+
 
 # Port-state helpers. Shared with run_candidate.sh and covered offline by
 # scripts/test_ports.sh, which exercises them against a captured `ss` fixture under
@@ -85,12 +1024,76 @@ mkdir -p "$RUN" results
 # single PID. Covered offline by scripts/test_procs.sh.
 # shellcheck source=lib_procs.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib_procs.sh"
+# Request counting, and the two loops that issue requests. Both are sourced rather
+# than inline so `scripts/test_requests.sh` can drive them against a server that
+# answers late, hangs and refuses — the retry loop decides how many requests this run
+# sends to the host, and it had no test while it lived in this file.
+# shellcheck source=lib_requests.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_requests.sh"
+# shellcheck source=lib_http.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_http.sh"
+# D1's post-measurement finalisation, and the classification a failure there gets.
+# shellcheck source=lib_d1_finalize.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_d1_finalize.sh"
+# The S2 performance stage chain — contract, warm-up, latency, pilot, counting,
+# finalisation — as functions, so scripts/test_s2perf_driver.sh runs the real order
+# and the real stop-on-failure clauses rather than a reconstruction of them.
+# shellcheck source=lib_s2perf.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib_s2perf.sh"
+
+# ----------------------------------------------------------- shutdown budget ---
+# Asserted here, before a single process exists, and recorded as an artefact of the
+# run rather than left as a property of the source.
+#
+# The distinction matters. `STOP_WAIT_SECS` has a default of 20, but a default is
+# not what a run used: an exported value in the invoking shell overrides it
+# silently, and 20 in the source would still be reported while 5 was in force. C2
+# cycle 1 failed on exactly this relationship being wrong, so the run states both
+# numbers, states where each came from, and refuses to start if the inequality does
+# not hold.
+echo "== shutdown budget (asserted before anything starts) =="
+echo "   arms --graceful-timeout : ${ARM_GRACEFUL_TIMEOUT}s — one definition in"
+echo "                             lib_procs.sh for all six launch lines"
+echo "   STOP_WAIT_SECS          : ${STOP_WAIT_SECS}s (source: $STOP_WAIT_SOURCE)"
+assert_shutdown_budget || exit 4
+echo "   ${STOP_WAIT_SECS} > ${ARM_GRACEFUL_TIMEOUT}: cleanup outlasts the arms' own budget"
+printf '{\n  "kind": "shutdown_budget",\n  "label": "%s",\n  "arm_graceful_timeout": %s,\n  "stop_wait_secs": %s,\n  "stop_wait_source": "%s",\n  "holds": true\n}\n' \
+  "$LABEL" "$ARM_GRACEFUL_TIMEOUT" "$STOP_WAIT_SECS" "$STOP_WAIT_SOURCE" \
+  > "results/${LABEL}_shutdown_budget.json"
 
 # ============================================================== environment ===
 # Built and verified before any process starts. A run that discovers its
 # environment is wrong after the servers are up has already perturbed the host for
 # nothing.
+# ------------------------------------------- REQUIRED TOOLS, BEFORE ANY PREPARATION ---
+# Checked here: before the interpreter is probed, before `uv sync`, before a staging
+# directory or a venv exists. c1m discovered `uv` missing at the moment of invoking it,
+# which is late enough that the run had already announced it was preparing an environment.
+#
+# `command -v` alone answers "can I run it", not "why not", and that distinction cost a
+# report: c1m first said uv was ABSENT when it is present at /home/odbadmin/.local/bin/uv
+# and merely behind a directory uid 994 cannot traverse. require_tool names the candidates
+# and classifies each one, so the refusal says which of those two it is.
+echo "== required tools, verified before any staging or venv preparation =="
+UV_BIN=""
+if ! UV_BIN="$(require_tool uv \
+      "$HOME/.local/bin/uv" /usr/local/bin/uv /usr/bin/uv /opt/uv/bin/uv)"; then
+  echo "" >&2
+  echo "  C1 builds its harness venv with uv, so this stops here — before any staging" >&2
+  echo "  directory, venv or service exists. Nothing has been created." >&2
+  exit 4
+fi
+echo "  uv       : $UV_BIN"
+echo -n "  version  : "; "$UV_BIN" --version 2>&1 | head -1
+echo -n "  sha256   : "; sha256sum "$UV_BIN" 2>/dev/null | cut -d' ' -f1 \
+                         || shasum -a 256 "$UV_BIN" | cut -d' ' -f1
+echo
+
 echo "== preparing the shared environment =="
+# Absolute, when named explicitly: a relative path would resolve against whatever cwd
+# this script happens to run from, which is not a property anyone declared.
+prod_py_problem="$(prod_python_absolute_problem "$PROD_PY" "$PROD_PY_EXPLICIT")"
+[ -z "$prod_py_problem" ] || { echo "$prod_py_problem" >&2; exit 2; }
 [ -x "$PROD_PY" ] || { echo "production interpreter $PROD_PY not found" >&2; exit 1; }
 prod_py_version="$("$PROD_PY" --version 2>&1 | awk '{print $2}')"
 [ "$prod_py_version" = "$EXPECT_PY" ] || {
@@ -98,15 +1101,80 @@ prod_py_version="$("$PROD_PY" --version 2>&1 | awk '{print $2}')"
 
 # --locked, not --frozen: it fails if uv.lock does not match pyproject.toml, rather
 # than quietly installing from a lock that has drifted from its inputs.
+#
+# Under the S2 modes this venv is the *harness's* environment and nothing else. It
+# runs contract_diff, the provenance collectors and the checks; it is not on any
+# arm's import path and no package in it can reach an arm. The harness only issues
+# HTTP and compares bytes, so its own package set cannot change what an arm returns.
+# It is still built and pinned, because a harness that cannot run is a run that
+# produces nothing.
+#
+# **Two environments, recorded separately and never merged.** The authorisation to
+# run `uv sync` covers this one directory and nothing else:
+#
+#   harness bootstrap   dev2026/.venv, created or synced here by uv from uv.lock.
+#                       Runs contract_diff, the collectors and the checks. NOT on
+#                       any arm's import path.
+#   arm environment     under S2 the read-only package clone; under D2b the same
+#                       venv. This is what is under test, and uv never touches it —
+#                       the clone stays immutable and production is never written.
+#
+# They go to different artefacts, `<label>_harness_bootstrap.json` and
+# `<label>_environment.json`, so the digest of one cannot be read as the other's.
+echo "== harness bootstrap: dev2026/.venv — NOT the environment under test =="
 uv sync --locked --python "$PROD_PY" >&2
 
-uv run python - <<PYEOF || exit 1
-import hashlib, json, subprocess, sys
+if [ "$S2_MODE" = none ]; then
+  ARM_ENV_KIND="dev2026/.venv (the same environment as the harness)"
+else
+  ARM_ENV_KIND="the read-only production package clone at $PKG_CLONE"
+fi
+VENV_PY="$VENV/bin/python" LABEL="$LABEL" ARM_ENV_KIND="$ARM_ENV_KIND" \
+uv run python - <<'PYEOF' || exit 1
+import json, os, sys
+from pathlib import Path
 sys.path.insert(0, ".")
 from bench.collect_backend_meta import dependencies
 
-venv_py = "$VENV/bin/python"
-want_py = "$EXPECT_PY"
+label = os.environ["LABEL"]
+deps = dependencies(os.environ["VENV_PY"], Path("uv.lock"))
+if "distributions_error" in deps:
+    print(f"the harness venv is unusable: {deps['distributions_error']}",
+          file=sys.stderr)
+    raise SystemExit(1)
+json.dump({
+    "kind": "harness_bootstrap",
+    "what_this_is": ("the environment the measuring harness runs in, created by "
+                     "'uv sync --locked'. NOT the environment under test, and "
+                     "not "
+                     "on any arm's import path."),
+    "arm_environment_is": os.environ["ARM_ENV_KIND"],
+    "uv_authorisation_scope": ("uv may create or sync dev2026/.venv only. It never "
+                               "installs into the package clone or into production "
+                               "site-packages; both remain immutable."),
+    "env_python": os.environ["VENV_PY"],
+    "python_version": deps["python_version"],
+    "lockfile_sha256": deps["lockfile_sha256"],
+    "name_version_set_sha256": deps["name_version_set_sha256"],
+    "n_distributions": len(deps["distributions"]),
+    "distributions": deps["distributions"],
+}, open(f"results/{label}_harness_bootstrap.json", "w"), indent=2)
+print(f"  harness venv: python {deps['python_version']}, "
+      f"{len(deps['distributions'])} distributions, "
+      f"lock {deps['lockfile_sha256'][:16]}")
+print(f"  environment under test (separate): {os.environ['ARM_ENV_KIND']}")
+PYEOF
+
+if [ "$S2_MODE" = none ]; then
+VENV_PY="$VENV/bin/python" WANT_PY="$EXPECT_PY" LABEL="$LABEL" \
+uv run python - <<'PYEOF' || exit 1
+import hashlib, json, os, subprocess, sys
+sys.path.insert(0, ".")
+from bench.collect_backend_meta import dependencies
+
+venv_py = os.environ["VENV_PY"]
+want_py = os.environ["WANT_PY"]
+label = os.environ["LABEL"]
 
 deps = dependencies(venv_py, __import__("pathlib").Path("uv.lock"))
 if "distributions_error" in deps:
@@ -122,14 +1190,114 @@ json.dump({"kind": "controlled_environment",
            "python_version": deps["python_version"],
            "env_python": venv_py,
            "lockfile_sha256": deps["lockfile_sha256"],
-           "distributions_sha256": deps["distributions_sha256"],
+           "name_version_set_sha256": deps["name_version_set_sha256"],
+           "name_version_set_canonicalization": deps["name_version_set_canonicalization"],
            "n_distributions": len(deps["distributions"]),
            "distributions": deps["distributions"]},
-          open("results/d2b_environment.json", "w"), indent=2)
+          open(f"results/{label}_environment.json", "w"), indent=2)
 print(f"  python {deps['python_version']}  "
       f"{len(deps['distributions'])} distributions  "
-      f"lock {deps['lockfile_sha256'][:16]}  dists {deps['distributions_sha256'][:16]}")
+      f"lock {deps['lockfile_sha256'][:16]}  "
+      f"name==version set {deps['name_version_set_sha256'][:16]}")
 PYEOF
+else
+# The S2 environment record describes the *clone*, not the venv, and it is produced
+# by listing the clone exactly the way an arm will be started: production's binary,
+# `-S`, the clone on PYTHONPATH, no VIRTUAL_ENV and no PYTHONHOME. Listing it any
+# other way — including simply running the binary — reports production's own 236
+# distributions, which is the environment this run exists to stay out of.
+PY_BINARY="$PY_BINARY" PKG_CLONE="$PKG_CLONE" CLONE_MANIFEST="$CLONE_MANIFEST" \
+WANT_PY="$EXPECT_PY" S2_MODE="$S2_MODE" LABEL="$LABEL" \
+uv run python - <<'PYEOF' || exit 1
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, ".")
+from bench.collect_backend_meta import dependencies
+from bench.package_digests import CANONICALIZATION
+from bench.s2_provenance import launch_env
+
+binary = os.environ["PY_BINARY"]
+clone = os.environ["PKG_CLONE"]
+manifest = Path(os.environ["CLONE_MANIFEST"])
+want_py = os.environ["WANT_PY"]
+label = os.environ["LABEL"]
+
+# hashseed=None here regardless of mode: this listing is importlib.metadata, whose
+# answer does not depend on the hash seed, and pinning it would suggest it did.
+env = launch_env(clone, hashseed=None)
+deps = dependencies(binary, None, interp_args=("-S",), env=env,
+                    clone_manifest=manifest, clone_root=clone)
+if "distributions_error" in deps:
+    print(f"cannot list the clone's distributions: {deps['distributions_error']}",
+          file=sys.stderr)
+    raise SystemExit(1)
+if "clone_manifest_error" in deps:
+    print(f"clone manifest: {deps['clone_manifest_error']}", file=sys.stderr)
+    raise SystemExit(1)
+if "clone_digest_error" in deps:
+    print(f"clone dist-info digests: {deps['clone_digest_error']}", file=sys.stderr)
+    raise SystemExit(1)
+if deps["python_version"] != want_py:
+    print(f"the clone's interpreter reports {deps['python_version']}, expected "
+          f"{want_py}", file=sys.stderr)
+    raise SystemExit(1)
+if not deps["distributions"]:
+    print("the clone listed no distributions at all. A clone that imports nothing "
+          "would let both arms fail identically and be recorded as agreement.",
+          file=sys.stderr)
+    raise SystemExit(1)
+
+json.dump({"kind": "s2_package_clone_environment",
+           "mode": os.environ["S2_MODE"],
+           "python_version": deps["python_version"],
+           "env_python": binary,
+           "package_clone": clone,
+           # All three digests over the same tree, each with what it hashes, so
+           # none can be read as another. name_version_set_sha256 is the SUPERSEDED
+           # rev 1-5 canonicalization and is kept because it is the only one an
+           # arm's own interpreter can compute.
+           "clone_manifest": deps["clone_manifest"],
+           "clone_manifest_sha256": deps["clone_manifest_sha256"],
+           "package_tree_digest": deps["package_tree_digest"],
+           "runtime_distribution_digest": deps["runtime_distribution_digest"],
+           "n_dist_info_directories": deps["n_dist_info_directories"],
+           "n_runtime_distributions": deps["n_runtime_distributions"],
+           "name_version_set_sha256": deps["name_version_set_sha256"],
+           "digest_canonicalization": dict(CANONICALIZATION),
+           "n_distributions": len(deps["distributions"]),
+           "distributions": deps["distributions"],
+           "interpreter_args": deps["interpreter_args"],
+           "interpreter_env": deps["interpreter_env"],
+           "site_limitation": (
+               "-S: site.py does not run, so no .pth in the clone is processed. "
+               "This is isolated package-tree import correctness, not production's "
+               "site/.pth startup semantics (spec 002 section 4.3.1).")},
+          open(f"results/{label}_environment.json", "w"), indent=2)
+print(f"  clone python {deps['python_version']}  "
+      f"{len(deps['distributions'])} distributions")
+print(f"    clone_manifest_sha256       {deps['clone_manifest_sha256']}")
+print(f"    package_tree_digest         {deps['package_tree_digest']} "
+      f"({deps['n_dist_info_directories']} dist-info dirs)")
+print(f"    runtime_distribution_digest {deps['runtime_distribution_digest']} "
+      f"({deps['n_runtime_distributions']} with METADATA)")
+print(f"    name_version_set_sha256     {deps['name_version_set_sha256']} "
+      f"(SUPERSEDED rev 1-5 canonicalization; not the runtime digest)")
+print(f"  LIMITATION -S: site.py does not run; no .pth in the clone is processed.")
+PYEOF
+
+# ------------------------------------------------ is the clone still the clone? ---
+# Mode bits answer "could this be replaced?". Only re-hashing answers "is this still
+# the tree that was verified?". Both are asked, here and again immediately before
+# each arm is started, and a failure at either point stops the run.
+clone_integrity() {         # clone_integrity <stage>
+  uv run python -m bench.clone_integrity \
+    --clone "$PKG_CLONE" --manifest "$CLONE_MANIFEST" --stage "$1" \
+    --out "results/${LABEL}_clone_integrity_$1.json" \
+    || { echo "clone integrity failed at stage '$1'; stopping" >&2; return 1; }
+}
+echo "== clone integrity: ancestors and full manifest =="
+clone_integrity preflight || exit 1
+fi
 
 # ================================================================ preflight ===
 # Leftover state first: a free port is not an all-clear, because cleanup
@@ -142,8 +1310,15 @@ shopt -s nullglob
 # `.diag` too: it is the record of why a previous cleanup could not confirm itself,
 # and it is written into the same directory the next run would write over. Evidence
 # that a run can silently destroy is evidence that will be destroyed.
-leftovers=("$RUN"/*.pid "$RUN"/*.starttime "$RUN"/*.tree "$RUN"/*.uncertain \
-           "$RUN"/*.diag)
+# The whole run/ tree, not just this label's directory. State left by ANY previous
+# run or cycle is a reason to stop: per-label directories isolate evidence, and they
+# would also hide a neighbouring cycle's unfinished cleanup from a check that only
+# looked at its own. Logs are deliberately not in this list — they are the evidence a
+# clean cleanup leaves behind.
+leftovers=()
+while IFS= read -r _leftover; do leftovers+=("$_leftover"); done < <(
+  find "$HERE/run" -type f \( -name '*.pid' -o -name '*.starttime' -o -name '*.tree' \
+       -o -name '*.uncertain' -o -name '*.diag' \) 2>/dev/null | sort)
 if [ ${#leftovers[@]} -gt 0 ]; then
   echo "leftover run state from a previous invocation:" >&2
   printf '  %s\n' "${leftovers[@]}" >&2
@@ -151,6 +1326,47 @@ if [ ${#leftovers[@]} -gt 0 ]; then
   exit 1
 fi
 shopt -u nullglob
+
+# Two different questions, both asked, neither standing in for the other.
+#
+# "Is anything listening right now" is what port_held answers, from the host. Every
+# port a finished run used passes it, precisely because that run's cleanup worked —
+# so it cannot tell a fresh port from one c2c bound three cycles at.
+#
+# "Has this campaign used this port before" is the ledger, and it is the question a
+# report gets wrong: 18091/18092 were described as new when they were c2c's. Reusing
+# a port is allowed and is sometimes right; describing a reused one as new is not.
+# Both answers are recorded per port, so the run states it rather than the report.
+ports_json=""
+reused=""
+for pair in "candidate:$CAND_PORT" "reference:$REF_PORT" "scheduler:$SCHED_PORT"; do
+  role="${pair%%:*}"; port="${pair#*:}"
+  st=0; rows="$(port_previously_used "$port")" || st=$?
+  case "$st" in
+    0) first_use=false; reused="$reused $port"
+       echo "port $port ($role) has been used before by this campaign:" >&2
+       printf '  %s\n' "$rows" >&2 ;;
+    1) first_use=true ;;
+    *) echo "cannot read the used-port ledger ($PORTS_LEDGER). Refusing to start:" >&2
+       echo "  an unreadable ledger is not the same as an unused port." >&2
+       exit 4 ;;
+  esac
+  ports_json="$ports_json{\"role\":\"$role\",\"port\":$port,\"first_use\":$first_use},"
+done
+if [ -n "$reused" ] && [ "$ALLOW_REUSED_PORTS" != yes ]; then
+  echo "Refusing to start on previously used port(s):$reused" >&2
+  echo "  Pick ports this campaign has not bound, or pass --allow-reused-ports," >&2
+  echo "  which records the reuse in the run's evidence so no report can call" >&2
+  echo "  them new." >&2
+  exit 4
+fi
+printf '{\n  "kind": "ports",\n  "label": "%s",\n  "allow_reused": %s,\n  "ports": [%s]\n}\n' \
+  "$LABEL" "$([ "$ALLOW_REUSED_PORTS" = yes ] && echo true || echo false)" \
+  "${ports_json%,}" > "results/${LABEL}_ports.json"
+echo "== ports (host state and campaign history are different questions) =="
+for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
+  echo "   $(port_ledger_status "$port" || true)"
+done
 
 for port in "$CAND_PORT" "$REF_PORT" "$SCHED_PORT"; do
   st=0; port_held "$port" || st=$?
@@ -170,14 +1386,188 @@ BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
 # "Someone is still listening on 8050" is not the same as "production is the process
 # it was". A restart between the two checks would leave the port occupied and every
 # comparison in this run describing a different backend.
-prod_st=0
-PROD_PIDS_BEFORE="$(pids_on_port "$PROD_PORT")" || prod_st=$?
-[ "$prod_st" -eq 2 ] && { echo "cannot read port state for $PROD_PORT" >&2; exit 1; }
-[ -n "$PROD_PIDS_BEFORE" ] || { echo "production is not listening on $PROD_PORT" >&2; exit 1; }
+# TWO QUESTIONS, ASKED SEPARATELY, each by a means this account actually has.
+#
+# c1n stopped here with "production is not listening on 8050" while production was
+# listening throughout. The old form called `pids_on_port`, which greps `ss` output for
+# `pid=` -- and `ss -p` prints that only for sockets the caller owns, or to root. As uid
+# 994 the listener was plainly visible and its owner was not, so an empty pid list was
+# read as an empty port.
+#
+# The intent was never wrong. "Someone is still listening" is not "production is the
+# process it was". It is now established the way a non-owner can:
+if [ -n "${WOA23_EXPECT_UID:-}" ]; then
+  # 1. the port is listening -- `ss -ltn`, no ownership consulted
+  lst=0; port_is_listening "$PROD_PORT" || lst=$?
+  [ "$lst" -ne 2 ] || { echo "cannot read port state for $PROD_PORT" >&2; exit 1; }
+  [ "$lst" -eq 0 ] || {
+    echo "production is not listening on $PROD_PORT" >&2; exit 1; }
+
+  # 2. and the supplied pids ARE production -- validated against /proc, which is
+  #    world-readable for stat and cmdline. A wrong count is refused before anything is
+  #    read, so "some of them checked out" can never stand in for all of them.
+  echo "== production identity, from the supplied pids (a non-owner cannot read ss -p) =="
+  PROD_PIDS_BEFORE=""
+  PROD_IDENT_BEFORE=""
+  prod_bad=0
+  for ppid in $PROD_PIDS; do
+    ident="$(verify_prod_pid "$ppid" "$EXPECT_PY" gunicorn)" || {
+      echo "  REFUSED: $ident" >&2; prod_bad=1; continue; }
+    echo "  ok  $ident  (pid starttime)"
+    PROD_PIDS_BEFORE="$PROD_PIDS_BEFORE $ppid"
+    # pid:starttime, so the post-run check can detect PID REUSE rather than merely
+    # confirming the number is still in use by something.
+    PROD_IDENT_BEFORE="$PROD_IDENT_BEFORE ${ident% *}:${ident#* }"
+  done
+  [ "$prod_bad" -eq 0 ] || {
+    echo "REFUSING: a supplied production pid did not validate against /proc." >&2
+    echo "  These must be read FRESH in this run's preflight. A pid copied from an" >&2
+    echo "  earlier report names whatever holds that number today, which after a" >&2
+    echo "  restart is a different process entirely." >&2
+    exit 1; }
+  PROD_PIDS_BEFORE="${PROD_PIDS_BEFORE# }"
+  PROD_IDENT_BEFORE="${PROD_IDENT_BEFORE# }"
+  [ -n "$PROD_PIDS_BEFORE" ] || {
+    echo "no production pid validated" >&2; exit 1; }
+else
+  prod_st=0
+  PROD_PIDS_BEFORE="$(pids_on_port "$PROD_PORT")" || prod_st=$?
+  [ "$prod_st" -eq 2 ] && { echo "cannot read port state for $PROD_PORT" >&2; exit 1; }
+  [ -n "$PROD_PIDS_BEFORE" ] || { echo "production is not listening on $PROD_PORT" >&2; exit 1; }
+fi
 PROD_MASTER_BEFORE="$(master_of "$PROD_PIDS_BEFORE")" || {
   echo "cannot identify production's master among [$PROD_PIDS_BEFORE]" >&2; exit 1; }
 PROD_START_BEFORE="$(starttime_of "$PROD_MASTER_BEFORE")"
 echo "production master $PROD_MASTER_BEFORE (start $PROD_START_BEFORE), listeners: $PROD_PIDS_BEFORE"
+
+# ------------------------------------------ production's worker count, measured ---
+# C2 asks what happens under production's actual concurrency, so the number is read
+# from production's own argv at run time rather than written into this script. `-w 2`
+# was true when it was last looked at; a script that hard-codes it answers for the
+# deployment it was written against, not the one it is running beside.
+ARM_WORKERS=1
+if [ "$S2_MODE" = c2 ]; then
+  # Parsed from the NUL-separated bytes, in Python, behind a quoted heredoc — never
+  # by turning argv into newline-delimited text and reading it line by line.
+  #
+  # Two separate reasons, and the first is the one that bites without looking like a
+  # security problem. An argument may contain anything but NUL, so `tr '\0' '\n'`
+  # turns a single argument containing a newline into two, and every position after
+  # it shifts — which for a scan that pairs `-w` with the following token means the
+  # WRONG token becomes the worker count, and the run then verifies itself against a
+  # process set it was never authorised for. The second is that production's command
+  # line is external data: embedding it in a shell or Python source text at all is a
+  # quoting problem waiting for an argument with a quote in it. It crosses this
+  # boundary as one integer on stdout.
+  measured="$(PROD_MASTER="$PROD_MASTER_BEFORE" uv run python - <<'PYEOF'
+import os, sys
+sys.path.insert(0, ".")
+from bench.collect_backend_meta import argv_of, worker_count
+
+pid = int(os.environ["PROD_MASTER"])
+argv, err = argv_of(pid)
+if err:
+    print(err, file=sys.stderr)
+    raise SystemExit(1)
+n, err = worker_count(argv)
+if err:
+    print(f"{err}; argv has {len(argv)} arguments", file=sys.stderr)
+    raise SystemExit(1)
+print(n)
+PYEOF
+  )" || {
+    echo "cannot read a worker count from production's argv. Refusing to assume" >&2
+    echo "  one: C2's whole question is what production's concurrency does, and a" >&2
+    echo "  guessed number would answer it for a deployment that does not exist." >&2
+    exit 1; }
+  case "$measured" in
+    ''|*[!0-9]*)
+      echo "the worker count came back as '$measured', which is not a number" >&2
+      exit 1 ;;
+  esac
+  if [ "$measured" -lt 1 ] || [ "$measured" -gt 16 ]; then
+    echo "production reports $measured workers, outside the 1-16 this run will start" >&2
+    exit 1
+  fi
+  echo "production worker count: actual=$measured (read from pid $PROD_MASTER_BEFORE\'s argv)"
+  EXPECT_ARM_WORKERS="$measured"
+  echo "                        expected=${WORKERS:-<none asserted>}"
+  if [ -n "$WORKERS" ] && [ "$WORKERS" != "$measured" ]; then
+    echo "expected-workers mismatch: expected $WORKERS, production is running $measured." >&2
+    echo "  --expected-workers is an ASSERTION and never a setting: the arms take the" >&2
+    echo "  actual number, so a disagreement means production changed or the assertion" >&2
+    echo "  is stale, and either way this run would not be measuring production's" >&2
+    echo "  configuration. Stopping before any arm is started." >&2
+    exit 1
+  fi
+  ARM_WORKERS="$measured"          # the ACTUAL number, always; never $WORKERS
+
+  # -------------------------------- production must not have moved while we read ---
+  # The worker count, the master PID, its start time, the listener set and the boot
+  # id all describe one process. Reading them at different moments and using them
+  # together assumes production held still in between, and a restart between the
+  # preflight capture and here would leave this run sized for a deployment that no
+  # longer exists — with the arms not yet started, which is the last moment stopping
+  # is free.
+  # Non-owner-safe, like the pre-run and post-run checks. This is the THIRD place the
+  # ownership-dependent lookup lived, and it was found only by grepping for every call
+  # after fixing the other two -- which is the lesson: the fix was never "one line".
+  recheck_st=0
+  if [ -n "${WOA23_EXPECT_UID:-}" ]; then
+    lst_re=0; port_is_listening "$PROD_PORT" || lst_re=$?
+    [ "$lst_re" -ne 2 ] || {
+      echo "cannot re-read production's port state; refusing to continue" >&2; exit 1; }
+    [ "$lst_re" -eq 0 ] || {
+      echo "production stopped listening on $PROD_PORT; refusing to continue" >&2; exit 1; }
+    PROD_PIDS_RECHECK=""
+    for ppid in $PROD_PIDS; do
+      ident_re="$(verify_prod_pid "$ppid" "$EXPECT_PY" gunicorn)" || {
+        echo "production pid $ppid no longer validates: $ident_re" >&2; exit 1; }
+      PROD_PIDS_RECHECK="$PROD_PIDS_RECHECK $ppid"
+    done
+    PROD_PIDS_RECHECK="${PROD_PIDS_RECHECK# }"
+  else
+    PROD_PIDS_RECHECK="$(pids_on_port "$PROD_PORT")" || recheck_st=$?
+    [ "$recheck_st" -eq 2 ] && {
+      echo "cannot re-read production's port state; refusing to continue" >&2; exit 1; }
+  fi
+  PROD_MASTER_RECHECK="$(master_of "$PROD_PIDS_RECHECK")" || {
+    echo "cannot re-identify production's master among [$PROD_PIDS_RECHECK]" >&2; exit 1; }
+  PROD_START_RECHECK="$(starttime_of "$PROD_MASTER_RECHECK")" || {
+    echo "cannot re-read production's master start time" >&2; exit 1; }
+  BOOT_RECHECK="$(cat /proc/sys/kernel/random/boot_id)" || {
+    echo "cannot re-read the boot id" >&2; exit 1; }
+  if [ "$PROD_MASTER_RECHECK" != "$PROD_MASTER_BEFORE" ] \
+     || [ "$PROD_START_RECHECK" != "$PROD_START_BEFORE" ] \
+     || [ "$PROD_PIDS_RECHECK" != "$PROD_PIDS_BEFORE" ] \
+     || [ "$BOOT_RECHECK" != "$BOOT_ID" ]; then
+    echo "production changed while its configuration was being read:" >&2
+    echo "  master     $PROD_MASTER_BEFORE -> $PROD_MASTER_RECHECK" >&2
+    echo "  starttime  $PROD_START_BEFORE -> $PROD_START_RECHECK" >&2
+    echo "  listeners  [$PROD_PIDS_BEFORE] -> [$PROD_PIDS_RECHECK]" >&2
+    echo "  boot id    $BOOT_ID -> $BOOT_RECHECK" >&2
+    echo "  The worker count just read may describe a different process than the one" >&2
+    echo "  this run would compare itself against. Stopping before any test service" >&2
+    echo "  is started." >&2
+    exit 1
+  fi
+  echo "  production unchanged across the read (master, starttime, listeners, boot id)"
+fi
+
+# The authorised process count is DERIVED from the number just measured, never
+# written down. Two Dask processes plus, per arm, a gunicorn arbiter and the workers
+# it forks. With one worker that is 6, which is D2b's and C1's figure; with
+# production's two it is 8 — but 8 is a consequence of this measurement and not a
+# fact about the system. If production is reconfigured to four workers this run has
+# twelve processes, and the count it verifies against must move with it or the
+# verification is checking last week's deployment.
+#
+# Nothing here silently accommodates a surprise: --workers, when the authorisation
+# supplies it, has already aborted above on any disagreement, and a worker count that
+# could not be read aborted before that. This line only names the arithmetic.
+EXPECTED_TOTAL=$((1 + 1 + 2 * (1 + ARM_WORKERS)))
+echo "  processes this run will account for: 2 Dask + 2 x (1 arbiter + $ARM_WORKERS"
+echo "    worker(s)) = $EXPECTED_TOTAL, derived from the worker count above"
 
 # ================================================== tracked process handling ===
 CLEANUP_FAILED=0
@@ -197,7 +1587,47 @@ cleanup() {
   # this can go wrong is reported distinctly — "cannot tell" and "gone" and
   # "different process" are three different facts and only one of them is benign.
   local after boot_after master_after start_after st=0
-  after="$(pids_on_port "$PROD_PORT")" || st=$?
+  # THE SAME NON-OWNER-SAFE MECHANISM AS THE PRE-RUN CHECK.
+  #
+  # c1p ended with "production's listener disappeared while this run was using the host"
+  # while production was listening the whole time, all three pids alive at unchanged
+  # starttimes. I replaced the PRE-start production check with port_is_listening plus the
+  # supplied pids and left THIS half on pids_on_port, which greps ss for `pid=` and gets
+  # nothing as a non-owner. Both halves had to move together and only one did.
+  if [ -n "${WOA23_EXPECT_UID:-}" ]; then
+    after=""
+    lst_after=0; port_is_listening "$PROD_PORT" || lst_after=$?
+    if [ "$lst_after" -eq 2 ]; then
+      st=2
+    elif [ "$lst_after" -ne 0 ]; then
+      after=""                      # genuinely not listening
+    else
+      # Listening. Now: is it still the SAME production? Identity, not mere occupancy —
+      # a restart would leave the port held by a different process, which is the case
+      # this check exists for. PID REUSE is caught by the starttime, not the number.
+      after_bad=0
+      for ppid in $PROD_PIDS; do
+        ident_after="$(verify_prod_pid "$ppid" "$EXPECT_PY" gunicorn)" || {
+          echo "  production pid $ppid no longer validates: $ident_after" >&2
+          after_bad=1; continue; }
+        before_ident=""
+        for b in $PROD_IDENT_BEFORE; do
+          case "$b" in "$ppid:"*) before_ident="${b#*:}" ;; esac
+        done
+        now_start="${ident_after#* }"
+        if [ -n "$before_ident" ] && [ "$before_ident" != "$now_start" ]; then
+          echo "  production pid $ppid starttime changed: $before_ident -> $now_start" >&2
+          echo "    the PID was reused; this is a DIFFERENT process" >&2
+          after_bad=1; continue
+        fi
+        after="$after $ppid"
+      done
+      after="${after# }"
+      [ "$after_bad" -eq 0 ] || after=""
+    fi
+  else
+    after="$(pids_on_port "$PROD_PORT")" || st=$?
+  fi
   boot_after="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true)"
   if [ "$st" -eq 2 ]; then
     echo "WARNING: cannot read port state; whether production still holds" >&2
@@ -249,7 +1679,19 @@ cleanup() {
 
   if [ "$CLEANUP_FAILED" != "0" ]; then
     echo "CLEANUP DID NOT COMPLETE — this run is a failure regardless of its gates" >&2
-    [ "$rc" -eq 0 ] && rc=1
+    if [ "$rc" -eq 0 ]; then
+      # `return 1` from here does NOT make the shell exit 1. An EXIT trap's return
+      # value never sets the exit status — verified on bash 3.2 and 5.2 — so this
+      # said "the run is a failure" while the process exited 0, and every caller
+      # that checked the status saw a pass. c2d was caught only because the state
+      # it left behind stopped the NEXT cycle; a single-run mode would not have
+      # been caught at all.
+      #
+      # Exiting is the only way to raise it. Once, and only upward: a non-zero
+      # status already says the run failed and is more specific than 1 —
+      # INVALID_POST_MEASUREMENT_HARNESS is 6 and must stay 6.
+      exit 1
+    fi
   fi
   return $rc
 }
@@ -294,6 +1736,52 @@ cp -r "$HERE/api" "$CAND_DIR/api"
 ln -s "$STORE" "$REF_DIR/data"
 ln -s "$STORE" "$CAND_DIR/data"
 STORE_LITERAL='data/'                 # byte-for-byte what woa23_app.py:63 sets
+
+# ------------------------------------------------- D1: P1-P6, before anything ---
+# Spec 005 section 5 and section 9 step 5. This runs HERE — after the symlink
+# exists and BEFORE any service is started — so it precedes not merely every
+# data-path request but every HTTP request of any kind. Running it after readiness
+# would mean the store probe had already exercised the read path before anything
+# had established what the groups contain.
+#
+# Why it must run at all: a request for seasonal nitrate at 3000-4000 m can come
+# back empty because the depth is outside that climatology's range, or because the
+# group has no `nitrate` in its `parameters` coordinate and `api.query` skipped it
+# entirely. Those look identical from outside and mean opposite things.
+#
+# Launched the way the arms are launched — production's binary, -S, the clone on
+# PYTHONPATH — so what it reads is what an arm would read, not what the harness venv
+# would. $HERE joins PYTHONPATH because `bench` lives in the repository, not the
+# clone.
+#
+# NOTE it reads coordinate chunks: P2, P3 and P4 materialise the parameters,
+# time_periods and depth coordinate arrays, and coordinate arrays are stored as
+# chunks. That is a DIFFERENT operation from the lifespan anchor check and neither
+# strengthens nor weakens its zero-chunk property.
+if [ "$S2_MODE" = d1 ]; then
+  echo "== D1 store survey: P1-P6, read-only, before any service starts =="
+  set +e
+  env -C "$CAND_DIR" -u VIRTUAL_ENV -u PYTHONHOME \
+      PYTHONHASHSEED=0 PYTHONPATH="$PKG_CLONE:$HERE" \
+      PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      "$PY_BINARY" -S -m bench.store_survey \
+      --store "$STORE_LITERAL" --cwd "$CAND_DIR" \
+      --out "$HERE/results/${LABEL}_store_survey.json"
+  survey_rc=$?
+  set -e
+  case "$survey_rc" in
+    0) ;;
+    3) echo "PRECONDITION_UNMET: depth behaviour cannot be isolated on the real" >&2
+       echo "  store. No arm is started and no request is issued. The depth cases" >&2
+       echo "  must not be reported as depth characterization, and" >&2
+       echo "  D1-depth-out-of-range stays CHARACTERIZATION PENDING." >&2
+       echo "  The store is not modified and no substitute data is created." >&2
+       exit 3 ;;
+    *) echo "the D1 store survey did not complete (exit $survey_rc); refusing to" >&2
+       echo "  start anything on an unestablished store" >&2
+       exit 1 ;;
+  esac
+fi
 chmod -R a-w "$REF_DIR/woa23_app.py" "$REF_DIR/src" "$CAND_DIR/api"
 
 echo "== verifying the reference copy is byte-identical to production's =="
@@ -306,12 +1794,27 @@ for f in woa23_app.py src/__init__.py src/config.py src/dask_client_manager.py \
 done
 
 echo "== verifying the candidate copy is byte-identical to the repository's =="
-for f in api/__init__.py api/app.py api/config.py api/query.py; do
+# Enumerated, not listed. This was a hard-coded four-file loop, and spec 004 added a
+# fifth module — api/store_paths.py, which holds the path builder both arms' group
+# paths now come from. `cp -r` copied it and the loop would not have checked it: the
+# one file whose byte-identity matters most to this run would have been the one file
+# unverified. A list of filenames drifts from the directory it describes; the
+# directory does not.
+cand_files_repo="$(cd "$HERE" && find api -name '*.py' -not -path '*/__pycache__/*' | sort)"
+cand_files_stage="$(cd "$CAND_DIR" && find api -name '*.py' -not -path '*/__pycache__/*' | sort)"
+if [ "$cand_files_repo" != "$cand_files_stage" ]; then
+  echo "  the staged candidate does not have the same file set as the repository:" >&2
+  diff <(printf '%s\n' "$cand_files_repo") <(printf '%s\n' "$cand_files_stage") >&2 || true
+  exit 1
+fi
+printf '%s\n' "$cand_files_repo" | while IFS= read -r f; do
+  [ -n "$f" ] || continue
   a="$(sha256sum "$HERE/$f" | cut -d' ' -f1)"
   b="$(sha256sum "$CAND_DIR/$f" | cut -d' ' -f1)"
   [ "$a" = "$b" ] || { echo "  $f DIFFERS from the repository ($a vs $b)" >&2; exit 1; }
   echo "  $f  $a"
-done
+done || exit 1
+echo "  $(printf '%s\n' "$cand_files_repo" | grep -c .) candidate source files verified"
 
 # woa23_app.py:63 is the source of the reference's literal. If that line ever
 # changes, the string below is silently wrong, so it is checked rather than trusted.
@@ -327,55 +1830,169 @@ echo "  reference store literal confirmed at woa23_app.py:63: '$STORE_LITERAL'"
 # tcp://localhost:8786 — production's shared scheduler, serving tide_app and
 # mhw_app. The reference must never reach it, so it gets its own on $SCHED_PORT and
 # the variable is set explicitly rather than relying on a default being overridden.
-start_tracked dask_scheduler "$SCHED_PORT" \
-  "$VENV/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
+if [ "$S2_MODE" = none ]; then
+  start_tracked dask_scheduler "$SCHED_PORT" \
+    "$VENV/bin/dask" scheduler --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
+else
+  # No console script: the clone is a package tree, not an installed environment, so
+  # it has no bin/. `-m distributed.cli.dask_scheduler` is the same entry point the
+  # `dask scheduler` wrapper calls, reached without needing a wrapper to exist.
+  start_tracked dask_scheduler "$SCHED_PORT" \
+    env -C "$WORK" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      "$PY_BINARY" -S -m distributed.cli.dask_scheduler \
+      --host 127.0.0.1 --port "$SCHED_PORT" --no-dashboard
+fi
 for _ in $(seq 1 30); do port_held "$SCHED_PORT" && break; sleep 1; done
 port_held "$SCHED_PORT" || { echo "scheduler did not bind" >&2; exit 1; }
 # --no-nanny: `dask worker` defaults to --nanny, a supervisor process that forks
 # the worker. For a single worker the nanny buys nothing here and costs an extra
 # process to account for, so the worker runs in this process directly.
-start_tracked dask_worker "" \
-  "$VENV/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
-  --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard --no-nanny
+if [ "$S2_MODE" = none ]; then
+  start_tracked dask_worker "" \
+    "$VENV/bin/dask" worker "tcp://127.0.0.1:${SCHED_PORT}" \
+    --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard --no-nanny
+else
+  start_tracked dask_worker "" \
+    env -C "$WORK" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      "$PY_BINARY" -S -m distributed.cli.dask_worker "tcp://127.0.0.1:${SCHED_PORT}" \
+      --nworkers 1 --nthreads 1 --memory-limit 8GB --no-dashboard --no-nanny
+fi
 
 # ==================================================================== the arms ===
-# One venv, both arms. That is the whole point of 5.2A: the packages stop being a
-# variable because there is only one set of them. Both go through start_tracked, so
-# identity is recorded the same way for every process this run owns.
-start_tracked reference "$REF_PORT" \
-  env -C "$REF_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
-    DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
-    "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker \
-    -b "127.0.0.1:${REF_PORT}" --timeout 120
+# One environment, both arms. That is the whole point of the byte-exact comparison:
+# the packages stop being a variable because there is only one set of them. Under
+# D2b that set is dev2026/.venv; under C1 and C2 it is the read-only clone of
+# production's package tree, reached the same way by both arms. Both go through
+# start_tracked either way, so identity is recorded identically for every process
+# this run owns.
+#
+# The S2 launch is spelled out rather than assembled from a variable, because the
+# difference between the two forms is the difference between the two experiments
+# and a reader should not have to expand anything to see which one is running:
+#
+#   VIRTUAL_ENV, PYTHONHOME  unset — either would redirect the interpreter to an
+#                            environment other than the clone, and VIRTUAL_ENV is
+#                            exactly what a leftover `source .venv/bin/activate`
+#                            leaves behind in an interactive shell.
+#   -S                       site.py does not run, so no .pth is processed. This is
+#                            a real limitation and it is carried into the results.
+#   PYTHONPATH=<clone>       the only package source.
+#   PYTHONNOUSERSITE=1       ~/.local/lib/python3.11/site-packages is not a package
+#                            source either.
+#   PYTHONDONTWRITEBYTECODE  the clone is read-only and must stay byte-identical.
+if [ "$S2_MODE" = none ]; then
+  start_tracked reference "$REF_PORT" \
+    env -C "$REF_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
+      DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
+      "$VENV/bin/gunicorn" woa23_app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
+      -b "127.0.0.1:${REF_PORT}" --timeout 120
 
-# Same cwd-relative literal as the reference, still taken from the environment so
-# the candidate's configurability is intact. PYTHONPATH keeps the venv's packages
-# importable from a cwd that is not the repository.
-start_tracked candidate "$CAND_PORT" \
-  env -C "$CAND_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
-    WOA23_ZARR_STORE="$STORE_LITERAL" \
-    "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker \
-    -b "127.0.0.1:${CAND_PORT}" --timeout 120
+  # Same cwd-relative literal as the reference, still taken from the environment so
+  # the candidate's configurability is intact. PYTHONPATH keeps the venv's packages
+  # importable from a cwd that is not the repository.
+  start_tracked candidate "$CAND_PORT" \
+    env -C "$CAND_DIR" PYTHONHASHSEED=0 VIRTUAL_ENV="$VENV" \
+      WOA23_ZARR_STORE="$STORE_LITERAL" \
+      "$VENV/bin/gunicorn" api.app:app -w 1 -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
+      -b "127.0.0.1:${CAND_PORT}" --timeout 120
+elif [ "$S2_MODE" = c1 ] || [ "$S2_MODE" = d1 ] || [ "$S2_MODE" = s2perf ]; then
+  # Re-verified here rather than trusted from preflight. Between the two checks this
+  # run created a staging tree, started a Dask scheduler and a worker, and waited for
+  # a port — time in which a writable ancestor could have had the clone swapped. The
+  # window is narrowed to the gap between this line and the arm's own imports; it is
+  # not closed, and bench/clone_integrity.py says so in the record.
+  clone_integrity before-reference || exit 1
+  start_tracked reference "$REF_PORT" \
+    env -C "$REF_DIR" -u VIRTUAL_ENV -u PYTHONHOME \
+      PYTHONHASHSEED=0 PYTHONPATH="$PKG_CLONE" \
+      PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
+      "$PY_BINARY" -S -m gunicorn woa23_app:app -w 1 \
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${REF_PORT}" --timeout 120
 
-# Readiness: the OpenAPI document. It exercises the whole stack that has to be up —
-# gunicorn, the uvicorn worker, FastAPI routing — and reads **nothing** from the
+  clone_integrity before-candidate || exit 1
+  start_tracked candidate "$CAND_PORT" \
+    env -C "$CAND_DIR" -u VIRTUAL_ENV -u PYTHONHOME \
+      PYTHONHASHSEED=0 PYTHONPATH="$PKG_CLONE" \
+      PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      WOA23_ZARR_STORE="$STORE_LITERAL" \
+      "$PY_BINARY" -S -m gunicorn api.app:app -w 1 \
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${CAND_PORT}" --timeout 120
+else
+  # C2. `-u PYTHONHASHSEED` rather than an empty value: CPython rejects
+  # PYTHONHASHSEED="" outright, so setting it empty would not mean "unset", it would
+  # mean the interpreter refuses to start — and the arm would fail for a reason that
+  # looks nothing like the one it actually had.
+  clone_integrity before-reference || exit 1
+  start_tracked reference "$REF_PORT" \
+    env -C "$REF_DIR" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      DASK_SCHEDULER_ADDRESS="tcp://127.0.0.1:${SCHED_PORT}" \
+      "$PY_BINARY" -S -m gunicorn woa23_app:app -w "$ARM_WORKERS" \
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${REF_PORT}" --timeout 120
+
+  clone_integrity before-candidate || exit 1
+  start_tracked candidate "$CAND_PORT" \
+    env -C "$CAND_DIR" -u VIRTUAL_ENV -u PYTHONHOME -u PYTHONHASHSEED \
+      PYTHONPATH="$PKG_CLONE" PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 \
+      WOA23_ZARR_STORE="$STORE_LITERAL" \
+      "$PY_BINARY" -S -m gunicorn api.app:app -w "$ARM_WORKERS" \
+      -k uvicorn.workers.UvicornWorker --graceful-timeout "$ARM_GRACEFUL_TIMEOUT" -b "127.0.0.1:${CAND_PORT}" --timeout 120
+fi
+
+# ------------------------------------------------------- PROCESS readiness only ---
+# The OpenAPI document. It exercises the whole stack that has to be up — gunicorn,
+# the uvicorn worker, FastAPI routing — and **this probe** reads nothing from the
 # Zarr store, so waiting for the servers to appear costs neither arm a chunk read.
 #
-# The previous probe issued a real data query, to the reference first. That gave the
+# What has already happened by the time this runs is NOT nothing, and saying so was
+# wrong until spec 004 landed. Under the patched candidate the lifespan opens the
+# anchor group's **Zarr metadata** during startup — before any HTTP is served — so
+# by the time a 200 comes back the candidate has read metadata for
+# `1_degree/annual/TS`.
+#
+# That it read **no data or coordinate chunk** is NOT observed here. This run
+# installs no audit hook and records no file-open events; the property is
+# established offline, by bench/test_d1_store_validation.py, against synthetic
+# fixtures, and carries over only because this run executes the same code path.
+# It is **implementation-supported, not observed on this host**.
+#
+# The reference does not do this: `woa23_app.py` is unmodified and validates nothing
+# at startup. So the two arms differ in what they have read by this point — metadata
+# for one group on the candidate, nothing on the reference. That cannot change any
+# byte either returns, which is what 5.2A compares. It would matter to a latency
+# comparison, where a warmed metadata cache is exactly the kind of asymmetry S1 went
+# to trouble to remove; no latency is measured in --c1 or --c2-cycle.
+#
+# That is also this probe's limit, and the limit is the point. **A 200 here says the
+# process is serving.** Under the UNPATCHED candidate it said nothing at all about
+# the store — D1 measured that directly: with WOA23_ZARR_STORE pointing at a path
+# that does not exist, an empty directory, or an ordinary file, the app imported,
+# started, served this document with a 200, and failed only when a request reached
+# the data path. Under the patched candidate those three cannot get this far, but a
+# 200 still does not establish that a *data* read will succeed.
+#
+# STORE readiness — that the configured store can actually be opened and read for
+# data — is established by the symmetric data probe below and nowhere else, and it
+# is a *separate stage*. Nothing between here and there may be described as the
+# store being ready to serve data.
+#
+# The earlier probe issued a real data query, to the reference first. That gave the
 # reference a warm store handle and a populated page cache before the candidate had
 # served anything, and it did so on the one path the whole experiment measures.
-ready() {                   # ready <port>
-  local out
-  for _ in $(seq 1 30); do
-    out="$(curl -s --max-time 5 -o /dev/null -w '%{http_code} %{size_download}' \
-      "http://127.0.0.1:$1/api/swagger/woa23/openapi.json" || true)"
-    [ "${out%% *}" = "200" ] && [ "${out##* }" -gt 0 ] && return 0
-    sleep 1
-  done
-  return 1
-}
-ready "$REF_PORT"  || { echo "reference not ready; see $RUN/reference.log" >&2; exit 1; }
-ready "$CAND_PORT" || { echo "candidate not ready; see $RUN/candidate.log" >&2; exit 1; }
+# `process_ready` lives in lib_http.sh, with the counter that records its attempts.
+process_ready reference "$REF_PORT" || { echo "reference process not ready; see $RUN/reference.log" >&2; exit 1; }
+process_ready candidate "$CAND_PORT" || { echo "candidate process not ready; see $RUN/candidate.log" >&2; exit 1; }
+echo "  both arms are PROCESS-ready (OpenAPI 200)."
+echo "    This probe read nothing from the store. The candidate's startup anchor"
+echo "    validation has already read Zarr METADATA for 1_degree/annual/TS;"
+echo "    the reference validates nothing at startup."
+echo "    That the anchor read touched NO data or coordinate chunk is offline-audited"
+echo "    (bench/test_d1_store_validation.py, synthetic fixtures) and"
+echo "    implementation-supported — this run observes no file opens."
+echo "    Neither arm is known to serve DATA yet — that is the probe below."
 
 # The authorisation is for a specific set of processes, so the set is *verified*,
 # not merely printed. A run that has five or seven is outside what was granted —
@@ -385,11 +2002,14 @@ echo "== process trees (what the authorisation covers and cleanup is held to) ==
 expected_procs() {
   case "$1" in
     dask_scheduler|dask_worker) echo 1 ;;   # --no-nanny; the default would be 2
-    reference|candidate)        echo 2 ;;   # gunicorn arbiter + one forked worker
+    # gunicorn arbiter plus the workers it forks. One each under D2b and C1; under
+    # C2 it is production's measured count, so the authorised total is derived from
+    # the same number the arms were started with rather than written down twice.
+    reference|candidate)        echo $((1 + ARM_WORKERS)) ;;
     *)                          echo 0 ;;
   esac
 }
-AUTHORISED_TOTAL=6
+AUTHORISED_TOTAL="$EXPECTED_TOTAL"     # derived where ARM_WORKERS was established
 n_procs=0
 seen_pids=""
 for svc in dask_scheduler dask_worker reference candidate; do
@@ -415,31 +2035,65 @@ for svc in dask_scheduler dask_worker reference candidate; do
   done
   n_procs=$((n_procs + n))
 done
+
+# ------------------------------------------- EVERY PROCESS RUNS AS THE EXPECTED UID ---
+# Asserted here, where the trees have just been recorded and their process counts
+# checked -- so the set being examined is known-complete rather than whatever happened
+# to be enumerable.
+#
+# C1 reads the production store through a read-only ACL granted to ONE account. That
+# guarantee is only as good as the claim that the arms really run as it, and "the shell
+# that launched them was 994" is a DIFFERENT claim from "every gunicorn worker is 994".
+# assert_tree_uid reads /proc/<pid>/status for the master and every worker in the
+# recorded tree, and compares all four uids -- real, effective, saved-set and filesystem
+# -- because the filesystem uid is the one that decides whether a write to the store
+# would succeed, and a process can differ from its parent in any of them.
+#
+# Opt-in by variable rather than always-on: runs started by odbadmin against odbadmin's
+# own store are unaffected and keep working exactly as before. When the variable is set
+# the check is mandatory and a failure is fatal -- there is no "warn and continue".
+if [ -n "${WOA23_EXPECT_UID:-}" ]; then
+  case "$WOA23_EXPECT_UID" in
+    ''|*[!0-9]*) echo "WOA23_EXPECT_UID must be numeric: $WOA23_EXPECT_UID" >&2; exit 2 ;;
+  esac
+  echo "== process identity: every tracked process must run as uid $WOA23_EXPECT_UID =="
+  uid_bad=0
+  for svc in dask_scheduler dask_worker reference candidate; do
+    assert_tree_uid "$svc" "$WOA23_EXPECT_UID" || uid_bad=1
+  done
+  if [ "$uid_bad" -ne 0 ]; then
+    echo "REFUSING: not every tracked process runs as uid $WOA23_EXPECT_UID." >&2
+    echo "  The read-only guarantee this run depends on is a property of the ACCOUNT," >&2
+    echo "  so a process running as anyone else is outside it. Nothing is signalled" >&2
+    echo "  here; the trap cleans up and the state is left for inspection." >&2
+    exit 1
+  fi
+fi
+
 if [ "$n_procs" -ne "$AUTHORISED_TOTAL" ]; then
   echo "this run has $n_procs OS processes; the authorisation is for $AUTHORISED_TOTAL" >&2
   exit 1
 fi
 echo "  $n_procs OS processes, matching the authorised set: [$seen_pids ]"
 
-# The data path still has to work before committing to 64 contract cases — a store
-# the reference cannot open should fail here, not thirty requests in. But the probe
-# must not favour an arm either, so it runs once in each order: candidate-first,
-# then reference-first. Two requests per arm, exactly counterbalanced.
-probe() {                   # probe <label> <port>
-  local out
-  out="$(curl -s --max-time 60 -o /dev/null -w '%{http_code} %{size_download}' \
-    "http://127.0.0.1:$2/api/woa23?lon0=135&lat0=15&parameter=temperature" || true)"
-  if [ "${out%% *}" != "200" ] || [ "${out##* }" -le 0 ]; then
-    echo "$1 cannot serve the data path (got '$out'); see $RUN/$1.log" >&2
-    return 1
-  fi
-}
+# ------------------------------------------------- STORE readiness, separately ---
+# This is the stage that establishes the store can be opened and read, and it is the
+# first one that touches it. The OpenAPI check above proved only that the process is
+# serving: D1 showed a nonexistent path, an empty directory and an ordinary file all
+# import, start and answer that document with a 200, failing only here.
+#
+# So a store the reference cannot open fails at this point rather than thirty
+# requests into the contract gate. But the probe must not favour an arm either, so it
+# runs once in each order: candidate-first, then reference-first. Two requests per
+# arm, exactly counterbalanced.
+# `probe` lives in lib_http.sh, with the counter that records its attempt.
 if [ "$CLEANUP_ONLY" = "yes" ]; then
   # Skipped deliberately. The probe exists to catch an unreadable store before
   # spending 64 contract cases; with no contract gate to protect there is nothing
   # for it to save, and this mode's request count is meant to be as close to zero as
   # the process tree allows.
   echo "  data-path probe skipped (--cleanup-only): 0 requests"
+  echo "  STORE readiness is therefore NOT established by this run."
 else
   for pair in "candidate:$CAND_PORT reference:$REF_PORT" \
               "reference:$REF_PORT candidate:$CAND_PORT"; do
@@ -447,8 +2101,9 @@ else
       probe "${entry%%:*}" "${entry#*:}" || exit 1
     done
   done
+  echo "  both arms are STORE-ready: each served the data path twice, in both orders."
 fi
-echo "both arms ready"
+echo "both arms ready (process readiness and, unless --cleanup-only, store readiness)"
 
 # Re-record each tree now that the children exist. start_tracked already wrote one
 # when it began tracking — it has to, because the trap is armed from that moment and
@@ -459,33 +2114,91 @@ echo "both arms ready"
 
 # ================================================================= provenance ===
 echo "== provenance =="
-uv run python -m bench.collect_backend_meta --port "$CAND_PORT" --manifest candidate \
-  --expect-argv-contains api.app:app --lockfile uv.lock \
-  --out results/d2b_meta_candidate.json
-uv run python -m bench.collect_backend_meta --port "$REF_PORT" --manifest reference \
-  --expect-argv-contains woa23_app:app --lockfile uv.lock \
-  --out results/d2b_meta_reference.json
+if [ "$S2_MODE" = none ]; then
+  uv run python -m bench.collect_backend_meta --port "$CAND_PORT" --manifest candidate \
+    --expect-argv-contains api.app:app --lockfile uv.lock \
+    --expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
+    --out "results/${LABEL}_meta_candidate.json"
+  uv run python -m bench.collect_backend_meta --port "$REF_PORT" --manifest reference \
+    --expect-argv-contains woa23_app:app --lockfile uv.lock \
+    --expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
+    --out "results/${LABEL}_meta_reference.json"
+else
+  # --env-python, and not the derived answer. Under S2 the arm's argv[0] is
+  # production's binary, whose sibling `python` *is* production's environment: the
+  # heuristic would list production's 236 distributions and label them the clone's.
+  # The listing is reproduced under the arms' own launch (-S, clone on PYTHONPATH),
+  # because the same binary answers differently depending on how it is started.
+  for arm in candidate reference; do
+    if [ "$arm" = candidate ]; then p="$CAND_PORT"; expect=api.app:app
+    else p="$REF_PORT"; expect=woa23_app:app; fi
+    # --env-python-arg=-S, not `--env-python-arg -S`. argparse reads a value
+    # beginning with a dash as the next *option*, so the separated form makes it
+    # report "expected one argument" and exit 2 — which is what happened on the
+    # first real C1 attempt, after both arms were up and the store had been probed.
+    # The `=` form is unambiguous.
+    uv run python -m bench.collect_backend_meta --port "$p" --manifest "$arm" \
+      --expect-argv-contains "$expect" \
+      --expect-graceful-timeout "$ARM_GRACEFUL_TIMEOUT" \
+      ${EXPECT_ARM_WORKERS:+--expect-worker-count "$EXPECT_ARM_WORKERS"} \
+      `# asserts the count against the arm's argv; the -w on the launch line sets it` \
+      --env-python "$PY_BINARY" --env-python-arg=-S \
+      --env-python-pythonpath "$PKG_CLONE" \
+      --clone-manifest "$CLONE_MANIFEST" --clone-root "$PKG_CLONE" \
+      --out "results/${LABEL}_meta_${arm}.json"
+  done
 
-echo "== the arms must share an environment, or 5.2A proves nothing =="
+  # ------------------------------------------- what the arms actually imported ---
+  # Two kinds of evidence, recorded separately because they establish different
+  # things. The probe is an identically-launched sibling interpreter: exact about
+  # the launch procedure, and not the gunicorn worker. /proc/<pid>/maps is the arm
+  # itself: every native extension it really loaded, which is where polars, numpy,
+  # zarr's codecs and h5py would show up if they had come from production — and
+  # blind to a pure-Python module imported from the wrong place.
+  echo "== the arms' interpreter and import paths =="
+  for arm in candidate reference; do
+    if [ "$arm" = candidate ]; then armdir="$CAND_DIR"; else armdir="$REF_DIR"; fi
+    pids="$(tree_pids "$arm")"
+    pid_args=""
+    for pid in $pids; do pid_args="$pid_args --pid $pid"; done
+    [ -n "$pid_args" ] || { echo "no tracked PIDs for $arm" >&2; exit 1; }
+    # shellcheck disable=SC2086
+    uv run python -m bench.s2_provenance \
+      --python-binary "$PY_BINARY" --package-clone "$PKG_CLONE" \
+      --cwd "$armdir" --label "$arm" \
+      $([ "$S2_MODE" = c1 ] && echo "--hashseed 0" || echo "") \
+      --allow "$PKG_CLONE" --allow "$WORK" \
+      --forbid "$PROD_DIR" --forbid "$PROD_SITE" \
+      $pid_args \
+      --out "results/${LABEL}_interp_${arm}.json" \
+      || { echo "$arm did not establish import isolation; stopping before any gate" >&2
+           exit 1; }
+  done
+fi
+
+echo "== the arms must share an environment, or the comparison proves nothing =="
+LABEL="$LABEL" S2_MODE="$S2_MODE" \
 uv run python - <<'PYEOF' || exit 1
-import json, sys
+import json, os, sys
 sys.path.insert(0, ".")
-from bench.provenance import (validate_meta, verify_environment_match,
-                              verify_environment_record, verify_group_path_agreement)
-cand = json.load(open("results/d2b_meta_candidate.json"))
-ref = json.load(open("results/d2b_meta_reference.json"))
-env = json.load(open("results/d2b_environment.json"))
-problems = (validate_meta(cand, "candidate") + validate_meta(ref, "reference")
-            # do the two arms agree with each other?
-            + verify_environment_match(cand, ref)
-            # and is what they agree on the environment this run actually built?
-            # Two arms sharing a stale .venv agree perfectly and prove nothing.
-            + verify_environment_record(env, cand, "candidate")
-            + verify_environment_record(env, ref, "reference")
-            # and do they build zarr_group_paths from the same string? Different
-            # strings hash differently, so the set iterates in a different order
-            # for any query spanning more than one group.
-            + verify_group_path_agreement(cand, ref))
+# One call, into tested code. The composition used to be spelled out here, and the
+# S2 branch computed the right field list into a variable it then never passed —
+# a dead assignment that reads exactly like working code, and every S2 run failed
+# on the D2b field list complaining about a lockfile this campaign does not have.
+# Inline logic in a heredoc is logic no test can reach.
+from bench.provenance import compare_arms
+
+label = os.environ["LABEL"]
+s2_mode = os.environ["S2_MODE"]
+cand = json.load(open(f"results/{label}_meta_candidate.json"))
+ref = json.load(open(f"results/{label}_meta_reference.json"))
+env = json.load(open(f"results/{label}_environment.json"))
+# C2 is the only mode whose arms are deliberately unpinned, and it requires the
+# seed to be ABSENT rather than merely tolerating it: a cycle that ran pinned
+# observed nothing about the thing C2 exists to observe.
+seed_policy = "both-unpinned" if s2_mode == "c2" else "both-pinned"
+problems = compare_arms(cand, ref, env, s2=(s2_mode != "none"),
+                        seed_policy=seed_policy)
 if problems:
     print("arms are not comparable:", file=sys.stderr)
     for p in problems:
@@ -493,7 +2206,7 @@ if problems:
     raise SystemExit(1)
 print(f"both arms: python {cand['env_python_version']}, "
       f"{len(cand['dependencies']['distributions'])} distributions, "
-      f"digest {cand['dependencies']['distributions_sha256'][:16]}")
+      f"name==version set {cand['dependencies']['name_version_set_sha256'][:16]}")
 print(f"both arms build group paths from {cand['store_path_literal']!r}")
 PYEOF
 
@@ -509,23 +2222,204 @@ if [ "$CLEANUP_ONLY" = "yes" ]; then
   exit 0
 fi
 
-echo "== contract gate, variant 5.2A (byte-exact), 64 cases per arm =="
-uv run python -m bench.contract_diff \
-  --candidate "http://127.0.0.1:${CAND_PORT}" \
-  --reference "http://127.0.0.1:${REF_PORT}" --variant 5.2A \
-  --candidate-meta results/d2b_meta_candidate.json \
-  --reference-meta results/d2b_meta_reference.json \
-  --out results/d2b_contract.json \
-  || { echo "contract gate did not pass — stopping before the latency gate" >&2; exit 1; }
+# C1 and D2b compare bytes; C2 cannot. Under C2 neither arm has a pinned seed, so
+# `set` iteration order — and with it the row order of any query spanning more than
+# one Zarr group — is a property of the process, not of the code. Comparing bytes
+# there would fail on a difference that is not a defect. 5.2B compares the row
+# multiset and the column set instead, and order is recorded separately below rather
+# than folded into the verdict.
+# 5.2C, not 5.2A, since spec 008: the candidate deliberately reorders rows, so raw
+# byte equality is no longer the verdict for a gate whose arms are both ours. 5.2C
+# compares canonically, checks the candidate's own row-order contract and records the
+# raw-order difference as the decided change. Leaving 5.2A here would fail every
+# multi-row case for the change working as decided (spec 008 §7a.1).
+VARIANT=5.2C
+SEED_POLICY=both-pinned
+if [ "$S2_MODE" = c2 ]; then
+  VARIANT=5.2B
+  # Not the 5.2B default. That default is "pinned candidate against live
+  # production"; C2's arms are both ours and both unpinned, so the requirement is
+  # stated rather than inferred from the variant.
+  SEED_POLICY=both-unpinned
+fi
+# ------------------------------------------------------------- D1: the cases ---
+# Not the contract gate. Four characterization requests per arm, each followed by an
+# anchor recovery probe, both arms driven from one process so the per-case order
+# really is counterbalanced. Nothing here judges a status code: `d1_evidence` decides
+# byte equality between the arms, that each case left the process serving, and that
+# a case needing depth isolation was only issued once the survey established it.
+if [ "$S2_MODE" = d1 ]; then
+  echo "== D1 characterization: 4 cases + 4 anchor recovery probes per arm =="
+  cand_pid_args=""
+  for pid in $(tree_pids candidate); do cand_pid_args="$cand_pid_args --candidate-pid $pid"; done
+  ref_pid_args=""
+  for pid in $(tree_pids reference); do ref_pid_args="$ref_pid_args --reference-pid $pid"; done
+  # shellcheck disable=SC2086
+  uv run python -m bench.d1_probe \
+    --candidate-url "http://127.0.0.1:${CAND_PORT}" \
+    --reference-url "http://127.0.0.1:${REF_PORT}" \
+    $cand_pid_args $ref_pid_args \
+    --survey "results/${LABEL}_store_survey.json" \
+    --out-candidate "results/${LABEL}_d1_candidate.jsonl" \
+    --out-reference "results/${LABEL}_d1_reference.jsonl" || {
+      echo "the D1 probe did not complete; stopping before any verdict" >&2; exit 1; }
+
+  # Attempts, taken from the records the probe wrote. Every attempt produces a
+  # line, including a transport failure — `d1_probe.fetch` records those as status 0
+  # rather than raising — so counting lines counts requests and not successes.
+  for arm in candidate reference; do
+    n_lines="$(grep -c . "results/${LABEL}_d1_${arm}.jsonl" 2>/dev/null || echo 0)"
+    n_recover="$(grep -c 'D1-ANCHOR-RECOVER' "results/${LABEL}_d1_${arm}.jsonl" \
+                 2>/dev/null || echo 0)"
+    request_add "$arm" recovery "$n_recover"
+    request_add "$arm" characterization "$((n_lines - n_recover))"
+  done
+
+  set +e
+  uv run python -m bench.d1_evidence \
+    --candidate "results/${LABEL}_d1_candidate.jsonl" \
+    --reference "results/${LABEL}_d1_reference.jsonl" \
+    --survey "results/${LABEL}_store_survey.json" \
+    --out "results/${LABEL}_d1.json"
+  d1_rc=$?
+  set -e
+  # Finalisation: the artefacts written after the last request. In its own
+  # sourced function so `scripts/test_d1_finalize.sh` executes the real path, and
+  # with the label passed as an ARGUMENT — the heredoc this replaces read it from
+  # an environment variable nothing had exported, and the run died here with every
+  # measurement already taken.
+  #
+  # A failure is CLASSIFIED rather than left as a bare exit code: measurements
+  # complete and artefacts incomplete is a different state from a failed gate.
+  set +e
+  d1_finalize "$LABEL" results
+  finalize_rc=$?
+  set -e
+  if [ "$finalize_rc" -ne 0 ]; then
+    echo
+    echo "D1 classification: INVALID_POST_MEASUREMENT_HARNESS"
+    echo "  The characterization observations ARE recorded in results/${LABEL}_d1.json."
+    echo "  The run may not be reported as a completed D1 result. Cleanup still runs."
+    exit "$finalize_rc"
+  fi
+  echo
+  echo "== the arms' worker count =="
+  echo "   worker_count=1 per arm, SET by this mode (the -w on each launch line)"
+  echo "   and ASSERTED against each arm's own /proc/<pid>/cmdline. Not measured"
+  echo "   from production."
+  echo "   D1 uses one worker per arm by design. This is not a"
+  echo "   production-worker-count validation and makes no claim about"
+  echo "   multi-worker D1 behavior. Both arms' full launch argv are in"
+  echo "   results/${LABEL}_workers.json and in each arm's provenance record."
+
+  echo
+  echo "== requests recorded (attempts, not successes) =="
+  request_counts_report candidate reference
+  echo "   Measured, not a ceiling and not a range: the readiness attempts that used"
+  echo "   to be uncountable are in the numbers above. Spec 005 section 8.2's range"
+  echo "   is superseded for this run by results/${LABEL}_requests.json."
+  echo
+  echo "D1 characterization exit $d1_rc. What the responses ARE is recorded in"
+  echo "  results/${LABEL}_d1.json; nothing above judged a status code right or wrong."
+  echo "  No latency was measured. Cleanup runs next, from the trap, and a stranded"
+  echo "  process fails the run regardless of this exit code."
+  exit "$d1_rc"
+fi
+
+# One request per case per arm, issued by bench.contract_diff, recorded ONCE, here,
+# before the gate issues anything. `record_contract_count` in lib_s2perf.sh is the
+# single owner of this number for every mode, and carries the two conditions under
+# which a derived count may stand in for measured attempts — plus the case in which
+# it may not, which is a gate that did not complete.
+#
+# It is a function called from one place because it was two places: this line and
+# `s2perf_record_counts`, so the s2perf path recorded 64 per arm twice and reported
+# 528 against an authorised 496. `assert_request_ceiling` now fails any run whose
+# recorded total exceeds its ceiling, whatever caused it.
+record_contract_count reference candidate
+case "$VARIANT" in
+  5.2A) VARIANT_DESC="byte-exact" ;;
+  5.2B) VARIANT_DESC="semantic" ;;
+  5.2C) VARIANT_DESC="canonical row order + candidate order contract" ;;
+  *)    VARIANT_DESC="unknown variant" ;;
+esac
+echo "== contract gate, variant $VARIANT ($VARIANT_DESC), 64 cases per arm =="
+s2perf_contract "http://127.0.0.1:${CAND_PORT}" "http://127.0.0.1:${REF_PORT}" \
+  "$VARIANT" "$SEED_POLICY" "$LABEL" results \
+  || { echo "contract gate did not pass — stopping before anything further" >&2; exit 1; }
+
+if [ "$S2_MODE" != none ] && [ "$S2_MODE" != s2perf ]; then
+  echo
+  echo "== --$([ "$S2_MODE" = c1 ] && echo c1 || echo c2-cycle): stopping here =="
+  echo "   The contract gate above passed. No latency gate, no noise pilot, no rung"
+  echo "   escalation: this invocation produced no timing of any kind and nothing may"
+  echo "   be quoted from it as performance."
+  echo "   LIMITATION -S: site.py did not run, so no .pth in the clone was processed."
+  echo "   This is isolated package-tree import correctness (spec 002 section 4.3.1),"
+  echo "   and the launcher is this script rather than production's PM2 path."
+  if [ "$S2_MODE" = c2 ]; then
+    echo "   This is ONE cycle. A C2 result needs three independent cycles and the"
+    echo "   seed-diversity observation across them; scripts/run_c2_cycles.sh draws"
+    echo "   that conclusion, and this invocation does not."
+  fi
+  echo "   artefacts: results/${LABEL}_contract.json"
+  echo "              results/${LABEL}_meta_{candidate,reference}.json"
+  echo "              results/${LABEL}_interp_{candidate,reference}.json"
+  echo "              results/${LABEL}_environment.json"
+  exit 0
+fi
+
+if [ "$CONTRACT_ONLY" = "yes" ]; then
+  echo
+  echo "== --contract-only: stopping here =="
+  echo "   The contract gate above passed. No latency gate, no noise pilot, and no"
+  echo "   rung escalation was run, so this invocation produced no timing of any"
+  echo "   kind and nothing may be quoted from it as performance. The trap now"
+  echo "   stops all four services."
+  exit 0
+fi
+
+# One journal per stage, a line appended BEFORE each request leaves. When a stage
+# dies on a refused connection or a timeout it writes no complete artefact, and its
+# samples are not what it issued — the journal is then the only record of what this
+# run recorded as attempts. Under abrupt termination the record count is not a
+# bound on what reached the host — see bench/request_log.py. Read back by
+# `bench.perf_counts --journals`.
+PERF_JOURNALS="$RUN/journals"
+mkdir -p "$PERF_JOURNALS"
+
+# ------------------------------------------- S2 performance: the warm-up first ---
+# Spec 007 section 4.1. The candidate reaches its first request having read the
+# anchor group's metadata and the reference has not; `WARMUP_REQUESTS` does not
+# cover that, because it discards one sample per case INSIDE the sequence and this
+# asymmetry precedes the sequence. Every response here is discarded, and every
+# request here is counted.
+if [ "$S2_MODE" = s2perf ]; then
+  echo "== symmetric warm-up pass: 8 cases x 2 arm orders, discarded =="
+  s2perf_warmup "http://127.0.0.1:${CAND_PORT}" "http://127.0.0.1:${REF_PORT}" \
+    "$LABEL" results "$PERF_JOURNALS" \
+    || { echo "the symmetric warm-up did not complete; stopping before any" >&2
+         echo "  sample is taken, because the arms would not be in a common state" >&2
+         exit 1; }
+fi
 
 echo "== latency gate, rung 21, variant 5.2A =="
-uv run python -m bench.paired_bench \
-  --candidate "http://127.0.0.1:${CAND_PORT}" \
-  --reference "http://127.0.0.1:${REF_PORT}" \
-  --gate-variant 5.2A --warm 21 --include-heavy --margin 0.05 \
-  --candidate-meta results/d2b_meta_candidate.json \
-  --reference-meta results/d2b_meta_reference.json \
-  --out results/d2b_paired.json
+s2perf_latency "http://127.0.0.1:${CAND_PORT}" "http://127.0.0.1:${REF_PORT}" \
+  "$LABEL" results "$PERF_JOURNALS" && LATENCY_RC=0 || LATENCY_RC=$?
+
+# `set -e` would have ended the run here on ANY non-zero status from the gate — and
+# the gate exits 1 for a REGRESSION, which is a RESULT, not a crash. That would have
+# skipped the request counting, the finalisation and the closing report, and left a
+# complete measurement as a bare non-zero exit: the same shape as the c2d and d1a
+# failures. The status is captured instead, and acted on after the artefacts exist.
+if [ "$LATENCY_RC" -ne 0 ] && [ "$S2_MODE" != s2perf ]; then
+  exit "$LATENCY_RC"
+fi
+
+# A gate that stopped on a transport failure has no sample-size planning to do, and
+# spending 416 more requests to plan an escalation of a measurement that never
+# finished is the opposite of a budget.
+LATENCY_COMPLETE="$(s2perf_latency_complete "$LABEL" results)"
 
 # The pilot runs LAST, and against both arms.
 #
@@ -535,17 +2429,34 @@ uv run python -m bench.paired_bench \
 # Its output is sample-size planning for the *next* rung, which does not need to
 # precede this one; the gate's own confidence interval carries the noise for this
 # one. Running it against both arms keeps the recorded floor a property of the pair.
-echo "== sample-size planning for any escalation, both arms, after the measurement =="
-uv run python -m bench.noise_pilot --base-url "http://127.0.0.1:${REF_PORT}" \
-  --warm 25 --out results/d2b_noise_pilot_reference.json
-uv run python -m bench.noise_pilot --base-url "http://127.0.0.1:${CAND_PORT}" \
-  --warm 25 --out results/d2b_noise_pilot_candidate.json
+PILOT_RC=0
+if [ "$LATENCY_COMPLETE" = no ]; then
+  echo "== noise pilot SKIPPED: the latency gate did not finish =="
+  echo "   Sample-size planning for an escalation of a measurement that never"
+  echo "   completed would spend 416 requests to plan nothing."
+else
+  echo "== sample-size planning for any escalation, both arms, after the measurement =="
+  s2perf_pilot "http://127.0.0.1:${CAND_PORT}" "http://127.0.0.1:${REF_PORT}" \
+    "$LABEL" results "$PERF_JOURNALS" || PILOT_RC=$?
+fi
+if [ "$S2_MODE" = s2perf ]; then
+  # Everything after the last request, in one function so the driver test runs the
+  # real precedence: artefacts-not-written beats total-unknown beats gate-verdict.
+  set +e
+  s2perf_finish "$LABEL" results "$PERF_JOURNALS" "$BUDGET_ARM" "$LATENCY_RC" \
+    "$PILOT_RC"
+  S2PERF_RC=$?
+  set -e
+  if [ "$S2PERF_RC" -ne 0 ]; then
+    exit "$S2PERF_RC"
+  fi
+fi
 
 echo
-echo "artefacts: results/d2b_contract.json results/d2b_paired.json"
-echo "           results/d2b_meta_{candidate,reference}.json"
-echo "           results/d2b_noise_pilot_{reference,candidate}.json"
-echo "           results/d2b_environment.json"
+echo "artefacts: results/${LABEL}_contract.json results/${LABEL}_paired.json"
+echo "           results/${LABEL}_meta_{candidate,reference}.json"
+echo "           results/${LABEL}_noise_pilot_{reference,candidate}.json"
+echo "           results/${LABEL}_environment.json"
 echo "== done; the trap now stops all four services, verifies every process in"
 echo "   their recorded trees has exited, verifies the ports, and confirms"
 echo "   production is the same process it was =="
