@@ -20,3 +20,13 @@
     -- Remark outlier of OR1-294 cruise cause abruptly smaller salinity in comparison example/n3
 
 #### v0.1.3 Decouple shared Dask service and add reconnect-capable client
+
+#### v0.2.0 WOA23 PostGIS / GeoServer performance milestone (2026-11-18)
+
+    -- validate the N1 style method across representative WOA23 layers and four palette families
+    -- add 49 additional N1 palette styles to seaimage's woa23 workspace (50 total, including the previously installed rainbow_256_n1)
+    -- preserve existing defaults and client behavior
+    -- record VM34 isolated rendering evidence and seaimage loopback/public-path comparisons
+    -- document a reusable PostgreSQL/PostGIS + GeoServer performance investigation playbook
+    -- no API contract or client code changed; N1 styles are opt-in by explicit style name
+    -- see dev2026/specs/docs/geoserver-postgis-performance/README.md
