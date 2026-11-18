@@ -1,0 +1,13 @@
+layer	family	regime	grid	parameter	cells	exec_med_A	exec_med_C	exec_med_D	exec_med_CD	windowagg_A	windowagg_C	windowagg_D	windowagg_CD	A_to_C	A_to_D	C_to_CD	D_to_CD
+Nutrients_annual_grid1	Nutrients	annual	1deg	nitrate	4	11.365	11.358	1.401	1.356	all	all	none	none	-0.1%	-87.7%	-88.1%	-3.2%
+Nutrients_monthly_grid1	Nutrients	monthly	1deg	nitrate	4	15.248	15.171	1.513	1.515	all	all	none	none	-0.5%	-90.1%	-90.0%	+0.2%
+Nutrients_seasonal_grid1	Nutrients	seasonal	1deg	nitrate	4	15.468	15.437	1.185	1.176	all	all	none	none	-0.2%	-92.3%	-92.4%	-0.8%
+Oxy_annual_grid1	Oxy	annual	1deg	oxygen	4	20.172	20.184	1.589	1.549	all	all	none	none	+0.1%	-92.1%	-92.3%	-2.5%
+Oxy_monthly_grid1	Oxy	monthly	1deg	oxygen	4	27.983	27.948	6.053	5.873	all	all	none	none	-0.1%	-78.4%	-79.0%	-3.0%
+Oxy_seasonal_grid1	Oxy	seasonal	1deg	oxygen	4	34.896	34.865	4.113	3.974	all	all	none	none	-0.1%	-88.2%	-88.6%	-3.4%
+TS_annual_grid025	TS	annual	0.25deg	temperature	4	455.861	455.865	25.394	25.218	all	all	none	none	+0.0%	-94.4%	-94.5%	-0.7%
+TS_annual_grid1	TS	annual	1deg	temperature	4	28.261	28.196	1.417	1.409	all	all	none	none	-0.2%	-95.0%	-95.0%	-0.6%
+TS_monthly_grid025	TS	monthly	0.25deg	temperature	4	302.147	205.916	47.614	10.907	all	all	none	none	-31.8%	-84.2%	-94.7%	-77.1%
+TS_monthly_grid1	TS	monthly	1deg	temperature	4	45.675	22.338	10.749	2.278	all	all	none	none	-51.1%	-76.5%	-89.8%	-78.8%
+TS_seasonal_grid025	TS	seasonal	0.25deg	temperature	4	863.184	862.057	44.198	44.050	all	all	none	none	-0.1%	-94.9%	-94.9%	-0.3%
+TS_seasonal_grid1	TS	seasonal	1deg	temperature	4	79.451	79.418	4.354	4.323	all	all	none	none	-0.0%	-94.5%	-94.6%	-0.7%
