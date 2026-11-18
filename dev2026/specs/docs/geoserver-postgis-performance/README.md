@@ -12,6 +12,7 @@ WOA23-specific SQL, schema assumptions, thresholds, or commands without re-valid
 | How should a GeoServer or style change be isolated and checked? | [GeoServer/style evaluation](geoserver-style-evaluation.md) |
 | How should timing, pairing, cache and evidence be reported? | [Measurement and evidence](measurement-and-evidence.md) |
 | What did the VM4_248 lab actually do? | [VM4_248 lab case study](vm4_248-lab.md) |
+| What did the WOA23 GeoServer N1 style work establish? | [WOA23 N1 case study](woa23-n1-case-study.md) |
 
 ## Core principle
 
