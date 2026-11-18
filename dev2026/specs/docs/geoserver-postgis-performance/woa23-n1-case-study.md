@@ -106,7 +106,8 @@ those images with their original-style counterparts and did not measure performa
    distinct changes and should have separate owners, evidence and authorization.
 7. **Treat old operational code as historical.** The original scripts are pinned to specific hosts, paths,
    hashes and authorizations. Preserve or inspect them as evidence; extract a fresh, host-independent utility
-   before reusing transformation logic in another project.
+   before reusing transformation logic in another project. The constrained local implementation and its limits
+   are documented in the [N1 static transformer guide](n1-static-transformer.md).
 
 ## Provenance and limits
 
