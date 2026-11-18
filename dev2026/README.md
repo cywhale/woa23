@@ -20,6 +20,13 @@ New code lives here; the old notebooks stay as the record of how the data was bu
 | `bench/` | the benchmark harness (documented below) |
 | `results/` | raw measurement JSON, kept in git as the record |
 
+### GeoServer / PostGIS performance
+
+The reusable investigation guide and the curated VM4_248 PostgreSQL index case study are in
+[`specs/docs/geoserver-postgis-performance/`](specs/docs/geoserver-postgis-performance/README.md). They cover
+how to separate database, GeoServer and public-path measurements, and preserve the index experiment's measured
+results without carrying forward host-specific operation instructions.
+
 ## Environment
 
 Managed with `uv`, pinned to the same versions production runs (`../requirements.txt`)
